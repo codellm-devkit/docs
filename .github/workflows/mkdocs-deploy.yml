@@ -20,6 +20,6 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install Dependencies
-        run: pip install . 
+        run: poetry install --no-root 
       - name: Deploy docs
-        run: mkdocs gh-deploy --force --verbose
+        run: poetry run mkdocs gh-deploy --force --verbose
