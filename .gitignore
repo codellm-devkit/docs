@@ -1,0 +1,19 @@
+# Mac file
+.DS_Store
+
+# environment file
+.env
+
+# log file
+*.json
+!devcontainer.json
+
+
+# Python compiled files and env
+__pycache__/
+*.py[cod]
+.python-version
+.venv/
+
+# Build files
+dist/
