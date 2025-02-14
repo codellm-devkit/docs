@@ -33,7 +33,6 @@ The Python SDK can be installed directly from
 
 ## Programming Language Specific Dependencies
 
-
 `CLDK` supports program analysis for multiple languages and requires additional dependencies to support specific languages. The following table lists the additional dependencies required for each language:
 
 === "Python Analysis"
@@ -41,8 +40,8 @@ The Python SDK can be installed directly from
     For Python analysis as well as to use the CLDK Python SDK, you will need to install the Python programming language with version 3.11 or later. We recommend using a package manager like [pyenv](https://github.com/pyenv/pyenv) to install and manage Python dependencies.
 
 === "Java Analysis"
-    
-    For Java analysis, CLDK relies on a companion project called [`codeanalyzer`](https://github.com/ibm/codenet-minerva-code-analyzer). `codeanalyzer` is a java project and you will therefore need to install the Java Development Kit (JDK) with java version 11 or later. 
+
+    For Java analysis, CLDK relies on a companion project called [`codeanalyzer`](https://github.com/ibm/codenet-minerva-code-analyzer). `codeanalyzer` is a java project and you will therefore need to install the Java Development Kit (JDK) with java version 11 or later.
 
     You can use a package manager like [SDKMAN](https://sdkman.io/) to install the JDK. First, install SDKMAN by running the following command:
 
@@ -83,7 +82,7 @@ The Python SDK can be installed directly from
     - Set Java 11 as the current (or default) Java version:
 
         ```bash
-        sdk use java 11.0.25-sem 
+        sdk use java 11.0.25-sem
         # If want to default to java 11 for all sessions, use the following command instead:
         # sdk default java 11.0.25-sem
         ```
@@ -95,7 +94,7 @@ The Python SDK can be installed directly from
         ```
 
         This should output the version of the installed Java.
-        
+
         ```bash
         openjdk 11.0.25 2024-10-15
         IBM Semeru Runtime Open Edition 11.0.25.0 (build 11.0.25+9)
@@ -131,7 +130,6 @@ The Python SDK can be installed directly from
         ```
         This should output the version of the installed Maven.
 
-
 === "C/C++ Analysis"
 
     CLDK uses LLVM and Clang Python bindings to analyze C/C++ code. The project requires specific versions:
@@ -147,14 +145,14 @@ The Python SDK can be installed directly from
         ```shell
         brew install llvm@18
         ```
-        
+
         - Add LLVM to your PATH (add this to your ~/.zshrc or ~/.bash_profile)
         ```shell
         export PATH="/usr/local/opt/llvm@18/bin:$PATH"
         export LDFLAGS="-L/usr/local/opt/llvm@18/lib"
         export CPPFLAGS="-I/usr/local/opt/llvm@18/include"
         ```
-        
+
         - Verify installation
         ```shell
         clang --version
@@ -176,13 +174,13 @@ The Python SDK can be installed directly from
         sudo ./llvm.sh 18
         sudo apt-get install llvm-18 llvm-18-dev clang-18 libclang-18-dev
         ```
-        
+
         - Create symlinks (optional but recommended)
         ```shell
         sudo ln -s /usr/bin/clang-18 /usr/bin/clang
         sudo ln -s /usr/bin/llvm-config-18 /usr/bin/llvm-config
         ```
-        
+
         - Verify installation
         ```shell
         clang --version
@@ -206,13 +204,13 @@ The Python SDK can be installed directly from
         sudo yum install epel-release
         sudo yum install llvm18 llvm18-devel clang18 clang18-devel
         ```
-        
+
         - Create symlinks (optional but recommended)
         ```shell
         sudo ln -s /usr/bin/clang-18 /usr/bin/clang
         sudo ln -s /usr/bin/llvm-config-18 /usr/bin/llvm-config
         ```
-        
+
         - Verify installation
         ```shell
         clang --version
@@ -226,6 +224,32 @@ The Python SDK can be installed directly from
         Configuration file: /etc/clang18/x86_64-redhat-linux-gnu-clang.cfg
         ```
 
+=== "Rust Installation"
+
+    Rustup is the recommended tool for installing Rust and managing its toolchains. It simplifies the process of keeping Rust up to date and allows switching between different Rust versions and toolchains seamlessly.
+
+    - **Install Rustup**
+    Run the following command in your terminal:
+    ```shell
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+    ```
+    Follow the on-screen instructions to complete the installation.
+
+    - **Configure Your Environment**
+    Add Rust to your PATH by appending this line to your shell init script:
+    ```shell
+    source $HOME/.cargo/env
+    ```
+
+    - **Verify Installation**
+    Confirm that Rust is installed correctly by checking the version:
+    ```shell
+    rustc --version
+    ```
+    Expected output (version may vary):
+    ```shell
+    rustc 1.70.0 (90c541806 2023-05-31)
+    ```
 
 ## Additional Development Tools
 
@@ -240,7 +264,7 @@ Some operating systems may require additional development tools:
         ```
 
     - Additionally, you may need to install the following packages using Homebrew:
-        
+
         ```shell
         brew install openssl readline sqlite3 xz zlib tcl-tk libffi
         ```
@@ -258,19 +282,17 @@ Some operating systems may require additional development tools:
 === "Red Hat-based Systems (Fedora/CentOS/RHEL)"
 
     - Install the required development tools using the following command:
-        
+
         ```shell
         sudo dnf group install c-development development-tools gcc make \
-        patch zlib-devel bzip2 bzip2-devel readline-devel sqlite sqlite-devel\ 
+        patch zlib-devel bzip2 bzip2-devel readline-devel sqlite sqlite-devel\
         openssl-devel tk-devel libffi-devel xz-devel
         ```
-
-
 
 ## Supported Python Versions
 
 `CLDK` is compatible with Python versions 3.11 and later. The following table lists the supported Python versions and the corresponding `CLDK` versions:
 
-| :fontawesome-brands-python: Python Version                        | :cldk-logo-white: Compatible `cldk` Versions |
-|-------------------------------------------------------------------|--------------------------------------------|
-| 3.11                                                              | ≥0.4.0                                      |
+| :fontawesome-brands-python: Python Version | :cldk-logo-white: Compatible `cldk` Versions |
+| ------------------------------------------ | -------------------------------------------- |
+| 3.11                                       | ≥0.4.0                                       |
