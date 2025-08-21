@@ -7,10 +7,19 @@ copyright: Copyright &copy; 2024-2025 IBM
 
 nav:
   - Home:
-    - Home: index.md
-    - Quick Start: quickstart.md
-    - Installation: installing.md
-    - Core Concepts: core-concepts/index.md
+      - Home: index.md
+      - Quick Start: quickstart.md
+      - Installation: installing.md
+      - Core Concepts: core-concepts/index.md
+  - SDKs:
+      - Python SDK:
+          - Overview: reference/python-api/index.md
+          - Core: reference/python-api/core.md
+          - Java: reference/python-api/java.md
+          - Python: reference/python-api/python.md
+          - C/C++: reference/python-api/c-cpp.md
+      - Typescript SDK:
+          - Overview: reference/ts-api/index.md
 
 theme:
   name: material
@@ -51,6 +60,7 @@ theme:
     - search.highlight
     - search.suggest
     - toc.follow
+    - toc.integrate
 
 markdown_extensions:
   - admonition # callouts
@@ -65,12 +75,13 @@ markdown_extensions:
       check_paths: true
   - pymdownx.superfences:
       custom_fences:
-          - name: mermaid
-            class: mermaid
-            format: !!python/name:pymdownx.superfences.fence_code_format
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
-      slugify: !!python/object/apply:pymdownx.slugs.slugify # NOTE: insiders only
+      slugify:
+        !!python/object/apply:pymdownx.slugs.slugify # NOTE: insiders only
         kwds:
           case: lower
   - toc:
@@ -100,6 +111,18 @@ plugins:
     cache_dir: .cache/plugin/social/free
   search:
     lang: en
+  mkdocstrings:
+    default_handler: python
+    handlers:
+      python:
+        # Make the cldk package importable to the docs build
+        paths:
+          - ../python-sdk
+        options:
+          docstring_style: google
+          show_source: true
+          members_order: source
+          filters: ["!^_"]
 
 extra:
   generator: false
@@ -119,5 +142,5 @@ extra:
       link: https://ibm.github.io/codellm-devkit
       name: The CLDK Library
   dd_rum:
-    client_token: !ENV [ DD_RUM_CLIENT_TOKEN, blank ]
-    application_id: !ENV [ DD_RUM_APPLICATION_ID, blank ]
+    client_token: !ENV [DD_RUM_CLIENT_TOKEN, blank]
+    application_id: !ENV [DD_RUM_APPLICATION_ID, blank]

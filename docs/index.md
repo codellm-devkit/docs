@@ -59,7 +59,7 @@ Get started with Codellm-Devkit:
 
     Explore the key components of CLDK—including data models and analysis backends—that simplify code analysis workflows.
 
-- [:cldk-manual-16: API Reference](reference/index.md)
+- [:cldk-manual-16: Python API Reference](reference/python-api/index.md)
 
     ---
 
@@ -104,7 +104,7 @@ Dive deeper into advanced topics
     Learn how to extend CLDK to a new language.
 
 - [:cldk-workflow-16: Adding a New Analysis Backend](advanced/adding_backend.md)
-  
+
     ---
 
     Learn how to add a new analysis backend to CLDK.
