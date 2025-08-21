@@ -1,9 +1,9 @@
-name: mkdocs-deploy 
+name: mkdocs-deploy
 on:
   push:
     branches:
-      - main 
-      
+      - main
+
 permissions:
   contents: write
 jobs:
@@ -21,7 +21,11 @@ jobs:
           python-version: "3.11"
       - name: Install Poetry
         run: pip install poetry
+      - name: Clone python-sdk
+        run: git clone --depth 1 https://github.com/codellm-devkit/python-sdk.git ../python-sdk
       - name: Install Dependencies
-        run: poetry install --no-root 
+        run: poetry install --no-root
+      - name: Install python-sdk into Poetry venv
+        run: poetry run pip install -e ../python-sdk
       - name: Deploy docs
         run: poetry run mkdocs gh-deploy --force --verbose
