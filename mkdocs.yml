@@ -6,21 +6,17 @@ strict: false
 copyright: Copyright &copy; 2024-2025 IBM
 
 nav:
-  - Home:
+  - CLDK:
       - Home: index.md
       - Quick Start: quickstart.md
       - Installation: installing.md
       - Core Concepts: core-concepts/index.md
-  - SDKs:
-      - Python SDK:
-          - Overview: reference/python-api/index.md
-          - Core: reference/python-api/core.md
-          - Java: reference/python-api/java.md
-          - Python: reference/python-api/python.md
-          - C/C++: reference/python-api/c-cpp.md
-      - Typescript SDK:
-          - Overview: reference/ts-api/index.md
-
+      - API Reference:
+          - Python SDK:
+              - Core: reference/python-api/core.md
+              - Java Analysis: reference/python-api/java.md
+              - Python Analysis: reference/python-api/python.md
+              - C/C++ Analysis: reference/python-api/c-cpp.md
 theme:
   name: material
   logo: assets/images/logo-white.svg
@@ -55,7 +51,7 @@ theme:
     - navigation.indexes
     - navigation.footer
     - navigation.sections
-    - navigation.tabs
+    # - navigation.tabs
     - navigation.tabs.sticky
     - search.highlight
     - search.suggest
