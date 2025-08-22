@@ -1,0 +1,31 @@
+/* Target nested nav items */
+.md-nav__list ul {
+    position: relative;
+    padding-left: 1rem; /* creates indentation */
+    margin: 0;
+    list-style: none;
+}
+
+/* Add a vertical guide line */
+.md-nav__list ul::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0.25rem; /* adjust to align with text */
+    bottom: 0;
+    width: 1px;
+    background: var(--md-default-fg-color--lighter);
+    opacity: 0.4;
+}
+
+/* Optional: guide bullets for each nested item */
+.md-nav__list ul li::before {
+    content: "";
+    position: absolute;
+    left: -0.25rem;
+    top: 1.2em;
+    width: 0.5rem;
+    height: 1px;
+    background: var(--md-default-fg-color--lighter);
+    opacity: 0.5;
+}
