@@ -24,7 +24,7 @@ jobs:
       - name: Clone python-sdk
         run: git clone --depth 1 https://github.com/codellm-devkit/python-sdk.git ../python-sdk
       - name: Install Dependencies
-        run: uv sync --frozen
+        run: uv sync
       - name: Install python-sdk into uv venv
         run: uv pip install -e ../python-sdk
       - name: Deploy docs
