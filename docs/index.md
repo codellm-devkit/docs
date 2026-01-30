@@ -68,7 +68,7 @@ Get started with Codellm-Devkit:
 </div>
 ---
 
----
+<!-----
 
 # :cldk-learning-20: Use Cases
 
@@ -110,7 +110,7 @@ Dive deeper into advanced topics
     Learn how to add a new analysis backend to CLDK.
 
 </div>
----
+----->
 
 ## Why Codellm-Devkit?
 
