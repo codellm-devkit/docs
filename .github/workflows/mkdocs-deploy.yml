@@ -15,17 +15,17 @@ jobs:
         run: |
           git config --global user.name 'GitHub Actions'
           git config --global user.email 'actions@github.com'
-      - name: Set up Python 3.11
+      - name: Set up Python 3.12.12
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install Poetry
-        run: pip install poetry
+          python-version: "3.12.12"
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
       - name: Clone python-sdk
         run: git clone --depth 1 https://github.com/codellm-devkit/python-sdk.git ../python-sdk
       - name: Install Dependencies
-        run: poetry install --no-root
-      - name: Install python-sdk into Poetry venv
-        run: poetry run pip install -e ../python-sdk
+        run: uv sync --frozen
+      - name: Install python-sdk into uv venv
+        run: uv pip install -e ../python-sdk
       - name: Deploy docs
-        run: poetry run mkdocs gh-deploy --force --verbose
+        run: uv run mkdocs gh-deploy --force --verbose
