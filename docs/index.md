@@ -53,12 +53,6 @@ Get started with Codellm-Devkit:
 
     Install and initialize the `cldk` Python package to start analyzing your codebases.
 
-- [:cldk-area-of-interest-16: Core Concepts](core-concepts/index.md)
-
-    ---
-
-    Explore the key components of CLDK—including data models and analysis backends—that simplify code analysis workflows.
-
 - [:cldk-manual-16: Python API Reference](reference/python-api/index.md)
 
     ---

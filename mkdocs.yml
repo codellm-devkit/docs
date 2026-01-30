@@ -10,7 +10,6 @@ nav:
       - Home: index.md
       - Quick Start: quickstart.md
       - Installation: installing.md
-      - Core Concepts: core-concepts/index.md
       - API Reference:
           - Python SDK:
               - Core: reference/python-api/core.md

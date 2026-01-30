@@ -17,3 +17,12 @@ __pycache__/
 
 # Build files
 dist/
+
+# Build system lock files
+uv.lock
+
+# Cache
+.cache/
+
+# Site folder
+site/
