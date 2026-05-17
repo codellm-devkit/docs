@@ -17,4 +17,4 @@ Python analysis utilities and workflows.
 
 Data models used by the Python analyzers.
 
-::: cldk.models.python.models
+::: cldk.models.python
