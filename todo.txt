@@ -1,0 +1,160 @@
+═══════════════════════════════════════════════════════════════════════════════
+CLDK DOCS — API REFERENCE REDESIGN TODO
+Target: docs-astro (Astro + Starlight)  |  Reference aesthetic: MCP docs (modelcontextprotocol.io) + Anthropic API docs
+Drafted: 2026-06-04 (carry into next session)
+═══════════════════════════════════════════════════════════════════════════════
+
+CONTEXT / WHY
+─────────────────────────────────────────────────────────────────────────────
+The current API reference pages (src/content/docs/reference/python-api/*.md) are
+bare auto-generated symbol dumps. In the old MkDocs site these were `::: cldk.xxx`
+mkdocstrings directives; the page structure, ordering, and content was whatever the
+docstrings emitted — alphabetical, undifferentiated, no narrative, no "where do I
+start." We are migrating to Astro/Starlight and using this as the moment to make the
+reference pages AUTHORED (like MCP) rather than DUMPED.
+
+Core principle (from MCP docs): the auto-generated symbol list is the APPENDIX of a
+page, not the page. Every page leads with orientation + a conceptual model + a
+task-oriented walkthrough, THEN the reference detail.
+
+Decisions locked in this session:
+  • Recipes must be AGENT-NATIVE, not one-shot completion loops. CLDK's value prop is
+    being the context/grounding layer inside an agent loop — analysis methods become
+    TOOLS the model calls, MCP-primitives style.
+  • Agent framework for recipes: ANTHROPIC SDK (tool use).
+  • Anchor recipe covers ALL THREE tasks on one shared tool layer:
+      (1) call-graph-guided Q&A   (2) source-to-sink reachability   (3) targeted refactor
+  • Include prompt caching in the recipe examples from the start (Anthropic SDK best
+    practice; see the `claude-api` skill). Don't ship token-wasteful copy-paste patterns.
+
+
+───────────────────────────────────────────────────────────────────────────────
+HIGH-PRIORITY (closes ~80% of the gap to the MCP feel)
+───────────────────────────────────────────────────────────────────────────────
+
+[ ] 1. AGENT-NATIVE RECIPES PAGE  ← single highest-value addition
+       New page: src/content/docs/reference/python-api/recipes.mdx (or /guides/agent-recipes.mdx)
+       Add to sidebar in astro.config.mjs.
+
+       Structure:
+         a. Shared foundation block (write ONCE, reused by all 3 recipes):
+              - CLDK(language="java").analysis(project_path=APP)
+              - Define CLDK analysis methods as Claude tool definitions (input_schema each):
+                  get_method_body, get_callers, get_callees, is_reachable (call-graph path)
+              - dispatch(name, args)  -> routes tool_use calls to CLDK methods
+              - run_agent(task)       -> the messages.create tool-use loop
+                                         (loop until stop_reason != "tool_use")
+              - PROMPT CACHING on the stable tool defs / file context.
+         b. Recipe 1 — Call-graph-guided Q&A (gentle intro):
+              run_agent("How does OptionBuilder.create work, and what calls it?")
+              Show the trace of tool calls the model chose. Establishes the pattern.
+         c. Recipe 2 — Source-to-sink reachability (THE killer demo):
+              Feed a scanner alert (Bandit/Semgrep). Agent calls is_reachable/get_callers
+              to confirm or refute. TEACHING POINT to state explicitly: CLDK returns
+              ground truth the model would otherwise hallucinate.
+              Cross-link to skills: poe-with-cldk, triage-and-pov.
+         d. Recipe 3 — Targeted refactor (dev workflow):
+              Agent enumerates ALL callers via CLDK before proposing an API change, so the
+              edit is safe. Shows CLDK preventing a class of agent mistakes.
+
+       Use Starlight components: <Tabs>/<TabItem> for variants, <Steps> for the loop,
+       <Aside type="tip/caution"> for gotchas, <Code> for the request/response pairs.
+
+       PREREQ: pull the REAL cldk.analysis.java method names/signatures from the
+       python-sdk repo before writing tool defs — do NOT invent method names.
+       (Confirmed real so far: CLDK(language=), .analysis(project_path=),
+        .get_symbol_table(), .tree_sitter_utils(), sanitize_focal_class(). Verify
+        get_callers / get_callees / call-graph / reachability API names.)
+
+[ ] 2. TURN index.md INTO A REAL LANDING PAGE (not a link list)
+       File: src/content/docs/reference/python-api/index.md  (currently "Core. See Core API. ...")
+       Add:
+         - One paragraph: the CLDK mental model —
+             CLDK object -> language `analysis` -> `models`/schema.
+         - A Mermaid diagram of that flow (Starlight supports mermaid via rehype/expressive-code
+           or astro-mermaid; verify which is wired, add if missing — see task 7).
+         - Reuse the grid/card pattern already used on the home index.mdx (CardGrid + LinkCard
+           from @astrojs/starlight/components) instead of bullet links.
+
+[ ] 3. PER-LANGUAGE PAGES → THREE AUTHORED ZONES
+       Files: reference/python-api/{java,python,c-cpp}.md  (+ core.md)
+       Replace the "## Analysis / ## Schema dump" with:
+         Zone A — Overview: what this analyzer does, which BACKEND it wraps
+                  (Java=WALA, Tree-sitter, LLVM, CodeQL — home page name-drops these but
+                  never connects them to the API; make that connection), analysis levels.
+         Zone B — Worked example: <Tabs> walkthrough ("Get call graph / Get methods /
+                  Get symbol table"), mirroring MCP's <Steps>.
+         Zone C — API reference: THEN the generated symbols (see task 5 for how).
+
+
+───────────────────────────────────────────────────────────────────────────────
+MEDIUM-PRIORITY (structure + polish)
+───────────────────────────────────────────────────────────────────────────────
+
+[ ] 4. FIX INFORMATION ARCHITECTURE / SIDEBAR (astro.config.mjs)
+       Current sidebar is flat: Core / Java / Python / C-C++ under "Python SDK".
+       MCP separates LEARN (concepts) from REFERENCE (API). Restructure to:
+         - "Guides"        -> quickstart, installing, agent recipes (per-language how-tos)
+         - "API Reference" -> the symbol pages
+       So conceptual content isn't buried inside reference pages.
+
+[ ] 5. DECIDE & WIRE THE API-SYMBOL GENERATION STORY FOR STARLIGHT
+       MkDocs gave us mkdocstrings (`:::`). Astro has no built-in equivalent. Options:
+         (a) Generate Markdown/MDX from Python docstrings via a script in scripts/ (there's
+             already a scripts/ dir — check what's there) and commit/build-step it.
+         (b) Use a TypeDoc-style pipeline adapted for Python (e.g. griffe -> json -> MDX).
+         (c) Hand-author the high-value reference and link out to generated pages.
+       Whatever the choice: configure it to group by category, show source links, clean
+       signatures, filter privates (^_). The OLD mkdocstrings options we wanted were:
+         show_root_heading, show_category_heading, members_order: source,
+         docstring_section_style: table, separate_signature, show_signature_annotations,
+         filters: ["!^_"]
+       Port the SPIRIT of these to whatever Astro pipeline we pick.
+
+[ ] 6. UPGRADE THE QUICKSTART TO BE AGENT-NATIVE (or flag it)
+       File: src/content/docs/quickstart.mdx
+       Current example is the OLD paradigm: build prompt string -> ollama.generate() -> text.
+       That's "LLM-assisted," not agent-native, and it's a reader's FIRST impression of
+       CLDK+LLM, which undersells it. Either:
+         - Convert to the tool-use loop, OR
+         - Explicitly label it the "hello world" and link to the agent recipes (task 1) as
+           the real pattern.
+
+[ ] 7. ENABLE MERMAID + VERIFY EXPRESSIVE-CODE FEATURES IN STARLIGHT
+       - Confirm mermaid rendering is wired (astro-mermaid plugin or rehype-mermaid). Needed
+         for tasks 2 and the recipes data-layer diagram.
+       - Starlight ships Expressive Code: use it for code annotations/callouts (the inline
+         numbered-callout style MCP uses to explain fields) and tabbed/diff code.
+       - Add a Mermaid "data layer" diagram to the recipes page:
+             Claude  <->  tool loop  <->  CLDK  <->  {call graph, symbol table, tree-sitter}
+         This is the MCP "data layer" picture, CLDK-flavored.
+
+
+───────────────────────────────────────────────────────────────────────────────
+STRETCH / ON-THEME-WITH-MCP
+───────────────────────────────────────────────────────────────────────────────
+
+[ ] 8. "CLDK over MCP" subsection
+       Show (or at least gesture at) CLDK analysis exposed as an MCP SERVER — each analysis
+       method as an MCP tool. Closes the conceptual loop given MCP is our reference point:
+       "here's CLDK as primitives any MCP host can consume." Even a short stub lands hard.
+
+[ ] 9. "Common tasks" recipe index
+       A task-oriented landing list ("Get all methods in a class", "Build a call graph",
+       "Find callers", "Check reachability") each linking to a tabbed snippet — MCP-style
+       task orientation. NOTE: these must feed the agent-native framing, not replace it.
+
+
+───────────────────────────────────────────────────────────────────────────────
+SUGGESTED ORDER FOR NEXT SESSION
+───────────────────────────────────────────────────────────────────────────────
+  1. Pull real cldk.analysis.java API names from python-sdk (unblocks recipes).   [task 1 prereq]
+  2. Build the recipes prototype page: shared tool layer + Recipe 1 full, 2/3 stubbed. [task 1]
+  3. Rebuild index.md as conceptual landing + Mermaid diagram.                    [task 2]
+  4. Prototype ONE language page (java.md) into the three-zone structure.         [task 3]
+     -> Review prototype with maintainer BEFORE rolling across python/c-cpp.
+  5. Then: sidebar IA (task 4), symbol-gen pipeline decision (task 5), quickstart (task 6).
+
+REVIEW GATE: build the recipes page + java.md prototype first, get sign-off on the
+target structure, THEN replicate across all language pages.
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,72 @@
+name: Deploy docs to GitHub Pages
+
+on:
+  push:
+    branches: [astro]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout docs
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Clone python-sdk at latest release tag
+        run: |
+          set -euo pipefail
+          git clone https://github.com/codellm-devkit/python-sdk.git ../python-sdk
+          cd ../python-sdk
+          LATEST_TAG=$(git tag --sort=-v:refname | head -n1)
+          echo "Using python-sdk release tag: ${LATEST_TAG}"
+          git checkout "tags/${LATEST_TAG}"
+
+      - name: Install the SDK and the doc generator deps
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          # Installing cldk (from the release-tagged clone) pulls in the
+          # codeanalyzer-* backends that the schema pages re-export from.
+          pip install -e ../python-sdk
+          pip install griffe
+
+      - name: Generate API reference markdown
+        run: python scripts/gen_api_docs.py
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build site
+        run: npm run build
+
+      - name: Publish dist to gh-pages
+        run: |
+          set -euo pipefail
+          cd dist
+          touch .nojekyll
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy ${GITHUB_SHA}" || true
+          git branch -M gh-pages
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git push -f origin gh-pages

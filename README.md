@@ -1,7 +1,7 @@
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/images/cldk-dark.png">
-  <source media="(prefers-color-scheme: light)" srcset="docs/assets/images/cldk-light.png">
-  <img src="docs/assets/img-light.png" alt="Logo">
+  <source media="(prefers-color-scheme: dark)" srcset="public/assets/images/cldk-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="public/assets/images/cldk-light.png">
+  <img src="public/assets/images/cldk-light.png" alt="Logo">
 </picture>
 
 <p align='center'>
@@ -292,3 +292,36 @@ if __name__ == "__main__":
 1. Krishna, Rahul, Rangeet Pan, Raju Pavuluri, Srikanth Tamilselvam, Maja Vukovic, and Saurabh Sinha. "[Codellm-Devkit: A Framework for Contextualizing Code LLMs with Program Analysis Insights.](https://arxiv.org/pdf/2410.13007)" arXiv preprint arXiv:2410.13007 (2024).
 2. Pan, Rangeet, Myeongsoo Kim, Rahul Krishna, Raju Pavuluri, and Saurabh Sinha. "[Multi-language Unit Test Generation using LLMs.](https://arxiv.org/abs/2409.03093)" arXiv preprint arXiv:2409.03093 (2024).
 3. Pan, Rangeet, Rahul Krishna, Raju Pavuluri, Saurabh Sinha, and Maja Vukovic., "[Simplify your Code LLM solutions using CodeLLM Dev Kit (CLDK).](https://www.linkedin.com/pulse/simplify-your-code-llm-solutions-using-codellm-dev-kit-rangeet-pan-vnnpe/?trackingId=kZ3U6d8GSDCs8S1oApXZgg%3D%3D)", Blog.
+
+---
+
+## Building the documentation site
+
+This documentation site is built with [Astro](https://astro.build/) +
+[Starlight](https://starlight.astro.build/) (migrated from MkDocs).
+
+```sh
+npm install
+npm run dev        # dev server at http://localhost:4321
+npm run build      # production build into dist/
+```
+
+### Regenerating the Python API reference
+
+The `src/content/docs/reference/python-api/{core,java,python,c-cpp}.md` pages are
+auto-generated from the release-tagged
+[`codellm-devkit/python-sdk`](https://github.com/codellm-devkit/python-sdk)
+with [griffe](https://mkdocstrings.github.io/griffe/) (the engine behind
+mkdocstrings). Run it from an environment where `cldk` is installed, so the
+re-exported schema models resolve to their real definitions:
+
+```sh
+python -m venv .venv-docs && . .venv-docs/bin/activate
+pip install cldk griffe            # or: pip install -e ../python-sdk
+python scripts/gen_api_docs.py     # pass --search-path ../python-sdk for a local checkout
+```
+
+Deployment is automated by `.github/workflows/deploy.yml` on every push to
+`main`: it clones the python-sdk at its latest release tag, regenerates the API
+reference, builds the site, and publishes `dist/` to `gh-pages`
+(custom domain `codellm-devkit.info` via `public/CNAME`).

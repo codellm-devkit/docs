@@ -1,0 +1,342 @@
+/* ============================================================================
+   CLDK docs theme: "MCP restraint on IBM Carbon".
+   Near-monochrome neutral surfaces; one IBM-blue accent; code + diagrams carry
+   the color. Typography is IBM Plex; layout tuned for reference density.
+   ========================================================================== */
+
+:root {
+  --sl-font: "Space Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --sl-font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Slightly wider content for reference tables / signatures. */
+  --sl-content-width: 50rem;
+
+  /* Brand accent (IBM Carbon blue family). */
+  --cldk-blue: #0f62fe;
+}
+
+/* ---- Dark theme: Carbon gray-100 surfaces ------------------------------- */
+:root,
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #0a2d6e;
+  --sl-color-accent: var(--cldk-blue);
+  --sl-color-accent-high: #a6c8ff;
+
+  --sl-color-bg: #161616; /* Carbon gray-100 */
+  --sl-color-bg-nav: #161616;
+  --sl-color-bg-sidebar: #1a1a1a;
+  --sl-color-bg-inline-code: #262626;
+  --sl-color-bg-accent: var(--cldk-blue);
+
+  --sl-color-hairline: #2a2a2a;
+  --sl-color-hairline-light: #333333;
+  --sl-color-hairline-shade: #202020;
+
+  --cldk-surface: #1f1f1f; /* card / panel surface */
+  --cldk-surface-2: #262626;
+  --cldk-border: #393939; /* Carbon gray-80 */
+}
+
+/* ---- Light theme: white / gray-10 --------------------------------------- */
+:root[data-theme="light"] {
+  --sl-color-accent-low: #d0e2ff;
+  --sl-color-accent: var(--cldk-blue);
+  --sl-color-accent-high: #002d6e;
+
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: #ffffff;
+  --sl-color-bg-sidebar: #f4f4f4; /* Carbon gray-10 */
+  --sl-color-bg-inline-code: #f4f4f4;
+
+  --sl-color-hairline: #e0e0e0;
+  --sl-color-hairline-light: #d0d0d0;
+  --sl-color-hairline-shade: #ececec;
+
+  --cldk-surface: #ffffff;
+  --cldk-surface-2: #f4f4f4;
+  --cldk-border: #d0d0d0; /* Carbon gray-30 */
+}
+
+html {
+  font-family: var(--sl-font);
+}
+
+/* Tighten heading weight for a reference-grade feel. */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3 {
+  letter-spacing: -0.01em;
+}
+
+/* ============================================================================
+   Landing-page building blocks (splash template)
+   ========================================================================== */
+
+/* Badge row (arXiv / PyPI / license / Discord). */
+.cldk-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0 0 1.75rem;
+}
+.cldk-badges img {
+  height: 26px;
+}
+
+/* "First analysis" / inline install one-liner emphasis. */
+.cldk-oneliner {
+  font-size: var(--sl-text-lg);
+}
+
+/* scikit-learn-style capability grid: definition + thumbnail + examples. */
+.cldk-capabilities {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+  padding: 0;
+  list-style: none;
+}
+.cldk-capability {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.1rem 1.2rem;
+  border: 1px solid var(--cldk-border);
+  border-radius: 0.6rem;
+  background: var(--cldk-surface);
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+.cldk-capability:hover {
+  border-color: var(--sl-color-accent);
+  transform: translateY(-2px);
+}
+.cldk-capability__title {
+  font-weight: 600;
+  font-size: var(--sl-text-lg);
+  margin: 0;
+}
+.cldk-capability__def {
+  margin: 0;
+  color: var(--sl-color-gray-2);
+  font-size: var(--sl-text-sm);
+}
+.cldk-capability__thumb {
+  margin: 0.25rem 0;
+  padding: 0.6rem 0.7rem;
+  border-radius: 0.4rem;
+  background: var(--cldk-surface-2);
+  border: 1px solid var(--sl-color-hairline);
+  font-family: var(--sl-font-mono);
+  font-size: 0.74rem;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--sl-color-text);
+}
+.cldk-capability__examples {
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: var(--sl-text-xs);
+  color: var(--sl-color-gray-3);
+}
+
+/* "Agents prefer CLDK" call-out band. */
+.cldk-agent-band {
+  margin: 2rem 0;
+  padding: 1.5rem 1.6rem;
+  border: 1px solid var(--cldk-border);
+  border-left: 3px solid var(--sl-color-accent);
+  border-radius: 0.6rem;
+  background: var(--cldk-surface);
+}
+.cldk-agent-band h2 {
+  margin-top: 0 !important;
+}
+
+/* At-a-glance stat strip. */
+.cldk-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1.5rem 0;
+  padding: 0;
+  list-style: none;
+}
+.cldk-stat {
+  flex: 1 1 8rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--cldk-border);
+  border-radius: 0.6rem;
+  background: var(--cldk-surface);
+  text-align: center;
+}
+.cldk-stat__num {
+  display: block;
+  font-size: 1.7rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+.cldk-stat__label {
+  font-size: var(--sl-text-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--sl-color-gray-3);
+}
+
+/* Hero wordmark fallbacks (kept for non-splash uses). */
+.cldk-hero {
+  margin: 0.5rem 0 1.5rem;
+  text-align: center;
+}
+.cldk-hero img {
+  display: block;
+  width: min(100%, 620px);
+  height: auto;
+  margin: 0 auto;
+}
+:root[data-theme="dark"] .cldk-hero-light {
+  display: none;
+}
+:root[data-theme="light"] .cldk-hero-dark {
+  display: none;
+}
+
+/* Auto-generated API signatures wrap rather than overflow. */
+.sl-markdown-content pre.cldk-signature {
+  white-space: pre-wrap;
+}
+
+/* ---- Sidebar: Carbon line icons on nav items ---------------------------- *
+   Re-uses the original mkdocs cldk icon set (copied into /public/icons/cldk).
+   Each item carries `data-cldk-icon="<file>"`; the glyph is rendered as a
+   currentColor mask so it tracks the active/hover accent automatically. */
+.sidebar-content a[data-cldk-icon]::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.55rem;
+  background-color: currentColor;
+  opacity: 0.65;
+  -webkit-mask: var(--cldk-icon) center / contain no-repeat;
+  mask: var(--cldk-icon) center / contain no-repeat;
+  transition: opacity 0.15s ease;
+}
+
+/* Anchor is flex in Starlight; keep label + icon aligned. */
+.sidebar-content a[data-cldk-icon] {
+  display: flex;
+  align-items: center;
+}
+
+.sidebar-content a[data-cldk-icon]:hover::before,
+.sidebar-content a[data-cldk-icon][aria-current="page"]::before {
+  opacity: 1;
+}
+
+.sidebar-content a[data-cldk-icon="layers-16"] { --cldk-icon: url("/icons/cldk/layers-16.svg"); }
+.sidebar-content a[data-cldk-icon="cube-16"] { --cldk-icon: url("/icons/cldk/cube-16.svg"); }
+.sidebar-content a[data-cldk-icon="flame-16"] { --cldk-icon: url("/icons/cldk/flame-16.svg"); }
+.sidebar-content a[data-cldk-icon="archive-16"] { --cldk-icon: url("/icons/cldk/archive-16.svg"); }
+.sidebar-content a[data-cldk-icon="learning-16"] { --cldk-icon: url("/icons/cldk/learning-16.svg"); }
+.sidebar-content a[data-cldk-icon="workflow-16"] { --cldk-icon: url("/icons/cldk/workflow-16.svg"); }
+.sidebar-content a[data-cldk-icon="chat-16"] { --cldk-icon: url("/icons/cldk/chat-16.svg"); }
+.sidebar-content a[data-cldk-icon="widget-16"] { --cldk-icon: url("/icons/cldk/widget-16.svg"); }
+.sidebar-content a[data-cldk-icon="model-16"] { --cldk-icon: url("/icons/cldk/model-16.svg"); }
+.sidebar-content a[data-cldk-icon="manual-16"] { --cldk-icon: url("/icons/cldk/manual-16.svg"); }
+.sidebar-content a[data-cldk-icon="developer-16"] { --cldk-icon: url("/icons/cldk/developer-16.svg"); }
+.sidebar-content a[data-cldk-icon="dataset-16"] { --cldk-icon: url("/icons/cldk/dataset-16.svg"); }
+.sidebar-content a[data-cldk-icon="polygon-16"] { --cldk-icon: url("/icons/cldk/polygon-16.svg"); }
+.sidebar-content a[data-cldk-icon="results-16"] { --cldk-icon: url("/icons/cldk/results-16.svg"); }
+.sidebar-content a[data-cldk-icon="globe-network-16"] { --cldk-icon: url("/icons/cldk/globe-network-16.svg"); }
+
+/* ---- Splash: center the content column at a comfortable width ----------- *
+   Starlight caps `.sl-container` at --sl-content-width (50rem) and only centers
+   it at ≥72rem, which left-pins the hero + cards on the splash layout. Give it
+   a wider-but-not-full-bleed max and always center. `!important` beats
+   Starlight's @layer starlight.core rules. */
+main:has(.hero) .content-panel > .sl-container {
+  max-width: 62rem !important;
+  margin-inline: auto !important;
+}
+
+/* ---- Splash hero: static bounding box (does not raise) ------------------ *
+   Only the action buttons + landing cards lift on hover; the hero panel itself
+   stays put. Content is centered. */
+/* No hero image, so collapse the 7fr/4fr grid to a single full-width column
+   (otherwise the box only fills the left ~64% and won't align with the cards). */
+.hero {
+  grid-template-columns: 1fr !important;
+}
+
+.hero .stack {
+  max-width: none !important;
+  padding: 2.25rem 2rem;
+  align-items: center;
+}
+
+.hero .copy {
+  text-align: center;
+  align-items: center;
+}
+
+.hero .actions {
+  justify-content: center;
+}
+
+/* Every hero action button lifts with a soft drop shadow on hover. Per-button
+   colors: Quickstart stays blue (primary), What is CLDK? stays neutral
+   (secondary outline), GitHub is grey, arXiv is red. */
+.hero .actions a.sl-link-button {
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.hero .actions a.sl-link-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.4);
+}
+
+/* Quickstart (primary): blue drop shadow on hover. */
+.hero .actions a.sl-link-button.primary:hover {
+  box-shadow: 0 12px 26px -10px rgba(15, 98, 254, 0.5);
+}
+
+/* GitHub button: Carbon grey tile, white text + logo. */
+.hero .actions a.sl-link-button[data-cldk-gh] {
+  background: #525252; /* Carbon gray-70 */
+  border-color: #525252;
+  color: #ffffff;
+}
+
+.hero .actions a.sl-link-button[data-cldk-gh]:hover {
+  box-shadow: 0 12px 26px -10px rgba(0, 0, 0, 0.5);
+}
+
+/* arXiv button: brand red tile, white text + logo. */
+.hero .actions a.sl-link-button[data-cldk-arxiv] {
+  background: #b31b1b; /* arXiv red */
+  border-color: #b31b1b;
+  color: #ffffff;
+}
+
+.hero .actions a.sl-link-button[data-cldk-arxiv]:hover {
+  box-shadow: 0 12px 26px -10px rgba(179, 27, 27, 0.5);
+}
+
+/* Dark mode: a dark drop shadow is invisible on the dark page, so use a soft
+   white glow on hover, but only for the neutral (What is CLDK?) and grey
+   (GitHub) buttons. Quickstart keeps its blue shadow and Paper its red. */
+:root[data-theme="dark"]
+  .hero
+  .actions
+  a.sl-link-button:not(.primary):not([data-cldk-arxiv]):hover {
+  box-shadow: 0 12px 26px -10px rgba(255, 255, 255, 0.3);
+}

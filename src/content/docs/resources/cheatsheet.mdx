@@ -1,0 +1,135 @@
+---
+title: Cheat sheet
+description: The handful of CLDK objects and methods you reach for every day (construct, symbol table, call graph, and reachability) on one skimmable page.
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+One page, the daily moves: build one `analysis` object, then query it: the same interface for Java and Python. For the why and the walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
+
+## Install
+
+```bash frame="none"
+pip install cldk
+```
+
+Reachability uses `networkx` (a CLDK dependency, but install it explicitly if you query graphs directly):
+
+```bash frame="none"
+pip install cldk networkx
+```
+
+## Construct
+
+One pattern for every language: `CLDK(language=...).analysis(...)`. The analysis level decides how much gets computed.
+
+<Tabs syncKey="lang">
+  <TabItem label="Java">
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+# Default level is symbol_table. Use call_graph for callers/callees/reachability.
+analysis = CLDK(language="java").analysis(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+print(len(analysis.get_classes()), "classes")  # -> 23 classes
+```
+  </TabItem>
+  <TabItem label="Python">
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK(language="python").analysis(
+    project_path="my_pkg",
+    analysis_level=AnalysisLevel.call_graph,
+)
+print(len(analysis.get_classes()), "classes")
+```
+  </TabItem>
+</Tabs>
+
+| Argument | Value | Notes |
+| --- | --- | --- |
+| `language` | `"java"` / `"python"` | Picks the analysis facade. |
+| `project_path` | path to checkout | The project to analyze. |
+| `analysis_level` | `AnalysisLevel.symbol_table` (default) / `AnalysisLevel.call_graph` | Call graph, callers, callees, and reachability **need** `call_graph`. |
+
+## Symbol table
+
+The always-available layer: every class, method, and field, typed and queryable.
+
+| Method | Returns | What it gives you |
+| --- | --- | --- |
+| `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule]` | The whole project, file by file. |
+| `get_classes()` | `Dict[str, JType \| PyClass]` | Every class/type, keyed by qualified name. |
+| `get_methods()` | `Dict` | Every method (Java). |
+| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | One method; `.code` is its source body. |
+
+```python
+m = analysis.get_method(
+    "org.apache.commons.cli.OptionBuilder", "create(String)"
+)
+print(m.code)  # -> source body of OptionBuilder.create(String)
+```
+
+Java adds class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, `get_implemented_interfaces(cls)`, plus `get_all_crud_operations()` and `get_all_comments()`.
+
+## Call graph & reachability
+
+<Aside type="caution" title="Build at the right level">
+These methods need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not populate call edges.
+</Aside>
+
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `get_call_graph()` | `networkx.DiGraph` | Edges point caller → callee. |
+| `get_call_graph_json()` | `str` | Same graph, serialized. |
+| `get_callers(target_class_name, target_method_declaration)` | `Dict` | Who calls this method. |
+| `get_callees(source_class_name, source_method_declaration)` | `Dict` | What this method calls. |
+| `get_class_call_graph(qualified_class_name, method_signature=None)` | graph | Call graph scoped to one class (Java). |
+
+```python
+cg = analysis.get_call_graph()          # -> networkx.DiGraph
+callers = analysis.get_callers(
+    "org.apache.commons.cli.Options", "addOption(Option)"
+)  # -> Dict of call sites
+```
+
+Reachability is a `networkx` query over the call graph:
+
+```python
+import networkx as nx
+
+cg = analysis.get_call_graph()
+print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
+# nx.shortest_path(cg, src, sink)                 # one path
+# list(nx.all_simple_paths(cg, src, sink))        # every path
+```
+
+## Models
+
+The typed objects each facade returns.
+
+| Language | Models |
+| --- | --- |
+| Java | `JType`, `JCallable`, `JCompilationUnit`, `JField`, `JComment`, `JCRUDOperation` |
+| Python | `PyModule`, `PyClass`, `PyCallable`, `PyImport`, `PyComment` |
+
+## Gotchas
+
+<Aside type="caution" title="Read these once, save yourself an hour">
+- **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` won't have call edges.
+- **Analysis is project-based.** Always pass `analysis(project_path=...)`; point it at the project root.
+</Aside>
+
+## Keep going
+
+<CardGrid>
+  <LinkCard title="Common tasks" description="Copy-paste snippets for each call above." href="/guides/common-tasks/" />
+  <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these methods." href="/cocoa/" />
+  <LinkCard title="Python API reference" description="Every method on every analysis facade." href="/reference/python-api/" />
+  <LinkCard title="CLDK over MCP" description="Expose the same analysis layer as MCP tools." href="/resources/cldk-over-mcp/" />
+</CardGrid>

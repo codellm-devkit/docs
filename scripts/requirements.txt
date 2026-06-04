@@ -1,0 +1,5 @@
+# Dependencies for scripts/gen_api_docs.py (the Python API reference generator).
+# `cldk` itself is installed separately from the release-tagged python-sdk
+# (e.g. `pip install -e ../python-sdk`), which also pulls in the codeanalyzer-*
+# backends that the schema pages re-export from.
+griffe>=2.0,<3.0

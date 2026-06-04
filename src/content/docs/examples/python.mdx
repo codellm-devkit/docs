@@ -1,0 +1,381 @@
+---
+title: Python examples
+description: "Worked examples for analyzing Python projects with CLDK: symbol tables, call graphs, class relationships, and working with PyClass and PyCallable models."
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They're grouped by task: setting up an analysis, querying the symbol table, walking the call graph, and inspecting the model objects. Every example reflects behavior the SDK guarantees.
+
+<Aside type="note" title="Project-based analysis">
+Python analysis is project-based: point it at a directory of importable Python files with `project_path`.
+</Aside>
+
+## Set up the analysis
+
+Initialize a CLDK analysis object pointed at your Python project. By default, analysis extracts the symbol table (classes, methods, imports); add `analysis_level=AnalysisLevel.call_graph` for call-graph queries.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+# Symbol table only (default)
+analysis = CLDK(language="python").analysis(project_path="my_pkg")
+
+# Symbol table + call graph (required for callers/callees/reachability)
+analysis = CLDK(language="python").analysis(
+    project_path="my_pkg",
+    analysis_level=AnalysisLevel.call_graph,
+)
+```
+
+<Aside type="tip" title="Parallel backends">
+Set `use_codeql=False` to skip CodeQL augmentation and analyze faster (Jedi-only call graph). Defaults to `True` for enhanced inter-procedural accuracy. Also set `cache_dir` to control where the backend stores its virtualenv and analysis cache.
+</Aside>
+
+## Symbol table: modules, classes, methods
+
+### List all modules
+
+Each Python file becomes a `PyModule` in the symbol table. Retrieve them by file path or as a flat list.
+
+```python
+# Get all modules as a dictionary: file_path -> PyModule
+symbol_table = analysis.get_symbol_table()
+for file_path, module in symbol_table.items():
+    print(file_path, "->", module.name)
+# my_pkg/options.py -> my_pkg.options
+# my_pkg/parser.py -> my_pkg.parser
+
+# Or get a flat list
+modules = analysis.get_modules()
+print(len(modules), "modules analyzed")
+# 5 modules analyzed
+```
+
+### List all classes
+
+Retrieve all classes in the project by qualified name (e.g., `my_pkg.options.Options`).
+
+```python
+classes = analysis.get_classes()
+for qualified_name, pyclass in classes.items():
+    print(f"{qualified_name}: {len(pyclass.methods)} methods")
+# my_pkg.options.Options: 7 methods
+# my_pkg.parser.DefaultParser: 5 methods
+# my_pkg.cli.CommandLine: 3 methods
+```
+
+### Get a specific class
+
+Retrieve a class by its qualified name to inspect methods, attributes, and base classes.
+
+```python
+pyclass = analysis.get_class("my_pkg.options.Options")
+if pyclass:
+    print("Methods:", list(pyclass.methods.keys()))
+    print("Base classes:", pyclass.base_classes)
+    print("Fields:", len(pyclass.attributes))
+# Methods: ['__init__', 'add_option', 'get_option', 'has_option', ...]
+# Base classes: ['object']
+# Fields: 3
+```
+
+### List methods in a class
+
+Iterate over all methods in a class: use this first when you land in unfamiliar code.
+
+```python
+methods = analysis.get_methods_in_class("my_pkg.options.Options")
+for method_name, callable_obj in methods.items():
+    print(f"{method_name}: {callable_obj.signature}")
+# __init__: def __init__(self)
+# add_option: def add_option(self, option)
+# get_option: def get_option(self, name)
+# has_option: def has_option(self, name)
+```
+
+### Get a specific method
+
+Pull the exact method object by class and method name, including its signature and source body.
+
+```python
+method = analysis.get_method("my_pkg.options.Options", "add_option")
+if method:
+    print("Signature:", method.signature)
+    print("Parameters:", [p.name for p in method.parameters])
+    print("Source:")
+    print(method.code)
+# Signature: def add_option(self, option)
+# Parameters: ['self', 'option']
+# Source:
+# def add_option(self, option):
+#     self._options[option.name] = option
+#     return self
+```
+
+### Get constructors
+
+Retrieve `__init__` methods from a class.
+
+```python
+constructors = analysis.get_constructors("my_pkg.options.Options")
+for name, ctor in constructors.items():
+    print(f"{name}: {ctor.signature}")
+# __init__: def __init__(self)
+```
+
+### Get class attributes (fields)
+
+Extract all attributes declared in a class.
+
+```python
+attributes = analysis.get_fields("my_pkg.options.Options")
+for attr in attributes:
+    print(f"{attr.name}: {attr.type or 'untyped'}")
+# _options: dict
+# _required: list
+# _short_flags: dict
+```
+
+### Filter classes by name pattern
+
+Use substring matching to find classes matching inclusion and exclusion patterns.
+
+```python
+# Find all parser-related classes
+parser_classes = analysis.get_classes_by_criteria(
+    inclusions=["parser"],
+    exclusions=["internal"],
+)
+for name in parser_classes.keys():
+    print(name)
+# my_pkg.parser.DefaultParser
+# my_pkg.parser.Parser
+# my_pkg.parsers.argument_parser.ArgumentParser
+```
+
+### List all imports
+
+Get imports from all modules in the project.
+
+```python
+imports = analysis.get_imports()
+for file_path, import_list in imports.items():
+    print(f"{file_path}: {len(import_list)} imports")
+# my_pkg/options.py: 3 imports
+# my_pkg/parser.py: 5 imports
+```
+
+## Call graph: callers, callees, reachability
+
+<Aside type="tip" title="Always set analysis_level">
+All call-graph operations require `analysis_level=AnalysisLevel.call_graph`. The default level only builds the symbol table.
+</Aside>
+
+### Build a call graph
+
+The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**. Useful for reachability and dependency analysis.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+import networkx as nx
+
+analysis = CLDK(language="python").analysis(
+    project_path="my_pkg",
+    analysis_level=AnalysisLevel.call_graph,
+)
+
+cg = analysis.get_call_graph()
+print(f"{cg.number_of_nodes()} methods, {cg.number_of_edges()} edges")
+# 87 methods, 113 edges
+```
+
+### Find who calls a method
+
+Use `get_callers` to find all methods that invoke a target method: the backbone of impact analysis.
+
+```python
+callers = analysis.get_callers(
+    target_class_name="my_pkg.options.Options",
+    target_method_declaration="add_option",
+)
+print("Callers:", list(callers.keys()) if callers else "none")
+# Callers: ['my_pkg.cli.build_options', 'my_pkg.options.Options.add_required']
+```
+
+### Find what a method calls
+
+Use `get_callees` to find all methods that a target method invokes: the dependency view.
+
+```python
+callees = analysis.get_callees(
+    source_class_name="my_pkg.parser.DefaultParser",
+    source_method_declaration="parse",
+)
+print("Callees:", list(callees.keys()) if callees else "none")
+# Callees: ['my_pkg.options.Options.get_option', 'my_pkg.cli.CommandLine.add_option']
+```
+
+### Extract call graph for a class
+
+Get all call edges reachable from a specific class or method.
+
+```python
+edges = analysis.get_class_call_graph("my_pkg.cli.CLI")
+print("Edges reachable from CLI:")
+for caller, callee in edges:
+    print(f"  {caller} -> {callee}")
+# Edges reachable from CLI:
+#   my_pkg.cli.CLI.main -> my_pkg.cli.build_options
+#   my_pkg.cli.build_options -> my_pkg.options.Options.add_option
+#   ...
+```
+
+### Compute reachability
+
+Reachability is a `networkx` query over the call graph. Extract endpoints from the graph, then use `nx.has_path()`.
+
+```python
+import networkx as nx
+
+cg = analysis.get_call_graph()
+
+# Find a source node by searching metadata
+def find_node(class_name, method_name):
+    for node, data in cg.nodes(data=True):
+        if class_name in str(data) and method_name in str(data):
+            return node
+    return None
+
+src = find_node("my_pkg.cli", "main")
+sink = find_node("my_pkg.database", "execute")
+
+if src and sink:
+    reachable = nx.has_path(cg, src, sink)
+    print(f"Sink reachable from entry point: {reachable}")
+    if reachable:
+        path = nx.shortest_path(cg, src, sink)
+        print(f"Call chain: {' -> '.join(path)}")
+# Sink reachable from entry point: True
+# Call chain: my_pkg.cli.main -> my_pkg.parser.parse -> my_pkg.database.execute
+```
+
+## Working with the PyClass and PyCallable models
+
+CLDK returns rich model objects, not just strings. Inspect them to answer deeper questions.
+
+### Inspect a PyClass
+
+A `PyClass` object contains methods, attributes, base classes, and decorators.
+
+```python
+pyclass = analysis.get_class("my_pkg.options.Options")
+print("Name:", pyclass.name)
+print("Signature:", pyclass.signature)
+print("Base classes:", pyclass.base_classes)
+print("Methods:", list(pyclass.methods.keys()))
+print("Attributes:", [attr.name for attr in pyclass.attributes.values()])
+# Name: Options
+# Signature: my_pkg.options.Options
+# Base classes: ['object']
+# Methods: ['__init__', 'add_option', 'get_option', 'has_option', ...]
+# Attributes: ['_options', '_required', '_short_flags']
+```
+
+### Inspect a PyCallable
+
+A `PyCallable` represents a method or function. It includes the signature, parameters, decorators, and source body.
+
+```python
+method = analysis.get_method("my_pkg.options.Options", "add_option")
+print("Name:", method.name)
+print("Signature:", method.signature)
+print("Parameters:", [p.name for p in method.parameters])
+print("Decorators:", method.decorators)
+print("Source body:")
+print(method.code)
+# Name: add_option
+# Signature: def add_option(self, option)
+# Parameters: ['self', 'option']
+# Decorators: []
+# Source body:
+# def add_option(self, option):
+#     self._options[option.name] = option
+#     return self
+```
+
+### Access method parameters
+
+Retrieve the list of parameter names from a method signature.
+
+```python
+params = analysis.get_method_parameters(
+    "my_pkg.parser.DefaultParser",
+    "parse"
+)
+print("Parameters:", params)
+# Parameters: ['options_obj', 'args']
+```
+
+### Inspect inheritance and nesting
+
+Extract base classes from a class object, or find nested classes.
+
+```python
+pyclass = analysis.get_class("my_pkg.cli.CommandHandler")
+print("Base classes:", pyclass.base_classes)
+# Base classes: ['my_pkg.cli.BaseHandler']
+
+# Get all subclasses of a base
+subclasses = analysis.get_sub_classes("my_pkg.cli.BaseHandler")
+for name in subclasses.keys():
+    print(name)
+# my_pkg.cli.CommandHandler
+# my_pkg.cli.HelpHandler
+
+# Get nested classes inside a class
+nested = analysis.get_nested_classes("my_pkg.cli.CommandHandler")
+for nc in nested:
+    print(nc.signature)
+# my_pkg.cli.CommandHandler.Config
+```
+
+### Get extended classes
+
+List the base classes that a class inherits from.
+
+```python
+bases = analysis.get_extended_classes("my_pkg.parser.DefaultParser")
+print("Base classes:", bases)
+# Base classes: ['my_pkg.parser.Parser']
+```
+
+## Validate syntax and parse snippets
+
+Use the Tree-sitter parser for syntax validation and AST extraction.
+
+```python
+# Check if code is valid Python
+is_valid = analysis.is_parsable("def f(): return 1")
+print(f"Valid syntax: {is_valid}")
+# Valid syntax: True
+
+is_valid = analysis.is_parsable("def f(): pass if")
+print(f"Valid syntax: {is_valid}")
+# Valid syntax: False
+
+# Parse code and get the raw AST
+ast = analysis.get_raw_ast("x = 1")
+print(f"AST type: {type(ast)}")
+# AST type: <class 'tree_sitter.binding.Tree'>
+```
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Java examples" description="The same patterns for Java projects: CRUD operations, inheritance, interface implementation." href="/examples/java/" />
+  <LinkCard title="Common tasks" description="The same calls as a quick task-indexed reference." href="/guides/common-tasks/" />
+  <LinkCard title="Python API reference" description="Full method signatures and docstrings for the PythonAnalysis facade." href="/reference/python-api/python/" />
+</CardGrid>

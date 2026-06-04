@@ -1,0 +1,404 @@
+---
+title: Java examples
+description: "Real, runnable Java examples extracted from the CLDK test suite: symbol table, call graph, class relationships, CRUD operations, comments, and reachability queries."
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+This page mirrors the CLDK SDK test suite, turning verified assertions into illustrative examples. Each snippet below runs against a real codebase (the recurring sample is [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/), `project_path="commons-cli"`), exercises one capability, and shows the exact output the SDK returns. Copy any example, substitute your own project path, and you have working code.
+
+## Set up the analysis
+
+Before querying a codebase, initialize a CLDK analysis object targeting your Java project. The `analysis_level` parameter controls how deeply the backend parses the code: `symbol_table` (the default) finds classes, methods, and fields; `call_graph` additionally builds caller/callee edges.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+# Symbol table only: classes, methods, fields
+analysis = CLDK(language="java").analysis(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.symbol_table,
+)
+
+# Call graph included: all of the above plus caller/callee edges
+analysis_cg = CLDK(language="java").analysis(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+```
+
+## Symbol table: classes, methods, and fields
+
+Once the analysis object is built, query the symbol table to enumerate classes, methods, and fields by name.
+
+### Get all classes
+
+List every class in the project's symbol table.
+
+```python
+classes = analysis.get_classes()
+print(len(classes))
+# 145
+
+# All classes keyed by qualified name
+for name, jtype in classes.items():
+    print(name, "->", jtype)
+    # org.apache.commons.cli.Option -> <JType ...>
+    # org.apache.commons.cli.Options -> <JType ...>
+    # ...
+```
+
+### Get a single class
+
+Retrieve the metadata for one class by its fully qualified name.
+
+```python
+jtype = analysis.get_class("org.apache.commons.cli.Options")
+print(jtype.name, "is_interface:", jtype.is_interface, "is_abstract:", jtype.is_abstract)
+# org.apache.commons.cli.Options is_interface: False is_abstract: False
+```
+
+### Get all methods in a class
+
+Enumerate every method declared on a class.
+
+```python
+methods = analysis.get_methods_in_class("org.apache.commons.cli.Options")
+print(len(methods))
+# 29
+
+for signature, method in methods.items():
+    print(method.declaration)
+    # public Options addOption(Option opt)
+    # public Options addOption(String opt, String longOpt, String description)
+    # public Option getOption(String opt)
+    # ...
+```
+
+### Get a single method and its source
+
+Retrieve a method's full declaration and source code body by class name and method signature.
+
+```python
+method = analysis.get_method(
+    "org.apache.commons.cli.Options",
+    "addOption(Option)"
+)
+print(method.declaration)
+print(method.code)
+# public Options addOption(Option opt)
+# 
+# {
+#     String key = opt.getKey();
+#     if ((key == null) || (key.trim().length() == 0)) {
+#         throw new IllegalArgumentException("The key for option cannot be null or empty");
+#     }
+#     this.shortOpts.put(key, opt);
+#     this.longOpts.put(opt.getLongOpt(), opt);
+#     this.optionGroups.put(opt, opt);
+#     return this;
+# }
+```
+
+### Get method parameters
+
+Retrieve the list of parameters for a method, including their types and location in the source.
+
+```python
+params = analysis.get_method_parameters(
+    "org.apache.commons.cli.Options",
+    "addOption(Option)"
+)
+print(len(params))
+# 1
+
+for param in params:
+    print(param.name, param.type)
+    # opt Option
+```
+
+### Get fields in a class
+
+Retrieve all field declarations on a class.
+
+```python
+fields = analysis.get_fields("org.apache.commons.cli.Option")
+print(len(fields))
+# 8
+
+for field in fields:
+    print(field.name, "type:", field.type)
+    # longOpt type: String
+    # opt type: String
+    # description type: String
+    # ...
+```
+
+## Call graph: caller and callee relationships
+
+To query who calls whom, initialize the analysis at `call_graph` level: this builds the `networkx.DiGraph` that powers the next sections.
+
+### Get the call graph
+
+Retrieve the full call graph as a `networkx.DiGraph`. Edges point from caller → callee; weights and metadata are stored in edge attributes.
+
+```python
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK(language="java").analysis(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+
+cg = analysis.get_call_graph()
+print(cg.number_of_nodes(), "methods,", cg.number_of_edges(), "edges")
+# 421 methods, 638 edges
+
+# Edge data includes call type and calling line numbers
+for source, target, data in cg.edges(data=True):
+    print(source, "->", target, "type:", data["type"], "lines:", data["calling_lines"])
+    # org.apache.commons.cli.Options.addOption -> org.apache.commons.cli.Option.getKey CALL_DEP lines: [68]
+    # ...
+```
+
+### Get all callers of a method
+
+Find every method that invokes a target method (impact analysis: "if I change this, what breaks?").
+
+```python
+callers = analysis.get_callers(
+    "org.apache.commons.cli.Options",
+    "addOption(Option)"
+)
+print(len(callers["caller_details"]))
+# 18
+
+for detail in callers["caller_details"]:
+    print(detail["caller_method"].klass, detail["caller_method"].method.signature)
+    # org.apache.commons.cli.Options org.apache.commons.cli.Options.addOption(String, boolean, String)
+    # org.apache.commons.cli.DefaultParser org.apache.commons.cli.DefaultParser.handleOption(...)
+    # ...
+```
+
+### Get all callees of a method
+
+Find every method that a target method invokes (dependency analysis: "what does this call?").
+
+```python
+callees = analysis.get_callees(
+    "org.apache.commons.cli.Options",
+    "addOption(Option)"
+)
+print(len(callees["callee_details"]))
+# 2
+
+for detail in callees["callee_details"]:
+    print(detail["callee_method"].klass, detail["callee_method"].method.signature)
+    # org.apache.commons.cli.Option org.apache.commons.cli.Option.getKey()
+    # java.util.HashMap java.util.HashMap.put(Object, Object)
+    # ...
+```
+
+## Class relationships: inheritance and interfaces
+
+Query the inheritance hierarchy to understand class structure and polymorphism.
+
+### Get subclasses
+
+Retrieve all classes that extend a target class (including transitive subclasses).
+
+```python
+subclasses = analysis.get_sub_classes("java.io.Serializable")
+print(len(subclasses))
+# 15
+
+for name, jtype in subclasses.items():
+    print(name)
+    # org.apache.commons.cli.Option
+    # org.apache.commons.cli.Options
+    # ...
+```
+
+### Get extended classes (superclasses)
+
+Find the class hierarchy that a target class extends.
+
+```python
+extended = analysis.get_extended_classes(
+    "org.apache.commons.cli.HelpFormatter"
+)
+print(len(extended))
+# 1
+
+print(extended[0])
+# java.lang.Object
+```
+
+### Get implemented interfaces
+
+Retrieve all interfaces that a class declares it implements.
+
+```python
+interfaces = analysis.get_implemented_interfaces(
+    "org.apache.commons.cli.Converter"
+)
+print(len(interfaces))
+# 1
+
+print(interfaces[0])
+# org.apache.commons.cli.TypeHandler
+```
+
+## CRUD operations and data access
+
+Identify methods that read from or write to persistent storage: databases, files, or external services.
+
+```python
+crud_operations = analysis.get_all_crud_operations()
+print(len(crud_operations))
+# List of CRUD summaries, each with a list of operations
+
+for crud_summary in crud_operations:
+    class_name = next(k for k in crud_summary.keys() if isinstance(crud_summary[k], type(crud_summary[next(iter(crud_summary.keys()))])) and hasattr(crud_summary[k], 'name'))
+    method_name = next(k for k in crud_summary.keys() if isinstance(crud_summary[k], type(crud_summary[next(iter(crud_summary.keys()))])) and hasattr(crud_summary[k], 'signature'))
+    jtype = crud_summary[class_name]
+    jcallable = crud_summary[method_name]
+    for op in crud_summary["crud_operations"]:
+        print(
+            class_name,
+            method_name,
+            op.operation_type.value,
+            "line", op.line_number
+        )
+        # com.example.UserDao findById(int) READ line 42
+        # com.example.UserDao save(User) CREATE line 58
+        # ...
+```
+
+### Filter CRUD operations by type
+
+Query specific operation types: read, create, update, or delete.
+
+```python
+# All READ operations
+read_ops = analysis.get_all_read_operations()
+for summary in read_ops:
+    for op in summary["crud_operations"]:
+        print(op.operation_type.value, op.line_number)
+        # READ 42
+        # READ 57
+
+# All CREATE operations
+create_ops = analysis.get_all_create_operations()
+
+# All UPDATE operations
+update_ops = analysis.get_all_update_operations()
+
+# All DELETE operations
+delete_ops = analysis.get_all_delete_operations()
+```
+
+## Comments and documentation
+
+Extract all comments (line, block, and Javadoc) from the codebase to surface documentation and understand intent.
+
+### Get all comments
+
+Retrieve all comments in the project, organized by file.
+
+```python
+comments = analysis.get_all_comments()
+print(len(comments), "files with comments")
+# 145 files with comments
+
+for file_path, comment_list in comments.items():
+    print(f"{file_path}: {len(comment_list)} comments")
+    for comment in comment_list[:2]:
+        print("  ", comment.content[:60])
+    # src/main/java/org/apache/commons/cli/Option.java: 12 comments
+    #   The long representation of the option.
+    #   Specified in OptionBuilder.
+```
+
+### Get all docstrings
+
+Retrieve Javadoc-style documentation (Javadoc comments on classes and methods).
+
+```python
+docstrings = analysis.get_all_docstrings()
+print(len(docstrings), "files with docstrings")
+# 78 files with docstrings
+
+for file_path, doc_list in docstrings.items():
+    print(f"{file_path}:")
+    for doc in doc_list[:1]:
+        print(doc.content)
+    # src/main/java/org/apache/commons/cli/Option.java:
+    #   /**
+    #    * Option class to store and manipulate a command line option.
+    #    */
+```
+
+## Reachability: graph queries
+
+Use the call graph with `networkx` to answer reachability questions: "can execution flow from method A to method B?"
+
+```python
+import networkx as nx
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK(language="java").analysis(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+
+cg = analysis.get_call_graph()
+
+# Query: Is method B reachable from method A?
+source = "org.apache.commons.cli.Options.addOption(Option)"
+target = "org.apache.commons.cli.Option.getKey()"
+
+is_reachable = nx.has_path(cg, source, target)
+print(is_reachable)
+# True
+
+# All nodes reachable from a source within k hops
+source = "org.apache.commons.cli.DefaultParser.parse(String[])"
+reachable_nodes = nx.descendants(cg, source)
+print(len(reachable_nodes), "methods reachable from parse()")
+# 67 methods reachable from parse()
+
+# Find all strongly connected components (cycles in call graph)
+cycles = list(nx.strongly_connected_components(cg))
+print(len(cycles), "strongly connected components")
+for cycle in cycles[:1]:
+    print(cycle)
+    # frozenset(['org.apache.commons.cli.DefaultParser.handleOption(...)', 
+    #            'org.apache.commons.cli.Options.getOption(String)'])
+```
+
+## Entry point methods
+
+Identify the public-facing methods (e.g., servlet handlers, REST endpoints, main methods) that serve as entry points into the application.
+
+```python
+entry_methods = analysis.get_entry_point_methods()
+print(len(entry_methods), "classes with entry points")
+# 64 classes with entry points
+
+for class_name, methods in entry_methods.items():
+    for sig, method in methods.items():
+        print(class_name, sig)
+    # org.apache.commons.cli.DefaultParser parse(String[])
+    # org.apache.commons.cli.HelpFormatter printHelp(String)
+    # ...
+```
+
+---
+
+<CardGrid>
+  <LinkCard title="Python examples" description="The same patterns for Python packages: symbol table, call graph, class relationships, and imports." href="/examples/python/" />
+  <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, build a call graph, find callers, sanitize a focal method." href="/guides/common-tasks/" />
+  <LinkCard title="Java API reference" description="Full method signatures and return types for JavaAnalysis and all Java models." href="/reference/python-api/java/" />
+</CardGrid>
