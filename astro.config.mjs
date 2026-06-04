@@ -61,6 +61,63 @@ export default defineConfig({
             href: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap",
           },
         },
+        // --- SEO: social card + og:type override (Starlight dedupes by
+        // property/name, so these win over its defaults) ---
+        {
+          tag: "meta",
+          attrs: { property: "og:type", content: "website" },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            property: "og:image",
+            content: "https://codellm-devkit.info/og-image.png",
+          },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:width", content: "1200" },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:height", content: "630" },
+        },
+        {
+          tag: "meta",
+          attrs: {
+            name: "twitter:image",
+            content: "https://codellm-devkit.info/og-image.png",
+          },
+        },
+        // --- SEO: structured data so search engines model CLDK as software ---
+        {
+          tag: "script",
+          attrs: { type: "application/ld+json" },
+          content: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            name: "CodeLLM-DevKit",
+            alternateName: "CLDK",
+            applicationCategory: "DeveloperApplication",
+            operatingSystem: "Linux, macOS, Windows",
+            description:
+              "CodeLLM-DevKit (CLDK) is a multilingual program analysis framework: one typed analysis facade over call graphs and symbol tables, the same interface across languages, ready to hand to a code LLM.",
+            url: "https://codellm-devkit.info/",
+            downloadUrl: "https://pypi.org/project/cldk/",
+            softwareHelp: "https://codellm-devkit.info/quickstart/",
+            license: "https://www.apache.org/licenses/LICENSE-2.0",
+            sameAs: [
+              "https://github.com/codellm-devkit/python-sdk",
+              "https://pypi.org/project/cldk/",
+              "https://arxiv.org/abs/2410.13007",
+            ],
+            offers: {
+              "@type": "Offer",
+              price: "0",
+              priceCurrency: "USD",
+            },
+          }),
+        },
       ],
       social: [
         {
