@@ -3,6 +3,8 @@ title: Python API Reference
 description: "The CLDK Python SDK: the CLDK factory, the per-language analysis facades, and the typed data models they return."
 ---
 
+[![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk)
+
 Every CLDK program follows the same shape: construct a `CLDK` object for a
 language, ask it for an `analysis` facade over your project, then call typed
 methods that return data models.

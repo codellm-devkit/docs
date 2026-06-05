@@ -3,7 +3,7 @@ title: The codeanalyzer backends
 description: "CLDK is a thin Python frontend over a family of standalone language analyzers: the codeanalyzer-* backends. Here's how that split works and where each one lives."
 ---
 
-import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
+import { Badge, CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
 The Python SDK you call is deliberately thin. The heavy lifting (parsing source, resolving symbols, building call graphs) happens in a family of **standalone language analyzers**, one per language, collectively the `codeanalyzer-*` backends. Each one emits the same shape of typed JSON, and the SDK facade deserializes it into the models you query.
 
@@ -23,11 +23,33 @@ This separation is what lets one `analysis` API span languages: the facade never
 The SDK manages the backend for you: auto-downloading the Java JAR, provisioning the Python analyzer in a virtualenv. These pages are for when you want to understand (or contribute to) what's happening underneath.
 </Aside>
 
-## The backends
+This is the **backend** layer. For the SDKs that consume it, see the [SDKs overview](/reference/sdks/).
+
+## Maturity tiers
+
+<Badge text="Mature" variant="success" /> production-ready &nbsp;·&nbsp; <Badge text="Medium" variant="tip" /> usable, gaps remain &nbsp;·&nbsp; <Badge text="Help wanted" variant="danger" /> contributors wanted &nbsp;·&nbsp; <Badge text="Stub" variant="default" /> not started
+
+## Backends (analyzers)
+
+The `codeanalyzer-*` tools that parse a language and serialize the canonical symbol-table and call-graph schema every frontend reads.
+
+| Language | Analyzer | Maturity |
+| --- | --- | --- |
+| **Java** | [codeanalyzer-java](/backends/codeanalyzer-java/) | <Badge text="Mature" variant="success" /> |
+| **Python** | [codeanalyzer-python](/backends/codeanalyzer-python/) | <Badge text="Mature" variant="success" /> |
+| **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
+| **JavaScript** | via [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
+| **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+| **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+| **C** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+| **C++** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+| **C#** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+
+## Built backends
 
 <CardGrid>
   <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation; ships the canonical Py* schema." href="/backends/codeanalyzer-python/" />
   <LinkCard title="codeanalyzer-java" description="The deepest backend: WALA + Javaparser, producing symbol tables, call graphs, hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
   <LinkCard title="codeanalyzer-ts" description="The TypeScript analyzer: the backend exists today; Python SDK support is on the way." href="/backends/codeanalyzer-ts/" />
-  <LinkCard title="codeanalyzer-go" description="Coming soon. A planned Go analyzer that emits the same canonical analysis JSON." href="/backends/codeanalyzer-go/" />
+  <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# are unbuilt. A backend that speaks the canonical JSON lights the language up across every SDK." href="/contributing/add-language-backend/" />
 </CardGrid>

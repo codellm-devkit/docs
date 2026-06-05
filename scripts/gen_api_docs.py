@@ -357,9 +357,17 @@ MARK_START = "<!-- CLDK:API:START -->"
 MARK_END = "<!-- CLDK:API:END -->"
 
 
+# A GitHub badge linking to the python-sdk source, shown atop every API page.
+GITHUB_BADGE = (
+    "[![Source on GitHub]"
+    "(https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)]"
+    "(https://github.com/codellm-devkit/python-sdk)"
+)
+
+
 def build_body(root, page: dict) -> str:
     """The generated symbol reference body (no frontmatter)."""
-    out: list[str] = []
+    out: list[str] = [GITHUB_BADGE, ""]
     multi = len(page["sections"]) > 1
     for heading, dotted in page["sections"]:
         module = get_object(root, dotted)

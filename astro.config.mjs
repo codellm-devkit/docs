@@ -123,7 +123,7 @@ export default defineConfig({
         {
           icon: "github",
           label: "CLDK on GitHub",
-          href: "https://github.com/codellm-devkit/python-sdk",
+          href: "https://github.com/codellm-devkit",
         },
         {
           icon: "seti:python",
@@ -198,16 +198,6 @@ export default defineConfig({
               link: "https://github.com/codellm-devkit/typescript-sdk",
               attrs: { "data-cldk-icon": "typescript", target: "_blank", rel: "noopener noreferrer" },
             },
-            {
-              label: "Rust SDK",
-              slug: "contributing/rust-frontend",
-              attrs: { "data-cldk-icon": "rust" },
-            },
-            {
-              label: "Go SDK",
-              slug: "reference/go-sdk",
-              attrs: { "data-cldk-icon": "go" },
-            },
           ],
         },
         {
@@ -217,7 +207,6 @@ export default defineConfig({
             { label: "codeanalyzer-python", slug: "backends/codeanalyzer-python", attrs: { "data-cldk-icon": "python" } },
             { label: "codeanalyzer-java", slug: "backends/codeanalyzer-java", attrs: { "data-cldk-icon": "java" } },
             { label: "codeanalyzer-ts", slug: "backends/codeanalyzer-ts", attrs: { "data-cldk-icon": "typescript" } },
-            { label: "codeanalyzer-go", slug: "backends/codeanalyzer-go", attrs: { "data-cldk-icon": "go" } },
           ],
         },
         {
