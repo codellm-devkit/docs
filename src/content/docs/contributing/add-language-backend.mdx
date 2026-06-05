@@ -7,6 +7,10 @@ import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from
 
 This guide walks you through manually adding first-class Go support to CLDK: building the `codeanalyzer-go` backend and wiring it into the Python SDK. Unlike a fully-scaffolded approach, you'll make informed decisions about tooling, schema design, and architecture at each stage, resulting in a modular, production-grade analyzer.
 
+<Aside type="tip" title="There's a skill for this">
+CLDK ships a skill that scaffolds first-class support for a new language end to end (a `codeanalyzer-<lang>` backend plus the SDK bindings) and takes you to a validated level-1 analysis on a branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). This page is the manual walkthrough behind what the skill automates.
+</Aside>
+
 ## Architecture overview
 
 CLDK's two-layer design separates the backend analyzer (emits `analysis.json`) from the SDK frontend (a Python query facade):

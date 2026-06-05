@@ -209,6 +209,34 @@ html {
   white-space: pre-wrap;
 }
 
+/* ---- In-content status/tier badges: subtle tinted pills, not loud blocks -- */
+.sl-markdown-content .sl-badge {
+  font-family: var(--sl-font);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  border-width: 1px;
+  white-space: nowrap;
+  background: transparent;
+}
+
+.sl-markdown-content .sl-badge.success { color: #24a148; border-color: rgba(36, 161, 72, 0.45); background: rgba(36, 161, 72, 0.12); }
+.sl-markdown-content .sl-badge.tip     { color: #009d9a; border-color: rgba(0, 157, 154, 0.45); background: rgba(0, 157, 154, 0.12); }
+.sl-markdown-content .sl-badge.caution { color: #b28600; border-color: rgba(178, 134, 0, 0.45); background: rgba(178, 134, 0, 0.12); }
+.sl-markdown-content .sl-badge.note    { color: #0f62fe; border-color: rgba(15, 98, 254, 0.45); background: rgba(15, 98, 254, 0.12); }
+.sl-markdown-content .sl-badge.default { color: #6f6f6f; border-color: rgba(111, 111, 111, 0.45); background: rgba(111, 111, 111, 0.12); }
+.sl-markdown-content .sl-badge.danger  { color: #da1e28; border-color: rgba(218, 30, 40, 0.45); background: rgba(218, 30, 40, 0.12); }
+
+/* Dark mode: brighten the text so the subtle tint stays legible. */
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.success { color: #42be65; }
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.tip     { color: #3ddbd9; }
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.caution { color: #f1c21b; }
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.note    { color: #78a9ff; }
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.default { color: #a8a8a8; }
+:root[data-theme="dark"] .sl-markdown-content .sl-badge.danger  { color: #fa4d56; }
+
 /* ---- Sidebar: Carbon line icons on nav items ---------------------------- *
    Re-uses the original mkdocs cldk icon set (copied into /public/icons/cldk).
    Each item carries `data-cldk-icon="<file>"`; the glyph is rendered as a
@@ -252,6 +280,39 @@ html {
 .sidebar-content a[data-cldk-icon="polygon-16"] { --cldk-icon: url("/icons/cldk/polygon-16.svg"); }
 .sidebar-content a[data-cldk-icon="results-16"] { --cldk-icon: url("/icons/cldk/results-16.svg"); }
 .sidebar-content a[data-cldk-icon="globe-network-16"] { --cldk-icon: url("/icons/cldk/globe-network-16.svg"); }
+.sidebar-content a[data-cldk-icon="python"] { --cldk-icon: url("/icons/cldk/python.svg"); }
+.sidebar-content a[data-cldk-icon="java"] { --cldk-icon: url("/icons/cldk/java.svg"); }
+.sidebar-content a[data-cldk-icon="typescript"] { --cldk-icon: url("/icons/cldk/typescript.svg"); }
+.sidebar-content a[data-cldk-icon="javascript"] { --cldk-icon: url("/icons/cldk/javascript.svg"); }
+.sidebar-content a[data-cldk-icon="rust"] { --cldk-icon: url("/icons/cldk/rust.svg"); }
+.sidebar-content a[data-cldk-icon="go"] { --cldk-icon: url("/icons/cldk/go.svg"); }
+
+/* Nested group labels (e.g. "Python SDK") shouldn't read as top-level section
+   headings — match the regular sidebar links (normal weight, smaller size). */
+.sidebar-content details details > summary .group-label > .large {
+  font-weight: 400;
+  font-size: var(--sl-text-sm);
+}
+
+/* The "Python SDK" group is a <summary>, not a link, so it can't carry a
+   data-cldk-icon. Render the Python brand mark via ::before to match the
+   icon styling on the sibling links. */
+.sidebar-content details details > summary .group-label::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin-right: 0.55rem;
+  background-color: currentColor;
+  opacity: 0.65;
+  -webkit-mask: url("/icons/cldk/python.svg") center / contain no-repeat;
+  mask: url("/icons/cldk/python.svg") center / contain no-repeat;
+}
+
+.sidebar-content details details > summary .group-label {
+  display: inline-flex;
+  align-items: center;
+}
 
 /* ---- Splash: center the content column at a comfortable width ----------- *
    Starlight caps `.sl-container` at --sl-content-width (50rem) and only centers

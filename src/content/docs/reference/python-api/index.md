@@ -23,8 +23,8 @@ CLDK?](/what-is-cldk/) for the mental model, or jump to the
 ## Reference pages
 
 - **[Core (CLDK)](/reference/python-api/core/)**, the factory: `CLDK(language)` and the `analysis()` entry point.
-- **[Java analysis](/reference/python-api/java/)**, the most complete analyzer: symbol table, call graph, subclasses/interfaces, CRUD.
 - **[Python analysis](/reference/python-api/python/)**: symbol table and call graph via Jedi + optional CodeQL.
+- **[Java analysis](/reference/python-api/java/)**, the deepest analyzer: symbol table, call graph, subclasses/interfaces, CRUD.
 
 More languages (Go, TypeScript, Rust, and C) are on the way.
 

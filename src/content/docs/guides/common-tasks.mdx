@@ -1,6 +1,6 @@
 ---
 title: Common tasks
-description: A cookbook of copy-paste CLDK snippets for the analysis questions you ask every day, each with the exact Java and Python call and the result it returns.
+description: A cookbook of copy-paste CLDK snippets for the analysis questions you ask every day, each with the exact Python and Java call and the result it returns.
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
@@ -16,6 +16,21 @@ Build the `analysis` object once and reuse it. The default analysis level is `sy
 Enumerate every method on a class: the first thing you do when you land in unfamiliar code.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    from cldk import CLDK
+
+    analysis = CLDK(language="python").analysis(project_path="my_pkg")
+
+    pyclass = analysis.get_classes()["my_pkg.options.Options"]
+    for method in pyclass.methods.values():
+        print(method.signature)
+    # add_option(self, option)
+    # get_option(self, name)
+    # has_option(self, name)
+    # ...
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     from cldk import CLDK
@@ -33,21 +48,6 @@ Enumerate every method on a class: the first thing you do when you land in unfam
     # ...
     ```
   </TabItem>
-  <TabItem label="Python">
-    ```python
-    from cldk import CLDK
-
-    analysis = CLDK(language="python").analysis(project_path="my_pkg")
-
-    pyclass = analysis.get_classes()["my_pkg.options.Options"]
-    for method in pyclass.methods.values():
-        print(method.signature)
-    # add_option(self, option)
-    # get_option(self, name)
-    # has_option(self, name)
-    # ...
-    ```
-  </TabItem>
 </Tabs>
 
 ## Get a method's source body
@@ -55,6 +55,18 @@ Enumerate every method on a class: the first thing you do when you land in unfam
 Pull the exact source of one method by its qualified class name and signature: no file reading, no line-range guessing.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    method = analysis.get_method(
+        "my_pkg.options.Options",
+        "add_option",
+    )
+    print(method.code)
+    # def add_option(self, option):
+    #     self._options[option.name] = option
+    #     return self
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     method = analysis.get_method(
@@ -69,18 +81,6 @@ Pull the exact source of one method by its qualified class name and signature: n
     # }
     ```
   </TabItem>
-  <TabItem label="Python">
-    ```python
-    method = analysis.get_method(
-        "my_pkg.options.Options",
-        "add_option",
-    )
-    print(method.code)
-    # def add_option(self, option):
-    #     self._options[option.name] = option
-    #     return self
-    ```
-  </TabItem>
 </Tabs>
 
 <Aside type="note">
@@ -92,21 +92,6 @@ Pull the exact source of one method by its qualified class name and signature: n
 The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**. It powers callers, callees, and reachability, so it requires the `call_graph` analysis level.
 
 <Tabs syncKey="lang">
-  <TabItem label="Java">
-    ```python
-    from cldk import CLDK
-    from cldk.analysis import AnalysisLevel
-
-    analysis = CLDK(language="java").analysis(
-        project_path="commons-cli",
-        analysis_level=AnalysisLevel.call_graph,  # required for call edges
-    )
-
-    cg = analysis.get_call_graph()
-    print(cg.number_of_nodes(), "methods,", cg.number_of_edges(), "edges")
-    # 421 methods, 638 edges
-    ```
-  </TabItem>
   <TabItem label="Python">
     ```python
     from cldk import CLDK
@@ -122,6 +107,21 @@ The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**
     # 87 methods, 113 edges
     ```
   </TabItem>
+  <TabItem label="Java">
+    ```python
+    from cldk import CLDK
+    from cldk.analysis import AnalysisLevel
+
+    analysis = CLDK(language="java").analysis(
+        project_path="commons-cli",
+        analysis_level=AnalysisLevel.call_graph,  # required for call edges
+    )
+
+    cg = analysis.get_call_graph()
+    print(cg.number_of_nodes(), "methods,", cg.number_of_edges(), "edges")
+    # 421 methods, 638 edges
+    ```
+  </TabItem>
 </Tabs>
 
 ## Find who calls a method
@@ -129,6 +129,16 @@ The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**
 Impact analysis: *"if I change this, what breaks?"* `get_callers` returns the set of methods that invoke the target.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    callers = analysis.get_callers(
+        "my_pkg.options.Options",
+        "add_option",
+    )
+    print(list(callers))
+    # ['my_pkg.cli.build_options', 'my_pkg.options.Options.add_required', ...]
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     callers = analysis.get_callers(
@@ -138,16 +148,6 @@ Impact analysis: *"if I change this, what breaks?"* `get_callers` returns the se
     print(list(callers))
     # ['org.apache.commons.cli.Options.addOption(String, boolean, String)',
     #  'org.apache.commons.cli.DefaultParser.handleOption(...)', ...]
-    ```
-  </TabItem>
-  <TabItem label="Python">
-    ```python
-    callers = analysis.get_callers(
-        "my_pkg.options.Options",
-        "add_option",
-    )
-    print(list(callers))
-    # ['my_pkg.cli.build_options', 'my_pkg.options.Options.add_required', ...]
     ```
   </TabItem>
 </Tabs>
@@ -161,6 +161,16 @@ Impact analysis: *"if I change this, what breaks?"* `get_callers` returns the se
 The dependency view: *"what does this method reach out to?"* `get_callees` is the mirror of `get_callers`.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    callees = analysis.get_callees(
+        "my_pkg.parser.DefaultParser",
+        "parse",
+    )
+    print(list(callees))
+    # ['my_pkg.options.Options.get_option', 'my_pkg.cli.CommandLine.add_option', ...]
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     callees = analysis.get_callees(
@@ -172,16 +182,6 @@ The dependency view: *"what does this method reach out to?"* `get_callees` is th
     #  'org.apache.commons.cli.CommandLine.addOption(Option)', ...]
     ```
   </TabItem>
-  <TabItem label="Python">
-    ```python
-    callees = analysis.get_callees(
-        "my_pkg.parser.DefaultParser",
-        "parse",
-    )
-    print(list(callees))
-    # ['my_pkg.options.Options.get_option', 'my_pkg.cli.CommandLine.add_option', ...]
-    ```
-  </TabItem>
 </Tabs>
 
 ## Map the class hierarchy
@@ -189,6 +189,15 @@ The dependency view: *"what does this method reach out to?"* `get_callees` is th
 In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`, and `get_implemented_interfaces`.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    # Python analysis does not expose get_class_hierarchy / get_sub_classes.
+    # Recover base classes from the model: each PyClass records its bases.
+    pyclass = analysis.get_classes()["my_pkg.parser.DefaultParser"]
+    print(pyclass.base_classes)
+    # ['my_pkg.parser.Parser']
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     parser = "org.apache.commons.cli.Parser"
@@ -197,15 +206,6 @@ In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`
 
     print(analysis.get_implemented_interfaces("org.apache.commons.cli.DefaultParser"))
     # {'org.apache.commons.cli.CommandLineParser'}
-    ```
-  </TabItem>
-  <TabItem label="Python">
-    ```python
-    # Python analysis does not expose get_class_hierarchy / get_sub_classes.
-    # Recover base classes from the model: each PyClass records its bases.
-    pyclass = analysis.get_classes()["my_pkg.parser.DefaultParser"]
-    print(pyclass.base_classes)
-    # ['my_pkg.parser.Parser']
     ```
   </TabItem>
 </Tabs>
@@ -219,6 +219,12 @@ Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_impl
 Locate where the code reads or writes persistent data: useful for security triage and data-flow questions. This is a **Java-only** capability.
 
 <Tabs syncKey="lang">
+  <TabItem label="Python">
+    ```python
+    # Not available. CRUD-operation extraction (get_all_crud_operations)
+    # is part of the Java analysis facade only.
+    ```
+  </TabItem>
   <TabItem label="Java">
     ```python
     crud = analysis.get_all_crud_operations()
@@ -227,12 +233,6 @@ Locate where the code reads or writes persistent data: useful for security triag
     # JCRUDOperation(operation_type='READ',  ...)
     # JCRUDOperation(operation_type='CREATE', ...)
     # ...
-    ```
-  </TabItem>
-  <TabItem label="Python">
-    ```python
-    # Not available. CRUD-operation extraction (get_all_crud_operations)
-    # is part of the Java analysis facade only.
     ```
   </TabItem>
 </Tabs>

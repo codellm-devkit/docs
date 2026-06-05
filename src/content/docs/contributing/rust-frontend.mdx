@@ -11,7 +11,7 @@ This page is a **stub**. A Rust frontend doesn't exist yet: this is the shape it
 
 ## Why a Rust frontend
 
-A *frontend* is just an SDK that consumes the canonical analysis JSON the [codeanalyzer backends](/backends/) emit and exposes an ergonomic `analysis` API over it. The [Python SDK](/reference/python-api/) is the reference implementation. Because the backends do all the language analysis, a second frontend inherits **every** backend for free: a Rust SDK would analyze Java, Python, and (once it lands) Go on day one.
+A *frontend* is just an SDK that consumes the canonical analysis JSON the [codeanalyzer backends](/backends/) emit and exposes an ergonomic `analysis` API over it. The [Python SDK](/reference/python-api/) is the reference implementation. Because the backends do all the language analysis, a second frontend inherits **every** backend for free: a Rust SDK would analyze Python, Java, and (once it lands) Go on day one.
 
 Rust is a natural fit: strong types for the schema, `serde` for fast zero-copy-ish deserialization, and `petgraph` for call-graph queries that map cleanly onto the SDK's `networkx` graphs.
 

@@ -1,19 +1,19 @@
 ---
 title: Examples
-description: Worked, runnable CLDK examples for Java and Python, mirrored from the SDK's own test suite, grouped by the question you're trying to answer.
+description: Worked, runnable CLDK examples for Python and Java, mirrored from the SDK's own test suite, grouped by the question you're trying to answer.
 ---
 
 import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-These examples are taken straight from the questions CLDK's own test suite asks of real projects, so every snippet reflects behavior the SDK actually guarantees, not a hand-wave. They're grouped by task and run against the recurring samples used across these docs: [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java and a generic `my_pkg` for Python.
+These examples are taken straight from the questions CLDK's own test suite asks of real projects, so every snippet reflects behavior the SDK actually guarantees, not a hand-wave. They're grouped by task and run against the recurring samples used across these docs: a generic `my_pkg` for Python and [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java.
 
 <Aside type="tip" title="Same facade, two languages">
-Notice how little changes between the Java and Python pages: that's the point. You construct `CLDK(language=...).analysis(project_path=...)` and call the same methods regardless of language. Start with whichever you're analyzing.
+Notice how little changes between the Python and Java pages: that's the point. You construct `CLDK(language=...).analysis(project_path=...)` and call the same methods regardless of language. Start with whichever you're analyzing.
 </Aside>
 
 <CardGrid>
-  <LinkCard title="Java examples" description="Symbol tables, call graphs, callers/callees, class relationships, CRUD, comments, and reachability, on Apache Commons CLI." href="/examples/java/" />
   <LinkCard title="Python examples" description="Symbol tables, call graphs, and working with the PyClass / PyCallable models." href="/examples/python/" />
+  <LinkCard title="Java examples" description="Symbol tables, call graphs, callers/callees, class relationships, CRUD, comments, and reachability, on Apache Commons CLI." href="/examples/java/" />
 </CardGrid>
 
 ## Where these come from

@@ -5,7 +5,7 @@ description: "The CLDK TypeScript/TSX backend: emits the canonical symbol-table 
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-ts** backend analyzes TypeScript and TSX codebases and emits the canonical CLDK `analysis.json`: the same symbol-table and call-graph schema that Java and Python analyses produce. It is a standalone binary that plugs into the CLDK Python SDK.
+The **codeanalyzer-ts** backend analyzes TypeScript and TSX codebases and emits the canonical CLDK `analysis.json`: the same symbol-table and call-graph schema that Python and Java analyses produce. It is a standalone binary that plugs into the CLDK Python SDK.
 
 ## Architecture
 
@@ -255,7 +255,7 @@ Disable phantoms with `--no-phantoms` if you want the graph to be internal-only.
 
 ## TypeScript-native features
 
-Unlike Java or Python, TypeScript brings several language-specific constructs that codeanalyzer-ts models as first-class citizens:
+Unlike Python or Java, TypeScript brings several language-specific constructs that codeanalyzer-ts models as first-class citizens:
 
 | Feature | Support | Details |
 |---------|---------|---------|
@@ -272,7 +272,7 @@ Unlike Java or Python, TypeScript brings several language-specific constructs th
 
 ## Python SDK integration
 
-TypeScript support in the Python SDK is **coming soon**. When available, you will be able to analyze TypeScript projects with the same `CLDK` facade as Java and Python:
+TypeScript support in the Python SDK is **coming soon**. When available, you will be able to analyze TypeScript projects with the same `CLDK` facade as Python and Java:
 
 ```python
 from cldk import CLDK

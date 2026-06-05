@@ -1,11 +1,11 @@
 ---
 title: What is CLDK?
-description: CLDK gives you one typed analysis facade over your code (call graphs, symbol tables, reachability), the same interface across Java and Python.
+description: CLDK gives you one typed analysis facade over your code (call graphs, symbol tables, reachability), the same interface across Python and Java.
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK (CodeLLM-DevKit) is a Python library that loads a codebase and hands you back a typed object model of it (classes, methods, fields, and call graphs) through **one consistent `analysis` object**. The interface is the same whether the code is Java or Python: the same methods, the same typed results. You stop parsing files by hand and start asking questions like "what calls this method?" or "is this sink reachable from that entry point?" and getting real answers.
+CLDK (CodeLLM-DevKit) is a Python library that loads a codebase and hands you back a typed object model of it (classes, methods, fields, and call graphs) through **one consistent `analysis` object**. The interface is the same whether the code is Python or Java: the same methods, the same typed results. You stop parsing files by hand and start asking questions like "what calls this method?" or "is this sink reachable from that entry point?" and getting real answers.
 
 ## The mental model
 
@@ -88,7 +88,7 @@ An agent asked "what calls this method?" without CLDK has to *crawl*: reading an
 
 ## Language coverage
 
-You query every language through the same `analysis` facade; only the engine behind it changes. Java is the most complete backend today, with Python close behind. More languages (Go, TypeScript, Rust, and C) are on the way.
+You query every language through the same `analysis` facade; only the engine behind it changes. Python and Java are both first-class today (Java's backend currently goes deepest, with class hierarchy and CRUD analysis). More languages (Go, TypeScript, Rust, and C) are on the way.
 
 | Language | Status | Symbol table | Call graph / callers / callees |
 | -------- | ------ | ------------ | ------------------------------ |

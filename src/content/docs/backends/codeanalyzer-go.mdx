@@ -1,0 +1,26 @@
+---
+title: codeanalyzer-go
+description: "A planned Go analysis backend for CLDK: parses Go source and emits the canonical symbol-table and call-graph JSON. Stub page tracking the roadmap."
+---
+
+import { Aside } from "@astrojs/starlight/components";
+
+<Aside type="caution" title="Stub: planned">
+The **codeanalyzer-go** backend does not exist yet. This page tracks intent and design. For backends that work today, see [codeanalyzer-python](/backends/codeanalyzer-python/), [codeanalyzer-java](/backends/codeanalyzer-java/), and [codeanalyzer-ts](/backends/codeanalyzer-ts/).
+</Aside>
+
+**codeanalyzer-go** is a planned CLDK *backend*: a standalone analyzer that parses Go codebases and emits the canonical CLDK `analysis.json`, the same symbol-table and call-graph schema every other backend produces. Once it lands, any CLDK frontend (the [Python SDK](/reference/python-api/) and beyond) can analyze Go projects through the same `analysis` facade, no SDK changes required.
+
+## Planned shape
+
+- **Parser/resolver:** `go/parser` + `go/packages` and `go/types` for symbol resolution, loaded after `go mod download`.
+- **Depth:** level 1 (symbol table + resolver call graph) first; deeper analysis to follow.
+- **Output:** the canonical `analysis.json` schema, so it plugs into the SDK with no frontend work.
+
+## Status
+
+On the roadmap, not started. The [Add a language backend (Go)](/contributing/add-language-backend/) guide walks through exactly this integration.
+
+<Aside type="tip" title="Adding a language pack">
+CLDK ships a skill that scaffolds first-class support for a new language end to end (a `codeanalyzer-<lang>` backend plus the SDK bindings). See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset).
+</Aside>

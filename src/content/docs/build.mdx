@@ -1,0 +1,40 @@
+---
+title: Build with CLDK
+description: "Worked builds on top of CLDK: end-to-end projects that turn the analysis facade into something an agent or tool can use. Start with the Code Context Agent."
+---
+
+import { CardGrid, LinkCard } from "@astrojs/starlight/components";
+
+The [examples](/examples/) show individual calls; this section shows **whole builds**: end-to-end projects that wire CLDK's `analysis` facade into something an agent or tool actually uses. Each one is runnable and grounded in the same call graphs and symbol tables the rest of the docs cover.
+
+## Builds
+
+<CardGrid>
+  <LinkCard
+    title="Code Context Agent"
+    description="Build a COCOA plugin that drives CLDK from a coding agent's Bash tool: callers, reachability, and change-impact answers grounded in real static analysis."
+    href="/cocoa/"
+  />
+  <LinkCard
+    title="COCO MCP Toolbox"
+    description="Expose CLDK's analysis methods as Model Context Protocol tools so any MCP host can query a real program. Reference implementation: cocoa-py."
+    href="/cocoa-mcp/"
+  />
+  <LinkCard
+    title="Community showcase"
+    description="Coming soon. Built something on CLDK? We'd love to feature it. Get in touch and we'll add your project to the showcase."
+    href="#contact"
+  />
+</CardGrid>
+
+More builds are on the way, and we'd love to feature yours. Built an agent, tool, or pipeline on CLDK? **Get in touch** (see [Contact](#contact) below) and we'll add it to the community showcase.
+
+## Contact
+
+CLDK is developed in the open under the [codellm-devkit](https://github.com/codellm-devkit) GitHub org, that's the best reference for the wider team and where to file issues or join the conversation. For contributions to the showcase or anything else, reach the primary maintainer:
+
+| Maintainer | Contact |
+| --- | --- |
+| Rahul Krishna (primary) | [i.m.ralk@gmail.com](mailto:i.m.ralk@gmail.com) |
+
+You can also say hi on [Discord](https://discord.gg/zEjz9YrmqN).

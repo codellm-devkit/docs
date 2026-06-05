@@ -159,53 +159,79 @@ export default defineConfig({
         {
           label: "Build with CLDK",
           items: [
+            { label: "Overview", slug: "build", attrs: { "data-cldk-icon": "manual-16" } },
             {
-              label: "A Code Context Agent (COCOA)",
+              label: "Code Context Agent",
               slug: "cocoa",
-              badge: { text: "★", variant: "tip" },
               attrs: { "data-cldk-icon": "chat-16" },
+            },
+            {
+              label: "COCO MCP Toolbox",
+              slug: "cocoa-mcp",
+              attrs: { "data-cldk-icon": "globe-network-16" },
             },
           ],
         },
         {
           label: "Examples",
           items: [
-            { label: "Overview", slug: "examples", attrs: { "data-cldk-icon": "widget-16" } },
-            { label: "Java examples", slug: "examples/java", attrs: { "data-cldk-icon": "cube-16" } },
-            { label: "Python examples", slug: "examples/python", attrs: { "data-cldk-icon": "model-16" } },
+            { label: "Overview", slug: "examples", attrs: { "data-cldk-icon": "manual-16" } },
+            { label: "Python examples", slug: "examples/python", attrs: { "data-cldk-icon": "python" } },
+            { label: "Java examples", slug: "examples/java", attrs: { "data-cldk-icon": "java" } },
           ],
         },
         {
-          label: "API Reference",
+          label: "SDKs",
           items: [
-            { label: "Overview", slug: "reference/python-api", attrs: { "data-cldk-icon": "manual-16" } },
-            { label: "Core (CLDK)", slug: "reference/python-api/core", attrs: { "data-cldk-icon": "layers-16" } },
-            { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "developer-16" } },
-            { label: "Python analysis", slug: "reference/python-api/python", attrs: { "data-cldk-icon": "developer-16" } },
+            { label: "Overview", slug: "reference/sdks", attrs: { "data-cldk-icon": "manual-16" } },
+            {
+              label: "Python SDK",
+              items: [
+                { label: "Overview", slug: "reference/python-api", attrs: { "data-cldk-icon": "manual-16" } },
+                { label: "Core (CLDK)", slug: "reference/python-api/core", attrs: { "data-cldk-icon": "layers-16" } },
+                { label: "Python analysis", slug: "reference/python-api/python", attrs: { "data-cldk-icon": "python" } },
+                { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "java" } },
+              ],
+            },
+            {
+              label: "TypeScript SDK",
+              link: "https://github.com/codellm-devkit/typescript-sdk",
+              attrs: { "data-cldk-icon": "typescript", target: "_blank", rel: "noopener noreferrer" },
+            },
+            {
+              label: "Rust SDK",
+              slug: "contributing/rust-frontend",
+              attrs: { "data-cldk-icon": "rust" },
+            },
+            {
+              label: "Go SDK",
+              slug: "reference/go-sdk",
+              attrs: { "data-cldk-icon": "go" },
+            },
           ],
         },
         {
           label: "Backends",
           items: [
-            { label: "Overview", slug: "backends", attrs: { "data-cldk-icon": "dataset-16" } },
-            { label: "codeanalyzer-java", slug: "backends/codeanalyzer-java", attrs: { "data-cldk-icon": "cube-16" } },
-            { label: "codeanalyzer-python", slug: "backends/codeanalyzer-python", attrs: { "data-cldk-icon": "cube-16" } },
-            { label: "codeanalyzer-ts", slug: "backends/codeanalyzer-ts", attrs: { "data-cldk-icon": "cube-16" } },
+            { label: "Overview", slug: "backends", attrs: { "data-cldk-icon": "manual-16" } },
+            { label: "codeanalyzer-python", slug: "backends/codeanalyzer-python", attrs: { "data-cldk-icon": "python" } },
+            { label: "codeanalyzer-java", slug: "backends/codeanalyzer-java", attrs: { "data-cldk-icon": "java" } },
+            { label: "codeanalyzer-ts", slug: "backends/codeanalyzer-ts", attrs: { "data-cldk-icon": "typescript" } },
+            { label: "codeanalyzer-go", slug: "backends/codeanalyzer-go", attrs: { "data-cldk-icon": "go" } },
           ],
         },
         {
           label: "Contributing",
           items: [
-            { label: "Overview", slug: "contributing", attrs: { "data-cldk-icon": "developer-16" } },
-            { label: "Add a language backend (Go)", slug: "contributing/add-language-backend", attrs: { "data-cldk-icon": "workflow-16" } },
-            { label: "Add a Rust frontend", slug: "contributing/rust-frontend", attrs: { "data-cldk-icon": "polygon-16" } },
+            { label: "Overview", slug: "contributing", attrs: { "data-cldk-icon": "manual-16" } },
+            { label: "Add a language backend (Go)", slug: "contributing/add-language-backend", attrs: { "data-cldk-icon": "go" } },
+            { label: "Add a Rust frontend", slug: "contributing/rust-frontend", attrs: { "data-cldk-icon": "rust" } },
           ],
         },
         {
           label: "Resources",
           items: [
             { label: "Cheat sheet", slug: "resources/cheatsheet", attrs: { "data-cldk-icon": "results-16" } },
-            { label: "CLDK over MCP", slug: "resources/cldk-over-mcp", attrs: { "data-cldk-icon": "globe-network-16" } },
           ],
         },
       ],

@@ -1,0 +1,140 @@
+---
+title: COCO MCP Toolbox
+description: "COCOA (Code Context Agent) is a FastMCP server that exposes CLDK's Java analysis as Model Context Protocol tools. The analysis is built once at startup and dependency-injected into every tool via the server lifespan."
+---
+
+import { Aside, Steps, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+<Aside type="tip" title="Reference implementation">
+The COCO MCP Toolbox lives at [codellm-devkit/cocoa-py](https://github.com/codellm-devkit/cocoa-py). This page documents how it works; the repo is the source of truth.
+</Aside>
+
+**COCOA** (Code Context Agent) is a [FastMCP](https://github.com/jlowin/fastmcp) server that publishes [CLDK](/reference/python-api/)'s Java analysis as [Model Context Protocol](https://modelcontextprotocol.io) tools. Point it at a Java project and any MCP host (Claude Desktop, an MCP-aware IDE, or your own agent) can call `get_callers`, `get_callees`, reachability, CRUD discovery, and the rest over a standard wire protocol, each answer backed by real static analysis rather than a guess.
+
+Where the in-process [Code Context Agent](/cocoa/) plugin shells out to CLDK via Bash, the toolbox runs CLDK as a long-lived server and exposes it as fixed tools. Same analysis layer, different delivery.
+
+## How state is managed: dependency injection
+
+Building a `JavaAnalysis` is the expensive step (it parses the project and constructs the symbol table and call graph). The toolbox does it **once**, when the server starts, and then **injects** that single instance into every tool call through the FastMCP lifespan context, so no tool ever re-analyzes the project.
+
+A `CLDKAnalysis` dataclass holds the instance and a lifespan yields it as the server's context:
+
+```python title="cocoa/cli.py"
+@dataclass
+class CLDKAnalysis:
+    project_path: Path
+    analysis_instance: JavaAnalysis | None = field(default=None, init=False)
+
+    def __post_init__(self):
+        # Built ONCE, at server startup.
+        self.analysis_instance = CLDK("java").analysis(project_path=str(self.project_path))
+
+
+def create_lifespan(project_path: Path):
+    @asynccontextmanager
+    async def coco_lifespan(server: FastMCP) -> AsyncIterator[CLDKAnalysis]:
+        yield CLDKAnalysis(project_path=project_path)  # becomes the lifespan context
+    return coco_lifespan
+
+
+mcp = FastMCP(name="cocoa", lifespan=create_lifespan(project_path), ...)
+```
+
+Every tool takes a FastMCP `Context` and pulls the shared analysis off the lifespan context, that is the dependency injection:
+
+```python title="cocoa/tools/tools.py"
+async def get_callers_tool(ctx: Context, target_class_name: str, target_method_declaration: str, using_symbol_table: bool = True):
+    # Injected, not rebuilt: the same JavaAnalysis every call.
+    analysis = ctx.request_context.lifespan_context.analysis_instance
+    return json.dumps(analysis.get_callers(target_class_name, target_method_declaration, using_symbol_table))
+```
+
+Tools are registered by naming convention at startup: every function ending in `_tool` (and every schema `_explainer`) is discovered and handed to `mcp.add_tool(...)`, so adding a capability is just adding a function.
+
+## What's in the toolbox
+
+Over fifty MCP tools mirror the `JavaAnalysis` facade, each returning JSON (Pydantic `model_dump()`) or a NetworkX node-link graph:
+
+- **Structure:** `get_symbol_table`, `get_compilation_units`, `get_classes`, `get_class`, `get_methods`, `get_method`, `get_fields`, `get_constructors`, `get_nested_classes`, `get_application_view`.
+- **Call graph:** `get_call_graph` (and `_json`), `get_callers`, `get_callees`, `get_class_call_graph`.
+- **Hierarchy:** `get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`, `get_entry_point_classes`, `get_entry_point_methods`.
+- **CRUD:** `get_all_crud_operations` plus per-verb create/read/update/delete variants.
+- **Comments:** comments and docstrings by method, class, file, or whole project; `remove_all_comments`.
+- **Schema explainers:** companion tools that describe CLDK's data models (`JType`, `JCallable`, `JComment`, and friends) so the model knows the shape of what it gets back.
+
+## Run it
+
+<Steps>
+
+1. Install [`uv`](https://docs.astral.sh/uv/):
+
+   ```bash
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+
+2. Run the server straight from the repo against a Java project:
+
+   ```bash
+   uvx --from git+https://github.com/codellm-devkit/cocoa-py cocoa toolbox --project-path /path/to/java/project
+   ```
+
+   Or clone and run locally:
+
+   ```bash
+   git clone https://github.com/codellm-devkit/cocoa-py.git
+   cd cocoa-py
+   uv run cocoa toolbox --project-path /path/to/java/project
+   ```
+
+</Steps>
+
+## Connect a host
+
+Register the server with any MCP host over stdio, for example in a Claude Desktop / MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "cocoa": {
+      "command": "uvx",
+      "args": [
+        "--from", "git+https://github.com/codellm-devkit/cocoa-py",
+        "cocoa", "toolbox",
+        "--project-path", "/path/to/java/project"
+      ]
+    }
+  }
+}
+```
+
+Or drive it directly with an MCP client:
+
+```python title="example/client.py"
+server_params = StdioServerParameters(
+    command="cocoa",
+    args=["toolbox", "--project-path", "/path/to/java/project"],
+)
+
+async with stdio_client(server_params) as (read, write):
+    async with ClientSession(read, write) as session:
+        await session.initialize()
+        result = await session.call_tool(
+            "get_callers_tool",
+            arguments={
+                "target_class_name": "org.example.Service",
+                "target_method_declaration": "save(Order)",
+            },
+        )
+        print(result.content[0].text)
+```
+
+<Aside type="note">
+The toolbox analyzes **Java** projects today (it constructs `CLDK("java")`). It's built on `cldk` and `fastmcp`; see the repo for the exact, current command names and tool list.
+</Aside>
+
+## Related
+
+<CardGrid>
+  <LinkCard title="Code Context Agent" description="The in-process sibling: drive the same CLDK analysis from a coding agent's Bash tool." href="/cocoa/" />
+  <LinkCard title="Python SDK" description="The CLDK analysis facade the toolbox wraps." href="/reference/python-api/" />
+</CardGrid>

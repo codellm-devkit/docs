@@ -104,7 +104,7 @@ New here? Read [What is CLDK?](/what-is-cldk/) for the mental model and the
 [cocoa](/cocoa/); the [concepts](/guides/concepts/) page
 explains analysis levels and call graphs in depth, and the
 [cheat sheet](/resources/cheatsheet/) is the one-page reminder. To expose any of
-this to an agent over MCP, see [CLDK over MCP](/resources/cldk-over-mcp/).
+this to an agent over MCP, see [COCO MCP Toolbox](/cocoa-mcp/).
 
 ## API reference
 
