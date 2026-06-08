@@ -34,22 +34,44 @@ Walks the ts-morph AST and indexes all declarations (classes, methods, interface
 
 Both maintain the no-dangling-edges invariant: every call-graph edge endpoint is a real `Callable.signature`.
 
-## Building and running
+## Installing
 
-### Prerequisites
-- **bun** ≥ 1.3, or **Node** ≥ 20
-- **npm** on PATH (to materialize dependencies)
+The fastest way to get the `cants` CLI is from **PyPI** or **Homebrew**. Both ship a prebuilt, self-contained binary for your platform — no Bun or Node is needed to *run* it:
 
-### Install and build
+<Tabs>
+  <TabItem label="pip">
+    ```bash
+    pip install codeanalyzer-typescript
+    cants --help
+    ```
+  </TabItem>
+  <TabItem label="Homebrew">
+    ```bash
+    brew install codellm-devkit/homebrew-tap/codeanalyzer-typescript
+    cants --help
+    ```
+  </TabItem>
+</Tabs>
+
+The PyPI package `codeanalyzer-typescript` is also what the CLDK Python SDK depends on to locate this backend — it exposes `bin_path()` to point at the bundled binary.
+
+<Aside type="note">
+The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on your `PATH` is **`cants`** — the analyzer's short binary name. Run `cants`, not `codeanalyzer-typescript`.
+</Aside>
+
+### Building from source
+
+To hack on the analyzer, build it with **bun** ≥ 1.3 (Node ≥ 20 also works to run from source). **npm** must be on PATH to materialize dependencies:
+
 ```bash
 cd codeanalyzer-ts
 bun install
-bun run build    # → dist/codeanalyzer-typescript (standalone binary)
+bun run build    # → dist/cants (standalone binary)
 ```
 
 Or run from source without compilation:
 ```bash
-bun run src/index.ts -i <project> -a 2
+bun run src/index.ts -i <project>
 ```
 
 ## CLI
@@ -57,7 +79,7 @@ bun run src/index.ts -i <project> -a 2
 The analyzer accepts these command-line options:
 
 ```bash
-codeanalyzer-typescript -i <path> [options]
+cants -i <path> [options]
 ```
 
 | Option | Description |
@@ -65,7 +87,7 @@ codeanalyzer-typescript -i <path> [options]
 | `-i, --input <path>` | Project root to analyze **(required)** |
 | `-o, --output <dir>` | Write `analysis.json` to this directory; omit to emit compact JSON to stdout (used by the SDK) |
 | `-f, --format <fmt>` | Output format: `json` or `msgpack` (default: `json`) |
-| `-a, --analysis-level <n>` | `1` = tsc resolver call graph + RTA (default); `2` = + CodeQL enrichment |
+| `-a, --analysis-level <n>` | `1` = symbol table + tsc resolver call graph + RTA (default); `2` = call graph |
 | `-t, --target-files <paths...>` | Restrict analysis to specific files (for incremental builds) |
 | `--skip-tests` / `--include-tests` | Skip or include test files (default: skip) |
 | `--eager` / `--lazy` | Force clean rebuild vs. reuse cache (default: reuse) |

@@ -128,6 +128,29 @@ The Python SDK can be installed directly from
       ```
       This should output the version of the installed Maven.
   </TabItem>
+  <TabItem label="TypeScript Analysis">
+    For TypeScript and JavaScript analysis, CLDK relies on a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt, self-contained binary, so you do **not** need Bun or Node installed to run it — just install the `codeanalyzer-typescript` package, which puts a `cants` command on your `PATH`.
+
+    Install it from PyPI:
+
+    ```bash
+    pip install codeanalyzer-typescript
+    ```
+
+    Or with Homebrew:
+
+    ```bash
+    brew install codellm-devkit/homebrew-tap/codeanalyzer-typescript
+    ```
+
+    Verify the installation:
+
+    ```bash
+    cants --help
+    ```
+
+    The package is named `codeanalyzer-typescript`, but the installed command is **`cants`**. To analyze a project's *dependencies* (so library call targets resolve), keep `npm` on your `PATH`; the analyzer materializes `node_modules` automatically (skip with `--no-build`). See the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/) for full CLI options.
+  </TabItem>
   <TabItem label="Rust Installation">
     Rustup is the recommended tool for installing Rust and managing its toolchains. It simplifies the process of keeping Rust up to date and allows switching between different Rust versions and toolchains seamlessly.
 
