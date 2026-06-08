@@ -28,11 +28,14 @@ Before parsing, the analyzer ensures `node_modules` is present (via `npm install
 ### Symbol table (Level 1 default)
 Walks the ts-morph AST and indexes all declarations (classes, methods, interfaces, enums, type aliases, namespaces, functions) into a flat `symbol_table` keyed by project-relative file paths.
 
-### Call graph (Level 1 + Level 2)
-- **Level 1 (default)**: ts-morph's TypeChecker resolves each call site to its declared-type target (exact for static dispatch), plus RTA-style subtype expansion, polymorphic calls on interface/abstract receivers also emit edges to every instantiated concrete override. Provenance: `tsc`.
-- **Level 2**: CodeQL enrichment adds dynamic-dispatch and dataflow edges the checker cannot reach (currently stubbed; wired in `src/semantic_analysis/codeql/`).
+### Call graph
+ts-morph's TypeChecker resolves each call site to its declared-type target (exact for static dispatch), plus RTA-style subtype expansion: polymorphic calls on interface/abstract receivers also emit edges to every instantiated concrete override. Provenance: `tsc`.
 
-Both maintain the no-dangling-edges invariant: every call-graph edge endpoint is a real `Callable.signature`.
+<Aside type="tip" title="Planned: dataflow enrichment">
+A future enrichment pass will add the dynamic-dispatch and dataflow edges the type checker cannot reach, using [**Jelly**](https://github.com/cs-au-dk/jelly) (a static call-graph analyzer for JavaScript/TypeScript). It is not yet implemented; the analyzer accepts `-a 2` today but produces the same call graph as `-a 1`.
+</Aside>
+
+The call graph maintains the no-dangling-edges invariant: every edge endpoint is a real `Callable.signature`.
 
 ## Installing
 
@@ -254,7 +257,7 @@ The `call_graph` is an array of edges (`TSCallEdge`) in identity-only form: each
   target: "src/db.Database.fetchById",
   type: "CALL_DEP",
   weight: 1,
-  provenance: ["tsc"],                            // "tsc" | "codeql" | other
+  provenance: ["tsc"],                            // "tsc" today; "jelly" once dataflow enrichment lands
   tags: { "ts.dispatch": "rta" }                  // RTA subtype expansion tag
 }
 ```
@@ -337,16 +340,16 @@ Use `--lazy` (default) to reuse the cache, or `--target-files <list>` to update 
 ## Performance notes
 
 - **Symbol table build**: O(n) in source lines; ts-morph's parse is linear
-- **Call graph build (level 1)**: O(c) in call sites; the checker resolution is constant-time per site
-- **CodeQL enrichment (level 2)**: Stubbed; will depend on CodeQL database construction time
+- **Call graph build**: O(c) in call sites; the checker resolution is constant-time per site
+- **Dataflow enrichment (planned, Jelly)**: not yet implemented; cost will depend on Jelly's analysis time
 
 For large projects (>100k LOC), expect analysis to take seconds to tens of seconds.
 
 ## Current maturity
 
 - **Symbol table**: Stable; all TypeScript node kinds supported
-- **Call graph (level 1)**: Stable; tsc resolution + RTA expansion proven correct
-- **Call graph (level 2)**: Stubbed; infrastructure in place for CodeQL enrichment
+- **Call graph**: Stable; tsc resolution + RTA expansion proven correct
+- **Dataflow enrichment (Jelly)**: Planned; not yet implemented
 - **Python SDK integration**: In progress
 
 ## See also
