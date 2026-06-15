@@ -5,11 +5,11 @@ description: "Technical reference for the Python static analysis backend: Jedi-p
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The Python analysis backend is the engine that powers `PythonAnalysis` in CLDK. It runs **Jedi** for semantic code understanding, optional **CodeQL** for enhanced call-graph resolution, and **Tree-sitter** for fast syntactic parsing, all producing a single canonical `PyApplication` schema that ships with the backend and is re-exported by the CLDK Python SDK.
+The Python analysis backend provides `PythonAnalysis` in CLDK. It runs **Jedi** for semantic analysis, optional **CodeQL** for call-graph augmentation, and **Tree-sitter** for syntax parsing. The output is a canonical `PyApplication` schema that ships with the backend and is re-exported by the CLDK Python SDK.
 
-## What it is
+## Overview
 
-`codeanalyzer-python` is a standalone static analysis library (published to PyPI as `codeanalyzer-python`) that the SDK auto-manages in a virtualenv. Rather than crawling files with token-heavy LLM calls, agents query the analyzed program directly: call graphs become `networkx` graph lookups, reachability becomes a path query, and callers/callees are deterministic.
+`codeanalyzer-python` is a standalone static analysis library (published to PyPI as `codeanalyzer-python`) that the SDK manages in a virtualenv. It converts a Python project into a queryable symbol table and call graph.
 
 The backend produces:
 - **Symbol table**: All modules, classes, methods, functions, imports, parameters, and docstrings in typed `PyModule` objects.
@@ -100,7 +100,7 @@ class PyCallable(BaseModel):
     end_line: int
     code_start_line: int
     accessed_symbols: List[PySymbol] = []      # local variable / import refs
-    call_sites: List[PyCallsite] = []          # who does this call?
+    call_sites: List[PyCallsite] = []          # calls made within this callable
     inner_callables: Dict[str, "PyCallable"] = {}
     inner_classes: Dict[str, "PyClass"] = {}
     local_variables: List[PyVariableDeclaration] = []
@@ -174,7 +174,7 @@ codeanalyzer --input /path/to/my_pkg [OPTIONS]
 ```
 
 <Aside type="note">
-The CLI is primarily for backend developers and direct analysis runs. CLDK SDK users invoke the backend indirectly through `CLDK(language="python").analysis(...)`, which auto-manages the virtualenv and invokes the CLI internally.
+The CLI is intended for backend developers and direct analysis runs. CLDK SDK users invoke the backend indirectly through `CLDK(language="python").analysis(...)`, which manages the virtualenv and invokes the CLI internally.
 </Aside>
 
 ### Options
@@ -217,7 +217,7 @@ Enables Ray for parallel processing across available cores.
 ```bash
 codeanalyzer -i ./my_pkg -o ./results --format msgpack
 ```
-Saves compressed `analysis.msgpack` with 30–50% of JSON size.
+Saves compressed `analysis.msgpack` with 30-50% of JSON size.
 
 **Custom cache, eager rebuild:**
 ```bash
@@ -233,7 +233,7 @@ Analyzes only `src/handlers.py`.
 
 ## How the SDK consumes it
 
-When you call `CLDK(language="python").analysis(project_path="my_pkg")` in the Python SDK:
+A call to `CLDK(language="python").analysis(project_path="my_pkg")` in the Python SDK proceeds as follows:
 
 1. **Virtualenv provisioning**: CLDK detects or installs `codeanalyzer-python` into a managed virtualenv in the cache directory (default: `<project_dir>/.codeanalyzer/venv`).
 
@@ -241,7 +241,7 @@ When you call `CLDK(language="python").analysis(project_path="my_pkg")` in the P
 
 3. **Schema re-export**: `cldk.models.python` re-exports `PyApplication`, `PyModule`, `PyClass`, `PyCallable`, and other Py* types directly from `codeanalyzer.schema.py_schema`, ensuring a single source of truth.
 
-4. **In-memory facade**: The parsed `PyApplication` is passed to `PythonAnalysis`, which wraps it with convenience methods:
+4. **In-memory analysis object**: The parsed `PyApplication` is passed to `PythonAnalysis`, which wraps it with convenience methods:
    - `get_symbol_table() → Dict[str, PyModule]`
    - `get_classes() → Dict[str, PyClass]`
    - `get_call_graph() → networkx.DiGraph`
@@ -292,15 +292,15 @@ To force a clean rebuild, pass `--eager` (or `eager_analysis=True` in the SDK), 
 
 ## Design principles
 
-- **One facade, one schema**: The same `PyApplication` schema is used everywhere: CLI, SDK, and agent code. All Py* types are Pydantic models with JSON/msgpack serialization.
-- **Semantic over syntactic**: Jedi resolves symbols and types; you query the program, not parse tokens.
-- **Optional CodeQL**: Jedi alone covers 80–90% of call edges. CodeQL augments dynamic/RPC calls but costs extra analysis time. Enable it when you need comprehensive coverage.
-- **Agents query instead of crawl**: Reachability is a networkx query, callers are a dict lookup, and every claim is grounded in ground truth. No tokens wasted on approximation.
+- **One schema**: The same `PyApplication` schema is used across the CLI, SDK, and consuming code. All Py* types are Pydantic models with JSON/msgpack serialization.
+- **Semantic over syntactic**: Jedi resolves symbols and types, so queries operate on the resolved program rather than raw tokens.
+- **Optional CodeQL**: Jedi alone resolves approximately 80-90% of call edges. CodeQL augments dynamic and RPC calls at the cost of additional analysis time. Enable it when those edges are required.
+- **Queryable interface**: Reachability is a `networkx` query, and callers and callees are exposed through API methods over the analyzed project.
 
 ## Next steps
 
 <CardGrid>
-  <LinkCard title="Python API reference" href="/reference/python-api/" description="Query the PythonAnalysis facade and typed models." />
+  <LinkCard title="Python API reference" href="/reference/python-api/" description="Query PythonAnalysis and the typed models." />
   <LinkCard title="cocoa" href="/cocoa/" description="A Code Context Agent plugin using call graphs for reachability and impact." />
   <LinkCard title="Contributing guide" href="/contributing/" description="Extend the Python backend or add support for new languages." />
 </CardGrid>

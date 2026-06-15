@@ -129,7 +129,7 @@ The Python SDK can be installed directly from
       This should output the version of the installed Maven.
   </TabItem>
   <TabItem label="TypeScript Analysis">
-    For TypeScript and JavaScript analysis, CLDK relies on a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt, self-contained binary, so you do **not** need Bun or Node installed to run it — just install the `codeanalyzer-typescript` package, which puts a `cants` command on your `PATH`.
+    For TypeScript and JavaScript analysis, CLDK relies on a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt, self-contained binary and does **not** require Bun or Node to run. Install the `codeanalyzer-typescript` package, which adds a `cants` command to your `PATH`.
 
     Install it from PyPI:
 
@@ -149,10 +149,10 @@ The Python SDK can be installed directly from
     cants --help
     ```
 
-    The package is named `codeanalyzer-typescript`, but the installed command is **`cants`**. To analyze a project's *dependencies* (so library call targets resolve), keep `npm` on your `PATH`; the analyzer materializes `node_modules` automatically (skip with `--no-build`). See the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/) for full CLI options.
+    The package is named `codeanalyzer-typescript`, but the installed command is **`cants`**. To resolve library call targets, the analyzer requires a project's *dependencies*; keep `npm` on your `PATH` and the analyzer materializes `node_modules` automatically (skip with `--no-build`). See the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/) for full CLI options.
   </TabItem>
   <TabItem label="Rust Installation">
-    Rustup is the recommended tool for installing Rust and managing its toolchains. It simplifies the process of keeping Rust up to date and allows switching between different Rust versions and toolchains seamlessly.
+    Use rustup to install Rust and manage toolchains. It keeps Rust versions isolated and lets you switch between them when needed.
 
     - **Install Rustup**
     Run the following command in your terminal:

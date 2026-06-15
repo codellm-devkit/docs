@@ -1,26 +1,26 @@
 ---
 title: The codeanalyzer backends
-description: "CLDK is a thin Python frontend over a family of standalone language analyzers: the codeanalyzer-* backends. Here's how that split works and where each one lives."
+description: "CLDK is a Python frontend over standalone per-language analyzers, the codeanalyzer-* backends. This page describes the frontend/backend split and where each backend lives."
 ---
 
 import { Badge, CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-The Python SDK you call is deliberately thin. The heavy lifting (parsing source, resolving symbols, building call graphs) happens in a family of **standalone language analyzers**, one per language, collectively the `codeanalyzer-*` backends. Each one emits the same shape of typed JSON, and the SDK facade deserializes it into the models you query.
+Source parsing, symbol resolution, and call-graph construction are performed by **standalone language analyzers**, one per language, collectively the `codeanalyzer-*` backends. Each backend emits typed JSON, and the SDK deserializes it into queryable models.
 
 ```mermaid
 flowchart LR
-    SDK["CLDK Python SDK<br/>(analysis facade)"] -->|invokes| CAJ["codeanalyzer-java<br/>(JVM · WALA)"]
+    SDK["CLDK Python SDK<br/>(analysis API)"] -->|invokes| CAJ["codeanalyzer-java<br/>(JVM · WALA)"]
     SDK -->|invokes| CAP["codeanalyzer-python<br/>(Jedi · CodeQL)"]
-    SDK -.->|coming soon| CAT["codeanalyzer-ts<br/>(TS compiler)"]
+    SDK -->|invokes| CAT["codeanalyzer-ts<br/>(TS compiler)"]
     CAJ -->|canonical JSON| SDK
     CAP -->|canonical JSON| SDK
-    CAT -.->|canonical JSON| SDK
+    CAT -->|canonical JSON| SDK
 ```
 
-This separation is what lets one `analysis` API span languages: the facade never parses code itself, it shells out to the right backend, then maps the backend's JSON onto typed models (`JApplication`, `PyModule`, …). Add a backend that speaks the canonical JSON and the SDK can analyze a new language with almost no new frontend logic: see [Add a language backend](/contributing/add-language-backend/).
+This separation lets a single `analysis` API span languages. The SDK does not parse code itself; it invokes the appropriate backend, then maps the backend JSON onto typed models (`JApplication`, `PyModule`, and others). A backend that emits the canonical JSON makes its language available to the SDK with only binding work required. See [Add a language backend](/contributing/add-language-backend/).
 
-<Aside type="note" title="You usually don't run these directly">
-The SDK manages the backend for you: auto-downloading the Java JAR, provisioning the Python analyzer in a virtualenv. These pages are for when you want to understand (or contribute to) what's happening underneath.
+<Aside type="note" title="Backends are managed by the SDK">
+The SDK manages the backend automatically: it downloads the Java JAR and provisions the Python analyzer in a virtualenv. These pages document the backend layer for readers who want to understand or contribute to it.
 </Aside>
 
 This is the **backend** layer. For the SDKs that consume it, see the [SDKs overview](/reference/sdks/).
@@ -31,13 +31,13 @@ This is the **backend** layer. For the SDKs that consume it, see the [SDKs overv
 
 ## Backends (analyzers)
 
-The `codeanalyzer-*` tools that parse a language and serialize the canonical symbol-table and call-graph schema every frontend reads.
+The `codeanalyzer-*` tools parse a language and serialize the canonical symbol-table and call-graph schema that every frontend reads.
 
 | Language | Analyzer | Maturity |
 | --- | --- | --- |
 | **Java** | [codeanalyzer-java](/backends/codeanalyzer-java/) | <Badge text="Mature" variant="success" /> |
 | **Python** | [codeanalyzer-python](/backends/codeanalyzer-python/) | <Badge text="Mature" variant="success" /> |
-| **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
+| **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Mature" variant="success" /> |
 | **JavaScript** | via [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
 | **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
@@ -48,8 +48,8 @@ The `codeanalyzer-*` tools that parse a language and serialize the canonical sym
 ## Built backends
 
 <CardGrid>
-  <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation; ships the canonical Py* schema." href="/backends/codeanalyzer-python/" />
-  <LinkCard title="codeanalyzer-java" description="The deepest backend: WALA + Javaparser, producing symbol tables, call graphs, hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
-  <LinkCard title="codeanalyzer-ts" description="The TypeScript analyzer: the backend exists today; Python SDK support is on the way." href="/backends/codeanalyzer-ts/" />
-  <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# are unbuilt. A backend that speaks the canonical JSON lights the language up across every SDK." href="/contributing/add-language-backend/" />
+  <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation; emits the canonical Py* schema." href="/backends/codeanalyzer-python/" />
+  <LinkCard title="codeanalyzer-java" description="WALA and Javaparser; produces symbol tables, call graphs, type hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
+  <LinkCard title="codeanalyzer-ts" description="Stable. The TypeScript/TSX analyzer, emitting the canonical symbol-table and call-graph schema." href="/backends/codeanalyzer-ts/" />
+  <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# are not yet built. A backend that emits the canonical JSON makes that language available to every SDK." href="/contributing/add-language-backend/" />
 </CardGrid>

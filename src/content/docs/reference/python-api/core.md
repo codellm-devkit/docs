@@ -3,11 +3,9 @@ title: "Core"
 description: "Core CLDK API: the top-level entry point."
 ---
 
-The `CLDK` class is the front door to the whole library. It is a **factory**: you
-construct it once with a language, then ask it for an analysis facade over your
-project. You never instantiate `JavaAnalysis` or `PythonAnalysis` directly,
-`CLDK` hands you the correct one, and they share the same method surface, so your
-code barely changes when you switch languages.
+The `CLDK` class is the top-level entry point. Construct it with a language, then
+ask it for an `analysis` object over your project. You never instantiate
+`JavaAnalysis` or `PythonAnalysis` directly; `CLDK` hands you the correct one.
 
 ## Overview
 
@@ -18,18 +16,18 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK(language="java").analysis(project_path="commons-cli")
-# -> JavaAnalysis facade, ready to query
+# -> JavaAnalysis, ready to query
 ```
 
 `CLDK(language=...)` accepts `"java"` and `"python"` today (Go, TypeScript, Rust,
-and C are on the way). The object it returns exposes the one method you'll use for
-almost everything:
+and C are on the way). The object it returns exposes the primary method used in
+most workflows:
 
-- **`.analysis(...)`**: returns the language-specific facade
+- **`.analysis(...)`**: returns the language-specific analysis object
   ([`JavaAnalysis`](/reference/python-api/java/) or
   [`PythonAnalysis`](/reference/python-api/python/)) backed by the appropriate
-  static analysis engine. This is where ground truth comes from: a real symbol
-  table and call graph.
+  static analysis engine. This is where the symbol table and call graph are
+  produced.
 
 ```mermaid
 flowchart LR
@@ -42,9 +40,9 @@ flowchart LR
 
 **Analysis levels.** The depth of `.analysis()` is governed by `analysis_level`.
 The default, `AnalysisLevel.symbol_table`, populates classes, methods, and
-fields. Call graphs are not free: `get_call_graph`, `get_callers`, and
-`get_callees` require `AnalysisLevel.call_graph`. Set it up front when you need
-call relationships.
+fields. Call-graph computation incurs additional cost: `get_call_graph`,
+`get_callers`, and `get_callees` require `AnalysisLevel.call_graph`. Set it up
+front when call relationships are needed.
 
 ### Key `.analysis()` arguments
 
@@ -81,7 +79,7 @@ print(len(analysis.get_classes()))    # 23
 ```
 
 The first run may download the CodeAnalyzer backend JAR; later runs reuse the
-cache. From here, every method lives on the facade, see the
+cache. From here, every method lives on `analysis`; see the
 [Java API reference](/reference/python-api/java/) for the full surface.
 
 ### Construct a Python analysis
@@ -95,16 +93,15 @@ print(type(analysis).__name__)        # PythonAnalysis
 classes = analysis.get_classes()      # Dict[str, PyClass]
 ```
 
-Same two-step shape, same method names, only `language` changed. Facade methods
+Same two-step shape, same method names, only `language` changed. Methods
 are documented on the [Python API reference](/reference/python-api/python/).
 
-New here? Read [What is CLDK?](/what-is-cldk/) for the mental model and the
-[Quickstart](/quickstart/) for a five-minute tour. For task-shaped snippets see
+For an introduction, see [What is CLDK?](/what-is-cldk/) and the
+[Quickstart](/quickstart/). For task-oriented snippets, see
 [Common tasks](/guides/common-tasks/) and the
 [cocoa](/cocoa/); the [concepts](/guides/concepts/) page
-explains analysis levels and call graphs in depth, and the
-[cheat sheet](/resources/cheatsheet/) is the one-page reminder. To expose any of
-this to an agent over MCP, see [COCO MCP Toolbox](/cocoa-mcp/).
+explains analysis levels and call graphs in detail, and the
+[cheat sheet](/resources/cheatsheet/) provides a one-page summary.
 
 ## API reference
 
@@ -225,4 +222,3 @@ List
     A list of treesitter nodes.
 
 <!-- CLDK:API:END -->
-

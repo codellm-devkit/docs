@@ -25,24 +25,22 @@
   </a>
 </p>
 
-Codellm-Devkit (CLDK) is a multilingual program analysis framework that bridges the gap between traditional static analysis tools and Large Language Models (LLMs) specialized for code (CodeLLMs). Codellm-Devkit allows developers to streamline the process of transforming raw code into actionable insights by providing a unified interface for integrating outputs from various analysis tools and preparing them for effective use by CodeLLMs.
+Codellm-Devkit (CLDK) is a multilingual program analysis framework for CodeLLM workflows. It turns source code into structured program facts such as symbols, method bodies, call graphs, and data-model objects that an LLM pipeline can query.
 
-Codellm-Devkit simplifies the complex process of analyzing codebases that span multiple programming languages, making it easier to extract meaningful insights and drive LLM-based code analysis. `CLDK` achieves this through an open-source Python library that abstracts the intricacies of program analysis and LLM interactions. With this library, developer can streamline the process of transforming raw code into actionable insights by providing a unified interface for integrating outputs from various analysis tools and preparing them for effective use by CodeLLMs.
+CLDK is an open-source Python library over language-specific analysis backends. The user calls one API; the backend handles parsing, symbol resolution, and graph construction for the selected language.
 
-**The purpose of Codellm-Devkit is to enable the development and experimentation of robust analysis pipelines that harness the power of both traditional program analysis tools and CodeLLMs.**
-By providing a consistent and extensible framework, Codellm-Devkit aims to reduce the friction associated with multi-language code analysis and ensure compatibility across different analysis tools and LLM platforms.
+**The purpose of Codellm-Devkit is to help build analysis pipelines that combine program-analysis results with CodeLLMs.**
+It gives those pipelines a consistent shape across languages and analysis tools.
 
-Codellm-Devkit is designed to integrate seamlessly with a variety of popular analysis tools, such as WALA, Tree-sitter, LLVM, and CodeQL, each implemented in different languages. Codellm-Devkit acts as a crucial intermediary layer, enabling efficient and consistent communication between these tools and the CodeLLMs.
+CLDK integrates with tools such as WALA, Tree-sitter, LLVM, and CodeQL. It normalizes their outputs into typed models that downstream code can consume.
 
-Codellm-Devkit is constantly evolving to include new tools and frameworks, ensuring it remains a versatile solution for code analysis and LLM integration.
+CLDK is an ongoing IBM Research project.
 
 Codellm-Devkit is:
 
-- **Unified**: Provides a single framework for integrating multiple analysis tools and CodeLLMs, regardless of the programming languages involved.
-- **Extensible**: Designed to support new analysis tools and LLM platforms, making it adaptable to the evolving landscape of code analysis.
-- **Streamlined**: Simplifies the process of transforming raw code into structured, LLM-ready inputs, reducing the overhead typically associated with multi-language analysis.
-
-Codellm-Devkit is an ongoing project, developed at IBM Research.
+- **Unified**: one API over language-specific analysis backends.
+- **Extensible**: new backends can add languages or analysis tools.
+- **Structured**: code becomes typed models, call graphs, and other queryable artifacts.
 
 ## Contact
 
@@ -68,7 +66,7 @@ For any questions, feedback, or suggestions, please contact the authors:
 
 ## Architectural and Design Overview
 
-Below is a very high-level overview of the architectural of CLDK:
+Below is a high-level view of CLDK's architecture:
 
 
 ```mermaid
@@ -96,17 +94,17 @@ User <--> A[CLDK]
 X[‡ Yet to be implemented]
 ```
 
-The user interacts by invoking the CLDK API. The CLDK API is responsible for handling the user requests and delegating them to the appropriate language-specific modules. 
+The user invokes the CLDK API. CLDK delegates the request to the language-specific module.
 
-Each language comprises of two key components: data models and backends.
+Each language has two main components: data models and backends.
 
-1. **Data Models:** These are high level abstractions that represent the various language constructs and componentes in a structured format using pydantic. This confers a high degree of flexibility and extensibility to the models as well as allowing for easy accees of various data components via a simple dot notation. In addition, the data models are designed to be easily serializable and deserializable, making it easy to store and retrieve data from various sources.
+1. **Data Models:** Pydantic models for language constructs such as files, classes, methods, fields, and call edges. They support attribute access and serialization.
 
-2. **Analysis Backends:** These are the components that are responsible for interfacing with the various program analysis tools. The core backends are Treesitter, Javaparse, WALA, LLVM, and CodeQL. The backends are responsible for handling the user requests and delegating them to the appropriate analysis tools. The analysis tools perfrom the requisite analysis and return the results to the user. The user merely calls one of several high-level API functions such as `get_method_body`, `get_method_signature`, `get_call_graph`, etc. and the backend takes care of the rest. 
+2. **Analysis Backends:** Components that call program-analysis tools such as Treesitter, Javaparser, WALA, LLVM, and CodeQL. The user calls high-level methods such as `get_method_body`, `get_method_signature`, or `get_call_graph`; the backend runs the required analysis and returns the result.
 
-    Some langugages may have multiple backends. For example, Java has WALA, Javaparser, Treesitter, and CodeQL backends. The user has freedom to choose the backend that best suits their needs. 
+    Some languages may have multiple backends. For example, Java uses WALA, Javaparser, Treesitter, and CodeQL-backed analysis.
 
-We are currently working on implementing the retrieval and prompting components. The retrieval component will be responsible for retrieving the relevant code snippets from the codebase for RAG usecases. The prompting component will be responsible for generating the prompts for the CodeLLMs using popular prompting frameworks such as `PDL`, `Guidance`, or `LMQL`.  
+Retrieval and prompting components are still in progress. Retrieval will pull relevant code snippets for RAG use cases. Prompting will generate CodeLLM prompts with frameworks such as `PDL`, `Guidance`, or `LMQL`.
 
 ## Quick Start: Example Walkthrough
 

@@ -1,11 +1,11 @@
 ---
 title: Cheat sheet
-description: The handful of CLDK objects and methods you reach for every day (construct, symbol table, call graph, and reachability) on one skimmable page.
+description: "A single-page reference for the core CLDK objects and methods: construction, symbol table, call graph, and reachability."
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-One page, the daily moves: build one `analysis` object, then query it: the same interface for Python and Java. For the why and the walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
+A single-page reference for the common CLDK calls. Construct one `analysis` object, then query it. For background and walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
 
 ## Install
 
@@ -13,7 +13,7 @@ One page, the daily moves: build one `analysis` object, then query it: the same 
 pip install cldk
 ```
 
-Reachability uses `networkx` (a CLDK dependency, but install it explicitly if you query graphs directly):
+Reachability queries use `networkx`. It is a CLDK dependency; install it explicitly if you query graphs directly:
 
 ```bash frame="none"
 pip install cldk networkx
@@ -21,7 +21,7 @@ pip install cldk networkx
 
 ## Construct
 
-One pattern for every language: `CLDK(language=...).analysis(...)`. The analysis level decides how much gets computed.
+The same pattern applies to every language: `CLDK(language=...).analysis(...)`. The analysis level determines how much is computed.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -53,29 +53,29 @@ print(len(analysis.get_classes()), "classes")
 
 | Argument | Value | Notes |
 | --- | --- | --- |
-| `language` | `"java"` / `"python"` | Picks the analysis facade. |
+| `language` | `"java"` / `"python"` | Selects the analysis backend. |
 | `project_path` | path to checkout | The project to analyze. |
 | `analysis_level` | `AnalysisLevel.symbol_table` (default) / `AnalysisLevel.call_graph` | Call graph, callers, callees, and reachability **need** `call_graph`. |
 
 ## Symbol table
 
-The always-available layer: every class, method, and field, typed and queryable.
+The layer available at every analysis level: every class, method, and field, typed and queryable.
 
-| Method | Returns | What it gives you |
+| Method | Returns | Description |
 | --- | --- | --- |
-| `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule]` | The whole project, file by file. |
-| `get_classes()` | `Dict[str, JType \| PyClass]` | Every class/type, keyed by qualified name. |
+| `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule]` | The entire project, indexed by file. |
+| `get_classes()` | `Dict[str, JType \| PyClass]` | Every class or type, keyed by qualified name. |
 | `get_methods()` | `Dict` | Every method (Java). |
-| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | One method; `.code` is its source body. |
+| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | A single method; `.code` holds its source body. |
 
 ```python
 m = analysis.get_method(
-    "org.apache.commons.cli.OptionBuilder", "create(String)"
+    "org.apache.commons.cli.OptionBuilder", "create(java.lang.String)"
 )
-print(m.code)  # -> source body of OptionBuilder.create(String)
+print(m.code)  # -> source body of OptionBuilder.create(java.lang.String)
 ```
 
-Java adds class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, `get_implemented_interfaces(cls)`, plus `get_all_crud_operations()` and `get_all_comments()`.
+Java additionally provides class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`, along with `get_all_crud_operations()` and `get_all_comments()`.
 
 ## Call graph & reachability
 
@@ -87,14 +87,14 @@ These methods need `analysis_level=AnalysisLevel.call_graph`. The default `symbo
 | --- | --- | --- |
 | `get_call_graph()` | `networkx.DiGraph` | Edges point caller → callee. |
 | `get_call_graph_json()` | `str` | Same graph, serialized. |
-| `get_callers(target_class_name, target_method_declaration)` | `Dict` | Who calls this method. |
-| `get_callees(source_class_name, source_method_declaration)` | `Dict` | What this method calls. |
+| `get_callers(target_class_name, target_method_declaration)` | `Dict` | Methods that call this method. |
+| `get_callees(source_class_name, source_method_declaration)` | `Dict` | Methods that this method calls. |
 | `get_class_call_graph(qualified_class_name, method_signature=None)` | graph | Call graph scoped to one class (Java). |
 
 ```python
 cg = analysis.get_call_graph()          # -> networkx.DiGraph
 callers = analysis.get_callers(
-    "org.apache.commons.cli.Options", "addOption(Option)"
+    "org.apache.commons.cli.Options", "addOption(org.apache.commons.cli.Option)"
 )  # -> Dict of call sites
 ```
 
@@ -111,7 +111,7 @@ print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
 
 ## Models
 
-The typed objects each facade returns.
+The typed objects returned by each language's analysis API.
 
 | Language | Models |
 | --- | --- |
@@ -120,16 +120,15 @@ The typed objects each facade returns.
 
 ## Gotchas
 
-<Aside type="caution" title="Read these once, save yourself an hour">
+<Aside type="caution" title="Common mistakes">
 - **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` won't have call edges.
 - **Analysis is project-based.** Always pass `analysis(project_path=...)`; point it at the project root.
 </Aside>
 
-## Keep going
+## Next steps
 
 <CardGrid>
   <LinkCard title="Common tasks" description="Copy-paste snippets for each call above." href="/guides/common-tasks/" />
   <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these methods." href="/cocoa/" />
-  <LinkCard title="Python API reference" description="Every method on every analysis facade." href="/reference/python-api/" />
-  <LinkCard title="COCO MCP Toolbox" description="Expose the same analysis layer as MCP tools." href="/cocoa-mcp/" />
+  <LinkCard title="Python API reference" description="Every method on the Python SDK analysis APIs." href="/reference/python-api/" />
 </CardGrid>

@@ -1,21 +1,21 @@
 ---
-title: "Build with CLDK: A Code Context Agent called COCOA"
-description: Build COCOA (COde COntext Agent), a Claude Code plugin that grounds a coding agent in real static analysis. It runs CLDK inside Bash heredocs to answer "what calls this?" and "is this reachable?" with facts, not guesses.
+title: "Build with CLDK: COCOA Code Context Agent"
+description: Build COCOA (COde COntext Agent), a Claude Code plugin that runs CLDK inside Bash heredocs for caller, callee, reachability, and impact questions.
 ---
 
 import { Steps, Tabs, TabItem, Aside, FileTree, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
 
-A coding agent guesses about code: it greps a few files and hopes. **COCOA** (**CO**de **CO**ntext **A**gent) is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that gives it ground truth instead: before the agent answers or edits, COCOA runs CLDK inside a Bash heredoc and reads back real static analysis: who calls a method, whether a sink is reachable, what a change would break.
+**COCOA** (**CO**de **CO**ntext **A**gent) is a [Claude Code plugin](https://code.claude.com/docs/en/plugins) that runs CLDK before answering code-structure questions. It uses Bash heredocs to ask who calls a method, what a method calls, whether a sink is reachable, and which call sites a change may affect.
 
-This guide builds COCOA **by hand**, so you see every moving part of a CLDK-powered plugin: a manifest, a code-context subagent, and a couple of skills, all powered by one tiny CLDK heredoc. (The plugin's technical id stays lowercase `cocoa`, so its skills are `/cocoa:callers` and friends.)
+This guide builds COCOA manually: a manifest, a code-context subagent, and two skills, all built on the same CLDK heredoc. The plugin's technical id is the lowercase `cocoa`, so its skills are `/cocoa:callers` and `/cocoa:reachable`.
 
 <Aside type="note" title="Prerequisites">
-[Claude Code](https://code.claude.com/docs/en/plugins), `pip install cldk` available on your `PATH`, and a JDK for Java projects. Skim [What is CLDK?](/what-is-cldk/) if the `analysis` facade is new to you.
+[Claude Code](https://code.claude.com/docs/en/plugins), `pip install cldk` available on your `PATH`, and a JDK for Java projects. Skim [What is CLDK?](/what-is-cldk/) if the `analysis` object is new to you.
 </Aside>
 
 ## How cocoa works
 
-cocoa is a thin wrapper around one idea: **the agent's Bash tool already runs anything**, so cocoa just has it run CLDK in a one-shot Python heredoc and read stdout. No SDK glue, no server.
+cocoa relies on a single mechanism: Claude Code's Bash tool can run Python, so cocoa executes a one-shot CLDK script and reads its stdout. It requires no SDK integration and no running server.
 
 ```mermaid
 flowchart LR
@@ -23,17 +23,17 @@ flowchart LR
     CC -->|delegates| A["@code-context (cocoa)"]
     A -->|"Bash: python3 - <<'PYEOF'"| K[CLDK analysis]
     K -->|stdout| A
-    A -->|grounded answer| CC
+    A -->|analysis result| CC
 ```
 
-The plugin ships two kinds of component over that engine:
+The plugin provides two components on top of that engine:
 
-- a **subagent** (`code-context`): cocoa's brain, which Claude delegates to for code-understanding questions;
-- **skills** (`/cocoa:callers`, `/cocoa:reachable`): named, reusable operations you (or the agent) can invoke directly.
+- a **subagent** (`code-context`) for open-ended code-understanding questions;
+- **skills** (`/cocoa:callers`, `/cocoa:reachable`): named, reusable operations that can be invoked directly.
 
 ### The engine: CLDK in a heredoc
 
-Every cocoa component runs a variant of this. It's the [agent pattern](/guides/common-tasks/) made into a plugin:
+Every cocoa component runs a variant of this CLDK heredoc:
 
 ```bash
 python3 - <<'PYEOF'
@@ -46,23 +46,23 @@ analysis = CLDK(language="java").analysis(
     analysis_level=AnalysisLevel.call_graph,   # needed for callers/reachability
 )
 
-callers = analysis.get_callers("org.apache.commons.cli.Options", "addOption(Option)")
+callers = analysis.get_callers("org.apache.commons.cli.Options", "addOption(org.apache.commons.cli.Option)")
 for c in callers["caller_details"]:
     print(c["caller_method"].klass)
 PYEOF
 ```
 
-<Aside type="caution" title="Two things to know">
-Call-graph queries need `analysis_level=AnalysisLevel.call_graph`. And since each heredoc is a fresh process, the analysis is rebuilt each call, but CLDK caches it on disk (`<project>/.codeanalyzer`), so only the first call is slow.
+<Aside type="caution" title="Two requirements">
+Call-graph queries require `analysis_level=AnalysisLevel.call_graph`. Because each heredoc runs in a fresh process, the analysis is rebuilt on every call; CLDK caches it on disk (`<project>/.codeanalyzer`), so only the first call incurs the full cost.
 </Aside>
 
 ## COCOA in action
 
-Here's the part that matters: **once COCOA is installed you don't run CLDK yourself.** You talk to Claude Code the way you always do, and it reaches for COCOA whenever a question needs ground truth: Claude auto-delegates to the `code-context` agent based on its description, or you invoke a skill like `/cocoa:reachable` directly. Three everyday jobs it turns from guesswork into facts:
+Once COCOA is installed, work continues in Claude Code. Claude can delegate to the `code-context` agent based on the request, or a skill such as `/cocoa:reachable` can be invoked directly. Three representative cases follow.
 
-### Write a unit test that actually compiles
+### Generate a unit test from a method's callees
 
-Ask an LLM to test a method it can only half-see and you get tests that call methods that don't exist and mock the wrong collaborators. COCOA hands it the method's real body **and** the methods it actually calls, so the test targets true dependencies.
+COCOA supplies the target's source body (`get_method`) together with the methods it invokes (`get_callees`), so a generated test exercises the method's actual dependencies and signatures.
 
 ```text frame="terminal"
 you ▸ Write a unit test for DefaultParser.parse(Options, String[]).
@@ -71,47 +71,47 @@ you ▸ Write a unit test for DefaultParser.parse(Options, String[]).
   ⤷ COCOA ran CLDK: get_method (the body) + get_callees (its collaborators)
 
 Claude ▸ parse() calls Options.getOption, CommandLine.addOption, and Util.stripLeadingHyphens,
-         no external services, so nothing needs mocking. Here's a JUnit test that builds a real
-         Options, parses argv, and asserts on the resulting CommandLine: …
+         and no external services, so nothing requires mocking. Here is a JUnit test that builds
+         a real Options, parses argv, and asserts on the resulting CommandLine: …
 ```
 
-The test is grounded in what `parse()` truly does: it compiles and exercises the right paths, instead of inventing APIs.
+The test is derived from the method's resolved callees rather than from assumed APIs.
 
-### Refactor without breaking callers you forgot about
+### Assess change impact before editing
 
-About to change a signature? The unsafe move is editing the one file you happened to open. COCOA gives the agent the real fan-in first.
+Before a signature change, COCOA enumerates the method's callers (`get_callers`) so the edit can be scoped to the call sites that actually use it.
 
 ```text frame="terminal"
 you ▸ I want to change Options.addOption(Option). What will break?
 
-  ⤷ /cocoa:callers org.apache.commons.cli.Options addOption(Option)
+  ⤷ /cocoa:callers org.apache.commons.cli.Options addOption(org.apache.commons.cli.Option)
   ⤷ COCOA ran CLDK get_callers
 
-Claude ▸ 7 call sites across 4 classes use it: Options.addOption(String, boolean, String),
+Claude ▸ 7 call sites across 4 classes invoke it: Options.addOption(String, boolean, String),
          DefaultParser.handleOption, GnuParser.flatten, … I'll update exactly those and
-         leave everything else untouched. Want me to make the change?
+         leave the rest untouched. Shall I make the change?
 ```
 
-The edit covers the actual call sites: no missed caller, no surprise red build.
+The reported call sites come directly from the call graph.
 
-### Understand unfamiliar code, correctly
+### Trace control flow through the call graph
 
-New to a codebase? Instead of skimming files and hoping, let the agent map the real flow.
+To understand an unfamiliar codebase, traverse the call graph (`get_callers` / `get_callees`) instead of reading files in isolation.
 
 ```text frame="terminal"
-you ▸ I'm new here, how does option parsing actually flow?
+you ▸ How does option parsing flow through this project?
 
   ⤷ @code-context trace parsing starting at DefaultParser.parse
   ⤷ COCOA walked callers and callees via CLDK
 
 Claude ▸ DefaultParser.parse is invoked by CommandLineParser implementations; it calls
          Options.getOption, CommandLine.addOption, and Util.stripLeadingHyphens.
-         Here's the real path through the parser: …
+         Here is the resolved path through the parser: …
 ```
 
-A mental model built from the call graph, not a plausible-sounding guess.
+The trace is reconstructed from call-graph edges.
 
-> The pattern across all three: you ask a normal question, COCOA quietly runs CLDK, and the agent answers with facts. The rest of this page is how you wire that up.
+> The pattern across all three cases is the same: a prompt triggers a CLDK query, and Claude answers from the returned methods or paths. The rest of this page wires that up.
 
 ## Build the plugin
 
@@ -140,25 +140,25 @@ A mental model built from the call graph, not a plausible-sounding guess.
      "name": "cocoa",
      "displayName": "cocoa (Code Context Agent)",
      "version": "0.1.0",
-     "description": "CLDK-powered code understanding: callers, reachability, and change impact, grounded in real static analysis.",
+     "description": "CLDK-powered code context: callers, reachability, and change impact from static analysis.",
      "author": { "name": "Your Name" },
      "keywords": ["cldk", "static-analysis", "call-graph", "reachability"],
      "license": "Apache-2.0"
    }
    ```
 
-3. **Add the Code Context subagent**: `agents/code-context.md`. The frontmatter declares its name, when Claude should delegate to it, and which tools it may use (`Bash` is the one that matters, it runs the heredoc). The body teaches it the CLDK pattern.
+3. **Add the Code Context subagent**: `agents/code-context.md`. The frontmatter declares its name, when Claude should delegate to it, and which tools it may use (`Bash` is the essential one, as it runs the heredoc). The body documents the CLDK pattern the subagent should follow.
 
    ````markdown title="agents/code-context.md"
    ---
    name: code-context
-   description: Answers questions about a codebase (callers, reachability, change impact) using CLDK static analysis. Delegate here before editing unfamiliar code.
+   description: Answers codebase questions about callers, reachability, and change impact using CLDK static analysis. Delegate here before editing unfamiliar code.
    tools: Bash, Read, Grep, Glob
    model: sonnet
    ---
 
-   You are a code-context agent. You never guess about call relationships or
-   reachability, you compute them with CLDK and cite the result.
+   You are a code-context agent. Compute call relationships and reachability with
+   CLDK, then cite the result.
 
    To answer a question, run CLDK in a Python heredoc and read its stdout:
 
@@ -193,7 +193,8 @@ A mental model built from the call graph, not a plausible-sounding guess.
      ---
 
      Find all callers of the method in: "$ARGUMENTS"
-     (format: `fully.qualified.Class methodSignature`, e.g. `org.apache.commons.cli.Options addOption(Option)`)
+     (format: `fully.qualified.Class methodSignature` with fully-qualified parameter types,
+     e.g. `org.apache.commons.cli.Options addOption(org.apache.commons.cli.Option)`)
 
      Run this, substituting the class and method, and report each caller:
 
@@ -246,7 +247,7 @@ A mental model built from the call graph, not a plausible-sounding guess.
      </TabItem>
    </Tabs>
 
-5. **(Optional) Greet on session start** with a hook: `hooks/hooks.json`. Handy for reminding users the commands exist.
+5. **(Optional) Greet on session start** with a hook: `hooks/hooks.json`. Use it to remind users that the commands are available.
 
    ```json title="hooks/hooks.json"
    {
@@ -269,7 +270,7 @@ A mental model built from the call graph, not a plausible-sounding guess.
 
    ```text frame="terminal"
    > @code-context what calls Options.addOption, and can CLI.main reach CommandLine.execute?
-   > /cocoa:callers org.apache.commons.cli.Options addOption(Option)
+   > /cocoa:callers org.apache.commons.cli.Options addOption(org.apache.commons.cli.Option)
    ```
 
    Edit a `SKILL.md` and `/reload-plugins` picks it up; agent and hook changes need a session restart.
@@ -286,14 +287,13 @@ A mental model built from the call graph, not a plausible-sounding guess.
 </Steps>
 
 <Aside type="tip" title="Why a subagent *and* skills?">
-The subagent is cocoa's identity: Claude delegates open-ended "help me understand this code" work to it. The skills are sharp, named tools (`/cocoa:callers`) for when you know exactly what you want. Both run the same CLDK heredoc; you're just choosing how much autonomy to hand the model.
+The subagent is the default path for open-ended code-understanding work. The skills are named commands (`/cocoa:callers`) for specific, well-defined operations. Both run the same CLDK heredoc.
 </Aside>
 
 ## Where to go next
 
 <CardGrid>
   <LinkCard title="Common tasks" description="The individual CLDK calls cocoa's heredocs are built from." href="/guides/common-tasks/" />
-  <LinkCard title="Core concepts" description="Call graphs, reachability, and analysis levels: the facts cocoa surfaces." href="/guides/concepts/" />
+  <LinkCard title="Core concepts" description="Call graphs and analysis levels: the facts cocoa surfaces." href="/guides/concepts/" />
   <LinkCard title="Java API reference" description="Every method available inside a cocoa heredoc." href="/reference/python-api/java/" />
-  <LinkCard title="COCO MCP Toolbox" description="Prefer a cross-process tool server to an in-process plugin? Expose CLDK over MCP instead." href="/cocoa-mcp/" />
 </CardGrid>

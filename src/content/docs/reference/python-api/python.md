@@ -3,11 +3,10 @@ title: "Python API"
 description: "Program analysis for Python and related data models."
 ---
 
-Python is CLDK's second-richest analyzer. The `PythonAnalysis` facade gives you a
-typed symbol table, classes and methods, and a real call graph, the same
-ground-truth surface [cocoa](/cocoa/) leans on, exposed
-through almost the same API as [Java](/reference/python-api/java/) so you can move
-between languages without relearning anything.
+Python is CLDK's second-most complete analyzer. `PythonAnalysis` provides a
+typed symbol table, classes and methods, and a call graph through nearly the same
+API as [Java](/reference/python-api/java/). [cocoa](/cocoa/) uses these calls for
+Python code-context queries.
 
 ## Overview
 
@@ -46,7 +45,7 @@ analysis = CLDK(language="python").analysis(
 **Analysis levels.** The `analysis_level` argument controls how much is computed.
 `AnalysisLevel.symbol_table` (the default) populates classes, methods, and
 imports. `AnalysisLevel.call_graph` additionally builds the call graph that
-`get_call_graph`, `get_callers`, and `get_callees` depend on, set it when you
+`get_call_graph`, `get_callers`, and `get_callees` depend on. Set it when you
 need call relationships, as shown above.
 
 ## Worked example
@@ -98,11 +97,11 @@ method calls), and `get_class_call_graph(...)` for a class-scoped slice.
 
 See the [common tasks](/guides/common-tasks/) guide for more snippets, the
 [concepts](/guides/concepts/) page for how the pieces fit together, and the
-[cocoa](/cocoa/), the Code Context Agent plugin, for putting these calls in an agent's hands.
+[cocoa](/cocoa/), the Code Context Agent plugin, for exposing these calls to an agent.
 
 ## API reference
 
-The full generated reference for the Python analysis facade and data models
+The full generated reference for the Python analysis API and data models
 follows.
 
 <!-- CLDK:API:START -->
@@ -279,4 +278,3 @@ Python package
 _No public symbols are exposed by this module._
 
 <!-- CLDK:API:END -->
-

@@ -1,15 +1,15 @@
 ---
 title: codeanalyzer-java
-description: "A comprehensive technical reference for the Java analysis backend: WALA-based call graph construction, symbol extraction via Javaparser, and the CLI interface the Python SDK shells out to."
+description: "Technical reference for the Java analysis backend: WALA-based call graph construction, symbol extraction via Javaparser, and the CLI interface the Python SDK shells out to."
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-java** backend is the JVM-based static analysis engine powering the CLDK Python SDK's Java analysis. It combines WALA (T.J. Watson Libraries for Analysis) for semantic analysis and Javaparser for syntactic extraction, producing a unified JSON schema that the Python SDK deserializes into typed models.
+The **codeanalyzer-java** backend is the JVM-based static analysis engine that provides Java analysis for the CLDK Python SDK. It combines WALA (T.J. Watson Libraries for Analysis) for semantic analysis with Javaparser for syntactic extraction, producing a unified JSON schema that the Python SDK deserializes into typed models.
 
-## What it is
+## Overview
 
-Codeanalyzer-java is a **standalone JAR tool** that takes a Java project (or source string) and emits a JSON graph containing:
+codeanalyzer-java is a **standalone JAR tool** that takes a Java project (or a source string) and emits a JSON graph containing:
 
 - **Symbol table**: All types (classes, interfaces, enums, records), their fields, methods/constructors, and imports
 - **Call graph** (optional, at analysis level 2): Edges between callers and callees, computed via WALA's interprocedural analysis
@@ -18,13 +18,13 @@ Codeanalyzer-java is a **standalone JAR tool** that takes a Java project (or sou
 - **Comments & Javadoc**: Extracted and positioned for each entity
 - **Entry points**: Main methods and framework-identified entry points (REST endpoints, Struts actions)
 
-The Python SDK shells out to this JAR, parses the JSON, and wraps it in the `JavaAnalysis` facade, so agents query an `analysis` object without knowing the backend exists.
+The Python SDK invokes this JAR, parses the JSON, and wraps it in `JavaAnalysis`, so callers interact with an `analysis` object rather than the backend directly.
 
 ## Architecture
 
 ### Analysis pipeline
 
-The backend flows through these stages:
+The backend proceeds through the following stages:
 
 ```mermaid
 graph LR
@@ -252,7 +252,7 @@ The jar is invoked via `java -jar codeanalyzer-*.jar` with these options:
 Usage: java -jar codeanalyzer.jar [-hvV] [--no-build] [-a=<analysisLevel>] 
            [-b=<build>] [-i=<input>] [-o=<output>] [-s=<sourceAnalysis>]
 
-Convert java binary into a comprehensive system dependency graph.
+Convert a Java project into a system dependency graph.
 
   -i, --input=<input>              Path to the project root directory.
   -s, --source-analysis=<sourceAnalysis>
@@ -291,7 +291,7 @@ Convert java binary into a comprehensive system dependency graph.
 
 ### Examples
 
-**Analyze a project at symbol-table level (fast, local files only):**
+**Analyze a project at symbol-table level (local files only):**
 
 ```bash
 java -jar codeanalyzer-2.3.7.jar \
@@ -329,7 +329,7 @@ java -jar codeanalyzer-2.3.7.jar \
 
 ## How the Python SDK uses it
 
-The Python SDK (`JavaAnalysis`) automates the JAR invocation:
+The Python SDK (`JavaAnalysis`) automates JAR invocation:
 
 1. **JAR discovery**: If `analysis_backend_path` is not provided, searches the package resources for `codeanalyzer-*.jar` (bundled)
 2. **Invocation**: Calls `java -jar codeanalyzer-*.jar -i <project> -a <level> -o <tmpdir>` (or reads from stdout)
@@ -345,7 +345,7 @@ from cldk.analysis import AnalysisLevel
 # 2. JCodeanalyzer finds/downloads codeanalyzer-2.3.7.jar
 # 3. Invokes: java -jar ... -i commons-cli -a 2 -o /tmp/...
 # 4. Parses JSON -> JApplication (symbol_table + call_graph)
-# 5. Returns JavaAnalysis facade
+# 5. Returns JavaAnalysis
 
 analysis = CLDK(language="java").analysis(
     project_path="commons-cli",
@@ -354,7 +354,7 @@ analysis = CLDK(language="java").analysis(
 )
 ```
 
-If you need to point at a custom JAR location (e.g., a locally built version):
+To point at a custom JAR location (for example, a locally built version):
 
 ```python
 analysis = CLDK(language="java").analysis(
@@ -397,14 +397,14 @@ To build codeanalyzer-java from source:
 </Steps>
 
 <Aside type="note" title="Native compilation">
-You can also build a native binary with GraalVM (`./gradlew nativeCompile`), but the JAR is the standard distribution method: the SDK expects a JVM.
+A native binary can also be built with GraalVM (`./gradlew nativeCompile`). The JAR is the standard distribution method, as the SDK expects a JVM.
 </Aside>
 
 ## Schema stability
 
-The JSON schema emitted by codeanalyzer-java is **versioned**. Each output includes a `version` field (e.g., `"2.3.7"`). The Python SDK's Pydantic models (`JApplication`, `JType`, etc.) are locked to a compatible schema version. When incompatibilities arise, the SDK logs a warning or error.
+The JSON schema emitted by codeanalyzer-java is **versioned**. Each output includes a `version` field (for example, `"2.3.7"`). The Python SDK's Pydantic models (`JApplication`, `JType`, and others) are locked to a compatible schema version. On incompatibility, the SDK logs a warning or error.
 
-If you're integrating codeanalyzer-java directly (not via the Python SDK), ensure your consumer can handle the schema for the version you're using.
+When integrating codeanalyzer-java directly rather than through the Python SDK, ensure the consumer can handle the schema for the version in use.
 
 ## Troubleshooting
 
@@ -426,4 +426,4 @@ If you're integrating codeanalyzer-java directly (not via the Python SDK), ensur
 
 ---
 
-**Is codeanalyzer-java not doing what you need?** Open an [issue](https://github.com/IBM/codeanalyzer-java/issues) with details on the limitation, and see [Contributing](/contributing/) for how to extend the backend.
+To report a limitation, open an [issue](https://github.com/IBM/codeanalyzer-java/issues) with details. See [Contributing](/contributing/) for guidance on extending the backend.

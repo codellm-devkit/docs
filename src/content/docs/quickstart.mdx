@@ -1,13 +1,13 @@
 ---
 title: Quickstart
-description: Install CLDK, point it at a real Java project, and run your first analysis (classes and a call graph) in three steps.
+description: Install CLDK, run it against a Java project, and produce a first analysis (classes and a call graph) in three steps.
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK loads a project and gives you a typed `analysis` object (its classes, methods, and call graph) through **one interface that's the same across languages** (Python and Java today). This is the grounding layer that lets a code LLM reason about a real program instead of guessing about it.
+CLDK loads a project and returns a typed `analysis` object containing its classes, methods, and, when requested, a call graph. It provides program structure that a code LLM or tool can query directly.
 
-Three steps below: install, grab a sample project, and run your first analysis. By the end you'll have a typed model of [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (the recurring sample across these docs) and a real `networkx` call graph in hand.
+This guide covers three steps: install CLDK, obtain a sample project, and run an analysis. The result is a typed model of [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) and a `networkx` call graph.
 
 <Steps>
 
@@ -17,11 +17,11 @@ Three steps below: install, grab a sample project, and run your first analysis. 
    pip install cldk
    ```
 
-   That's the whole dependency. The Java backend ships with the package; you only need a JDK on your `PATH` to analyze Java projects.
+   The Java backend ships with the package. Analyzing Java projects requires only a JDK on your `PATH`.
 
 2. **Get a sample project.**
 
-   We'll analyze Apache Commons CLI. Download a release, unzip it, and remember where it landed.
+   This guide analyzes Apache Commons CLI. Download a release, unzip it, and note its location.
 
    ```shell
    wget https://github.com/apache/commons-cli/archive/refs/tags/rel/commons-cli-1.7.0.zip -O commons-cli.zip
@@ -30,12 +30,12 @@ Three steps below: install, grab a sample project, and run your first analysis. 
    ```
 
    <Aside type="note">
-   Any Java project on disk works here: point `JAVA_APP_PATH` at its root. Commons CLI is just a small, well-structured codebase that's quick to analyze.
+   Any Java project on disk works here: point `JAVA_APP_PATH` at its root. Commons CLI is a small, well-structured codebase that is quick to analyze.
    </Aside>
 
 3. **Run your first analysis.**
 
-   Build a CLDK object for Java, point it at the project, and ask for two things: how many classes it found, and the call graph. The call graph (and callers/callees) needs `analysis_level=AnalysisLevel.call_graph`: the default level only builds the symbol table.
+   Build a CLDK object for Java, point it at the project, and print two results: the class count and the call graph. Call graphs, callers, and callees require `analysis_level=AnalysisLevel.call_graph`; the default level builds only the symbol table.
 
    ```python title="first_analysis.py"
    import os
@@ -53,12 +53,12 @@ Three steps below: install, grab a sample project, and run your first analysis. 
    # DiGraph with 312 nodes and 488 edges
    ```
 
-   That's it: `analysis` is now a typed, queryable model of the whole project. `get_call_graph()` hands back a real `networkx.DiGraph`, so every "who calls whom" question is a graph query, not a guess.
+   `analysis` is now a typed, queryable model of the project. `get_call_graph()` returns a `networkx.DiGraph`, so caller and callee queries can use standard graph operations.
 
 </Steps>
 
-<Aside type="tip" title="Prefer Python?">
-The exact same shape works for a Python package: swap the language and point at the package root. Every CLDK analysis is project-based: pass `project_path`.
+<Aside type="tip" title="Analyzing Python projects">
+The same pattern applies to a Python package: change the language and point at the package root. Every CLDK analysis is project-based and takes a `project_path`.
 
 ```python
 from cldk import CLDK
@@ -73,7 +73,7 @@ print(analysis.get_call_graph())   # -> networkx.DiGraph
 ```
 </Aside>
 
-## What just happened
+## How it works
 
 ```mermaid
 flowchart LR
@@ -84,14 +84,14 @@ flowchart LR
     C --> F[get_callers / get_method]
 ```
 
-One call turned a directory of source files into a typed `analysis` facade. From here `get_method(cls, sig)` pulls a method's source body and `get_callers` / `get_callees` walk the graph. The [concepts guide](/guides/concepts/) covers the object model; the [cheat sheet](/resources/cheatsheet/) is the day-to-day method list.
+A single call converts a directory of source files into a typed `analysis` object. From there, `get_method(cls, sig)` returns a method's source body, and `get_callers` / `get_callees` traverse the graph. The [concepts guide](/guides/concepts/) covers the object model, and the [cheat sheet](/resources/cheatsheet/) lists the available methods.
 
-## Where this goes next
+## Next steps
 
-The real pattern isn't a script that prints a graph: it's an agent that *queries* one. Wrap CLDK in a Claude Code plugin and a coding agent shells out to it for grounded answers instead of guessing. That plugin is **cocoa**.
+The same calls can run behind an agent tool. **cocoa** is a Claude Code plugin that runs CLDK for callers, reachability, and change-impact questions.
 
 <CardGrid>
-  <LinkCard title="cocoa: the real pattern" description="Build a Claude Code plugin that runs CLDK to answer callers, reachability, and change impact." href="/cocoa/" />
-  <LinkCard title="What is CLDK?" description="The mental model: CLDK object → analysis facade → typed models, the same across languages." href="/what-is-cldk/" />
+  <LinkCard title="cocoa plugin" description="Build a Claude Code plugin that runs CLDK for callers, reachability, and change impact." href="/cocoa/" />
+  <LinkCard title="What is CLDK?" description="The object model: CLDK object -> analysis object -> typed models." href="/what-is-cldk/" />
   <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, build a call graph, find callers, sanitize a focal method." href="/guides/common-tasks/" />
 </CardGrid>

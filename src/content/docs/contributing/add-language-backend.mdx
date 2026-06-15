@@ -5,15 +5,15 @@ description: "Step-by-step guide to manually integrate first-class Go support in
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-This guide walks you through manually adding first-class Go support to CLDK: building the `codeanalyzer-go` backend and wiring it into the Python SDK. Unlike a fully-scaffolded approach, you'll make informed decisions about tooling, schema design, and architecture at each stage, resulting in a modular, production-grade analyzer.
+This guide describes how to add first-class Go support to CLDK by building the `codeanalyzer-go` backend and wiring it into the Python SDK. It covers the tooling, schema, and architecture decisions involved.
 
-<Aside type="tip" title="There's a skill for this">
-CLDK ships a skill that scaffolds first-class support for a new language end to end (a `codeanalyzer-<lang>` backend plus the SDK bindings) and takes you to a validated level-1 analysis on a branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). This page is the manual walkthrough behind what the skill automates.
+<Aside type="tip" title="Claude Code plugin in progress">
+CLDK ships a Claude Code plugin that scaffolds first-class support for a new language end to end: a `codeanalyzer-<lang>` backend plus SDK bindings, validated through a level-1 analysis branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). This page is the manual walkthrough behind what the plugin automates.
 </Aside>
 
 ## Architecture overview
 
-CLDK's two-layer design separates the backend analyzer (emits `analysis.json`) from the SDK frontend (a Python query facade):
+CLDK's two-layer design separates the backend analyzer (emits `analysis.json`) from the SDK frontend (a Python query API):
 
 ```mermaid
 graph LR
@@ -33,13 +33,13 @@ graph LR
 
 ### Step 1: Choose the backend tooling
 
-Before writing a line of code, select the moving parts: runtime, parser, resolver, materialization, and packaging. Go has mature, purpose-built tools for each slot.
+Before writing code, choose the runtime, parser, resolver, materialization format, and packaging. Go provides a standard tool for each of these.
 
 <Aside type="tip">
 **Recommended tooling for Go:**
 - Runtime: Go
 - Structural parser: `go/ast` (the stdlib AST, always available with the Go toolchain)
-- Resolver (Tier 1): `go/packages` + `go/types` (the standard library's source-level resolver: exact and performant)
+- Resolver (Tier 1): `go/packages` + `go/types` (the standard library's source-level resolver: precise and performant)
 - Build/deps: `go mod download` (materializes the module graph so `go/packages` can load it)
 - Packaging: `go build` → single static binary (zero runtime deps for SDK users)
 - Framework backend (Tier 2, optional): CodeQL Go pack (off by default; you implement level 1)
@@ -71,7 +71,7 @@ If not present, stop and instruct the user to install it ([golang.org/dl](https:
 
 ### Step 2: Define the Go schema
 
-Design the analyzer's data types by mirroring the canonical schema and adding Go-specific nodes. Go's structure differs from Java/Python: no classes (but structs + interfaces), methods always carry a receiver type, interfaces are structural, packages are the module unit.
+Design the analyzer's data types by mirroring the canonical schema and adding Go-specific nodes. Go's structure differs from Java and Python: it has no classes but uses structs and interfaces, methods always carry a receiver type, interfaces are structural, and packages are the module unit.
 
 #### Anchor on existing models
 
@@ -320,9 +320,9 @@ func (b *SymbolTableBuilder) buildModuleFromFile(filePath string, pkg *packages.
 }
 ```
 
-**Signature canonicalization** (the critical linchpin):
+**Signature canonicalization** (the primary identity mechanism):
 
-Define one `signatureOf()` function used everywhere:
+Define a single `signatureOf()` function and use it everywhere:
 
 ```go
 func signatureOf(pkgPath, name string, isPointerReceiver bool, receiverType string) string {
@@ -348,15 +348,15 @@ type GoCallSite struct {
 ```
 
 **Verify this stage:**
-- Run on a small fixture project (e.g., a module with 2–3 files).
+- Run on a small fixture project (e.g., a module with 2-3 files).
 - Output validates against the SDK `GoApplication` Pydantic model (you'll create that in Part 2).
 - `symbol_table` is non-empty, keyed by relative file paths.
 - A known file's `GoModule` has the expected structs/functions/call sites.
 - Re-running reuses cache for unchanged files (no rebuild).
 
-### Step 6: Call graph construction (resolver-based, cheap)
+### Step 6: Call graph construction (resolver-based)
 
-Now resolve each unresolved call site using `go/types`. This is **level 1** and cheap because the type resolver is already loaded.
+Resolve each unresolved call site using `go/types`. This is **level 1** and inexpensive because the type resolver is already loaded.
 
 For each recorded call site in every callable:
 1. Get the enclosing callable's receiver type and argument types (from the AST or the symbol table).
@@ -615,7 +615,7 @@ __all__ = [
 ]
 ```
 
-### Step 10: Create the analysis facade
+### Step 10: Create the analysis API
 
 Add `cldk/analysis/go/` with the `GoAnalysis` class and backend wrapper:
 
@@ -630,7 +630,7 @@ from cldk.analysis.go.codeanalyzer import GoCodeanalyzer
 from cldk.analysis import AnalysisLevel
 
 class GoAnalysis:
-    """Analysis facade for Go code."""
+    """Analysis API for Go code."""
 
     def __init__(
         self,
@@ -945,7 +945,7 @@ Before merging, verify:
    - Every edge's `source` and `target` are real callable signatures.
    - `nx.DiGraph` builds successfully.
 
-5. **SDK facade works:**
+5. **SDK API works:**
    ```python
    from cldk import CLDK
    cldk = CLDK(language="go")

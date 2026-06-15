@@ -222,12 +222,12 @@ html {
   background: transparent;
 }
 
-.sl-markdown-content .sl-badge.success { color: #24a148; border-color: rgba(36, 161, 72, 0.45); background: rgba(36, 161, 72, 0.12); }
-.sl-markdown-content .sl-badge.tip     { color: #009d9a; border-color: rgba(0, 157, 154, 0.45); background: rgba(0, 157, 154, 0.12); }
-.sl-markdown-content .sl-badge.caution { color: #b28600; border-color: rgba(178, 134, 0, 0.45); background: rgba(178, 134, 0, 0.12); }
-.sl-markdown-content .sl-badge.note    { color: #0f62fe; border-color: rgba(15, 98, 254, 0.45); background: rgba(15, 98, 254, 0.12); }
-.sl-markdown-content .sl-badge.default { color: #6f6f6f; border-color: rgba(111, 111, 111, 0.45); background: rgba(111, 111, 111, 0.12); }
-.sl-markdown-content .sl-badge.danger  { color: #da1e28; border-color: rgba(218, 30, 40, 0.45); background: rgba(218, 30, 40, 0.12); }
+.sl-markdown-content .sl-badge.success { color: #57b87e; border-color: rgba(36, 161, 72, 0.28); background: rgba(36, 161, 72, 0.08); }
+.sl-markdown-content .sl-badge.tip     { color: #44b3b0; border-color: rgba(0, 157, 154, 0.28); background: rgba(0, 157, 154, 0.08); }
+.sl-markdown-content .sl-badge.caution { color: #cba43a; border-color: rgba(178, 134, 0, 0.28); background: rgba(178, 134, 0, 0.09); }
+.sl-markdown-content .sl-badge.note    { color: #5b8def; border-color: rgba(15, 98, 254, 0.28); background: rgba(15, 98, 254, 0.08); }
+.sl-markdown-content .sl-badge.default { color: #9a9a9a; border-color: rgba(111, 111, 111, 0.28); background: rgba(111, 111, 111, 0.08); }
+.sl-markdown-content .sl-badge.danger  { color: #e8737a; border-color: rgba(218, 30, 40, 0.28); background: rgba(218, 30, 40, 0.08); }
 
 /* Dark mode: brighten the text so the subtle tint stays legible. */
 :root[data-theme="dark"] .sl-markdown-content .sl-badge.success { color: #42be65; }

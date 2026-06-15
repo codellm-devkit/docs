@@ -154,21 +154,10 @@ export default defineConfig({
           items: [
             { label: "Core concepts", slug: "guides/concepts", attrs: { "data-cldk-icon": "learning-16" } },
             { label: "Common tasks", slug: "guides/common-tasks", attrs: { "data-cldk-icon": "workflow-16" } },
-          ],
-        },
-        {
-          label: "Build with CLDK",
-          items: [
-            { label: "Overview", slug: "build", attrs: { "data-cldk-icon": "manual-16" } },
             {
               label: "Code Context Agent",
               slug: "cocoa",
               attrs: { "data-cldk-icon": "chat-16" },
-            },
-            {
-              label: "COCO MCP Toolbox",
-              slug: "cocoa-mcp",
-              attrs: { "data-cldk-icon": "globe-network-16" },
             },
           ],
         },

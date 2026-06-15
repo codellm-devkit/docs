@@ -1,14 +1,14 @@
 ---
 title: Examples
-description: Worked, runnable CLDK examples for Python and Java, mirrored from the SDK's own test suite, grouped by the question you're trying to answer.
+description: Runnable CLDK examples for Python and Java, grouped by analysis task.
 ---
 
 import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-These examples are taken straight from the questions CLDK's own test suite asks of real projects, so every snippet reflects behavior the SDK actually guarantees, not a hand-wave. They're grouped by task and run against the recurring samples used across these docs: a generic `my_pkg` for Python and [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java.
+These examples are derived from the CLDK SDK test suite, so each snippet reflects behavior the SDK verifies. They are grouped by task and use the recurring samples from these docs: a generic `my_pkg` for Python and [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java.
 
-<Aside type="tip" title="Same facade, two languages">
-Notice how little changes between the Python and Java pages: that's the point. You construct `CLDK(language=...).analysis(project_path=...)` and call the same methods regardless of language. Start with whichever you're analyzing.
+<Aside type="tip" title="One API, two languages">
+The Python and Java pages follow the same pattern: construct `CLDK(language=...).analysis(project_path=...)`, then call the analysis method for the required task.
 </Aside>
 
 <CardGrid>
@@ -16,11 +16,11 @@ Notice how little changes between the Python and Java pages: that's the point. Y
   <LinkCard title="Java examples" description="Symbol tables, call graphs, callers/callees, class relationships, CRUD, comments, and reachability, on Apache Commons CLI." href="/examples/java/" />
 </CardGrid>
 
-## Where these come from
+## Source
 
-Each example mirrors an assertion in the SDK test suite (`python-sdk/tests/`). If you want the canonical method list instead of worked snippets, see the [API reference](/reference/python-api/); for the conceptual model behind them, read [Core concepts](/guides/concepts/).
+Each example corresponds to an assertion in the SDK test suite (`python-sdk/tests/`). For the canonical method list rather than worked snippets, see the [API reference](/reference/python-api/); for the underlying conceptual model, see [Core concepts](/guides/concepts/).
 
 <CardGrid>
-  <LinkCard title="Common tasks" description="The same calls as a quick task-indexed cheat-set." href="/guides/common-tasks/" />
+  <LinkCard title="Common tasks" description="The same calls in a task-indexed reference." href="/guides/common-tasks/" />
   <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these calls." href="/cocoa/" />
 </CardGrid>

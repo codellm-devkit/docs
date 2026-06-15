@@ -5,7 +5,7 @@ description: "Worked examples for analyzing Python projects with CLDK: symbol ta
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They're grouped by task: setting up an analysis, querying the symbol table, walking the call graph, and inspecting the model objects. Every example reflects behavior the SDK guarantees.
+These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They are grouped by task: setting up an analysis, querying the symbol table, traversing the call graph, and inspecting the model objects. Each example reflects behavior the SDK guarantees.
 
 <Aside type="note" title="Project-based analysis">
 Python analysis is project-based: point it at a directory of importable Python files with `project_path`.
@@ -83,7 +83,7 @@ if pyclass:
 
 ### List methods in a class
 
-Iterate over all methods in a class: use this first when you land in unfamiliar code.
+Iterate over all methods declared in a class.
 
 ```python
 methods = analysis.get_methods_in_class("my_pkg.options.Options")
@@ -194,7 +194,7 @@ print(f"{cg.number_of_nodes()} methods, {cg.number_of_edges()} edges")
 
 ### Find who calls a method
 
-Use `get_callers` to find all methods that invoke a target method: the backbone of impact analysis.
+Use `get_callers` to find all methods that invoke a target method. This is the basis of impact analysis.
 
 ```python
 callers = analysis.get_callers(
@@ -207,7 +207,7 @@ print("Callers:", list(callers.keys()) if callers else "none")
 
 ### Find what a method calls
 
-Use `get_callees` to find all methods that a target method invokes: the dependency view.
+Use `get_callees` to find all methods that a target method invokes. This provides the dependency view.
 
 ```python
 callees = analysis.get_callees(
@@ -264,7 +264,7 @@ if src and sink:
 
 ## Working with the PyClass and PyCallable models
 
-CLDK returns rich model objects, not just strings. Inspect them to answer deeper questions.
+CLDK returns typed model objects rather than plain strings. Inspect these objects for detailed information about classes and callables.
 
 ### Inspect a PyClass
 
@@ -377,5 +377,5 @@ print(f"AST type: {type(ast)}")
 <CardGrid>
   <LinkCard title="Java examples" description="The same patterns for Java projects: CRUD operations, inheritance, interface implementation." href="/examples/java/" />
   <LinkCard title="Common tasks" description="The same calls as a quick task-indexed reference." href="/guides/common-tasks/" />
-  <LinkCard title="Python API reference" description="Full method signatures and docstrings for the PythonAnalysis facade." href="/reference/python-api/python/" />
+  <LinkCard title="Python API reference" description="Full method signatures and docstrings for PythonAnalysis." href="/reference/python-api/python/" />
 </CardGrid>

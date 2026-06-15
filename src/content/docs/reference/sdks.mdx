@@ -5,7 +5,7 @@ description: "CLDK frontends (the language SDKs you write against), with a matur
 
 import { Aside, Badge, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-A CLDK **SDK** (a *frontend*) is an ergonomic `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. Because the backends do all the language analysis, every SDK inherits every backend for free: the same call graphs, symbol tables, and reachability, exposed through the idioms of your language.
+A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. Because the backends perform the language analysis, each SDK exposes the same call graphs, symbol tables, and reachability data in its host language.
 
 This is the **frontend** layer. For the analyzers behind it, see the [backends overview](/backends/).
 
@@ -15,7 +15,7 @@ This is the **frontend** layer. For the analyzers behind it, see the [backends o
 
 ## Frontends (SDKs)
 
-The SDK you write against. Each is an ergonomic `analysis` API over the canonical JSON.
+The SDK you write against. Each is an `analysis` API over the canonical JSON.
 
 | SDK | Repository | Maturity |
 | --- | --- | --- |
@@ -30,7 +30,7 @@ The SDK you write against. Each is an ergonomic `analysis` API over the canonica
 <CardGrid>
   <LinkCard
     title="Python SDK"
-    description="The reference implementation. Stable and the most complete: install cldk from PyPI and query Java, Python, and TypeScript projects through one analysis facade."
+    description="The reference implementation. Install cldk from PyPI and query Java, Python, and TypeScript projects through one analysis API."
     href="/reference/python-api/"
   />
   <LinkCard
@@ -40,7 +40,7 @@ The SDK you write against. Each is an ergonomic `analysis` API over the canonica
   />
   <LinkCard
     title="Add a frontend"
-    description="Help wanted. A new frontend inherits every backend for free; see the roadmap and starting points for a native SDK."
+    description="Help wanted. A new frontend can consume every existing backend; see the roadmap and starting points for a native SDK."
     href="/contributing/rust-frontend/"
   />
 </CardGrid>
@@ -51,10 +51,10 @@ A CLDK skill scaffolds a whole new language (a `codeanalyzer-<lang>` backend plu
 
 ## Same contract, every language
 
-Each SDK speaks the same `analysis` vocabulary because they all read the one schema the backends serialize:
+Each SDK exposes the same `analysis` vocabulary because they all read the single schema the backends serialize:
 
-- `CLDK(language=...).analysis(project_path=...)` to construct the facade.
-- The core methods (`get_symbol_table`, `get_call_graph`, `get_callers`, `get_callees`, and friends) return the same typed models.
-- Adding a backend lights the new language up across **every** SDK at once.
+- `CLDK(language=...).analysis(project_path=...)` constructs the analysis object.
+- The core methods (`get_symbol_table`, `get_call_graph`, `get_callers`, `get_callees`, and related calls) return the same typed models.
+- Adding a backend makes the new language available to every SDK that consumes the shared schema.
 
-The [Python SDK](/reference/python-api/) is stable and the place to start. The [TypeScript SDK](https://github.com/codellm-devkit/typescript-sdk) is experimental and evolving. The Java, Rust, and Go frontends are unbuilt: see [Add a Rust frontend](/contributing/rust-frontend/) for the shape a native SDK takes.
+The [Python SDK](/reference/python-api/) is stable and the recommended starting point. The [TypeScript SDK](https://github.com/codellm-devkit/typescript-sdk) is experimental and evolving. The Java, Rust, and Go frontends are not yet built; see [Add a Rust frontend](/contributing/rust-frontend/) for the form a native SDK takes.

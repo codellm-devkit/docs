@@ -3,10 +3,9 @@ title: "Java API"
 description: "Program analysis for Java and related data models."
 ---
 
-Java is CLDK's most complete analyzer. The `JavaAnalysis` facade gives you a
-typed symbol table, a real call graph, subclass/interface queries,
-CRUD/data-access discovery, and comments, everything the
-[cocoa](/cocoa/) builds on.
+Java is CLDK's most complete analyzer. `JavaAnalysis` provides a typed symbol
+table, call graph, subclass/interface queries, CRUD/data-access discovery, and
+comments. [cocoa](/cocoa/) builds on these calls.
 
 ## Overview
 
@@ -27,7 +26,7 @@ flowchart LR
 **Analysis levels.** The `analysis_level` argument controls how much is computed.
 `AnalysisLevel.symbol_table` (the default) populates classes, methods, and
 fields. `AnalysisLevel.call_graph` additionally builds the call graph that
-`get_call_graph`, `get_callers`, and `get_callees` rely on, set it when you need
+`get_call_graph`, `get_callers`, and `get_callees` rely on. Set it when you need
 call relationships:
 
 ```python
@@ -74,11 +73,11 @@ callers = analysis.get_callers(
 ```
 
 See the [common tasks](/guides/common-tasks/) guide for more snippets, and the
-[cocoa](/cocoa/), the Code Context Agent plugin, for putting these calls in an agent's hands.
+[cocoa](/cocoa/), the Code Context Agent plugin, for exposing these calls to an agent.
 
 ## API reference
 
-The full generated reference for the Java analysis facade and data models
+The full generated reference for the Java analysis API and data models
 follows.
 
 <!-- CLDK:API:START -->
@@ -1322,4 +1321,3 @@ validate_source(symbol_table) -> Dict[str, JCompilationUnit]
 ```
 
 <!-- CLDK:API:END -->
-

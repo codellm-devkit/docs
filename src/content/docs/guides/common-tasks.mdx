@@ -1,19 +1,19 @@
 ---
 title: Common tasks
-description: A cookbook of copy-paste CLDK snippets for the analysis questions you ask every day, each with the exact Python and Java call and the result it returns.
+description: Copy-paste CLDK snippets for common analysis questions, with Python and Java calls and example results.
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-If [cocoa](/cocoa/) is the cookbook, this is the spice rack. Each task below is one question you ask a codebase, answered with the verified CLDK call and the result it returns: input above, output as a trailing comment. Every example runs against [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`), the recurring sample across these docs, with a generic `my_pkg` for Python.
+This page is a task index. Each section states a codebase question, then shows the corresponding CLDK call and the shape of its result: the call appears first, and the output follows as a trailing comment. Java examples use [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`); Python examples use a generic `my_pkg`.
 
-<Aside type="tip" title="One facade, many questions">
-Build the `analysis` object once and reuse it. The default analysis level is `symbol_table`; anything touching the call graph (callers, callees, reachability) needs `analysis_level=AnalysisLevel.call_graph`. See [Concepts](/guides/concepts/) for what each level populates.
+<Aside type="tip" title="Build once, query many times">
+Construct the `analysis` object once and reuse it. The default analysis level is `symbol_table`; any query that touches the call graph (callers, callees) requires `analysis_level=AnalysisLevel.call_graph`. See [Concepts](/guides/concepts/) for what each level populates.
 </Aside>
 
 ## List all methods in a class
 
-Enumerate every method on a class: the first thing you do when you land in unfamiliar code.
+Enumerate every method declared on a class.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -41,10 +41,11 @@ Enumerate every method on a class: the first thing you do when you land in unfam
     methods = analysis.get_methods()[klass]
     for signature in methods:
         print(signature)
-    # addOption(Option)
-    # addOption(String, boolean, String)
-    # getOption(String)
-    # hasOption(String)
+    # Parameter types in each signature are fully qualified:
+    # addOption(org.apache.commons.cli.Option)
+    # addOption(java.lang.String, boolean, java.lang.String)
+    # getOption(java.lang.String)
+    # hasOption(java.lang.String)
     # ...
     ```
   </TabItem>
@@ -52,7 +53,7 @@ Enumerate every method on a class: the first thing you do when you land in unfam
 
 ## Get a method's source body
 
-Pull the exact source of one method by its qualified class name and signature: no file reading, no line-range guessing.
+Retrieve the exact source of a single method by its qualified class name and signature, without reading files or tracking line ranges.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -71,7 +72,7 @@ Pull the exact source of one method by its qualified class name and signature: n
     ```python
     method = analysis.get_method(
         "org.apache.commons.cli.Options",
-        "addOption(Option)",
+        "addOption(org.apache.commons.cli.Option)",
     )
     print(method.code)
     # public Options addOption(Option opt) {
@@ -89,7 +90,7 @@ Pull the exact source of one method by its qualified class name and signature: n
 
 ## Build a call graph
 
-The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**. It powers callers, callees, and reachability, so it requires the `call_graph` analysis level.
+The call graph is a `networkx.DiGraph` whose edges point from **caller** to **callee**. It underpins the callers and callees queries and therefore requires the `call_graph` analysis level.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -126,7 +127,7 @@ The call graph is a `networkx.DiGraph` with edges pointing **caller → callee**
 
 ## Find who calls a method
 
-Impact analysis: *"if I change this, what breaks?"* `get_callers` returns the set of methods that invoke the target.
+Impact analysis. `get_callers` returns the set of methods that invoke the target.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -143,22 +144,22 @@ Impact analysis: *"if I change this, what breaks?"* `get_callers` returns the se
     ```python
     callers = analysis.get_callers(
         "org.apache.commons.cli.Options",
-        "addOption(Option)",
+        "addOption(org.apache.commons.cli.Option)",
     )
     print(list(callers))
-    # ['org.apache.commons.cli.Options.addOption(String, boolean, String)',
+    # ['org.apache.commons.cli.Options.addOption(java.lang.String, boolean, java.lang.String)',
     #  'org.apache.commons.cli.DefaultParser.handleOption(...)', ...]
     ```
   </TabItem>
 </Tabs>
 
 <Aside type="tip" title="Inspect the shape once">
-`get_callers`/`get_callees` return dictionaries whose exact keys depend on your CLDK and backend version. Print one result with `print(callers)` (or `import json; print(json.dumps(callers, default=str, indent=2))`) the first time you wire this up, then index with confidence.
+`get_callers`/`get_callees` return dictionaries whose exact keys depend on your CLDK and backend version. Print one result with `print(callers)` (or `import json; print(json.dumps(callers, default=str, indent=2))`) the first time you wire this up, then index the fields your version returns.
 </Aside>
 
 ## Find what a method calls
 
-The dependency view: *"what does this method reach out to?"* `get_callees` is the mirror of `get_callers`.
+The dependency view. `get_callees` is the inverse of `get_callers`, returning the methods that the target invokes.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -175,11 +176,11 @@ The dependency view: *"what does this method reach out to?"* `get_callees` is th
     ```python
     callees = analysis.get_callees(
         "org.apache.commons.cli.DefaultParser",
-        "parse(Options, String[])",
+        "parse(org.apache.commons.cli.Options, java.lang.String[])",
     )
     print(list(callees))
-    # ['org.apache.commons.cli.Options.getOption(String)',
-    #  'org.apache.commons.cli.CommandLine.addOption(Option)', ...]
+    # ['org.apache.commons.cli.Options.getOption(java.lang.String)',
+    #  'org.apache.commons.cli.CommandLine.addOption(org.apache.commons.cli.Option)', ...]
     ```
   </TabItem>
 </Tabs>
@@ -211,18 +212,18 @@ In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`
 </Tabs>
 
 <Aside type="note">
-Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`) are part of the **Java** facade. For Python, read base classes off the `PyClass` model instead, as shown above.
+Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`) are part of the **Java** API. For Python, read base classes off the `PyClass` model instead, as shown above.
 </Aside>
 
 ## Find data-access / CRUD operations
 
-Locate where the code reads or writes persistent data: useful for security triage and data-flow questions. This is a **Java-only** capability.
+Locate where the code reads or writes persistent data. This is useful for security triage and data-flow analysis, and is a **Java-only** capability.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
     ```python
     # Not available. CRUD-operation extraction (get_all_crud_operations)
-    # is part of the Java analysis facade only.
+    # is part of the Java analysis API only.
     ```
   </TabItem>
   <TabItem label="Java">
@@ -237,45 +238,11 @@ Locate where the code reads or writes persistent data: useful for security triag
   </TabItem>
 </Tabs>
 
-## Compute reachability
-
-There is **no** `is_reachable()` method: reachability is a `networkx` query over the call graph CLDK hands you. Node identity is backend/version dependent, so locate endpoints by scanning node metadata once, then ask `networkx` for a path.
-
-```python
-import networkx as nx
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-
-analysis = CLDK(language="java").analysis(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-)
-cg = analysis.get_call_graph()
-
-# Inspect one node ONCE to learn the metadata schema for your version:
-# print(list(cg.nodes(data=True))[0])
-
-def find_node(class_name, method_decl):
-    for node, data in cg.nodes(data=True):
-        if class_name in str(data) and method_decl in str(data):
-            return node
-    return None
-
-src = find_node("org.apache.commons.cli.CLI", "main(String[])")
-sink = find_node("org.apache.commons.cli.CommandLine", "execute(String)")
-print(nx.has_path(cg, src, sink))
-# False  -> the sink is not reachable from this entry point
-```
-
-<Aside type="note">
-`nx.has_path` answers yes/no; reach for `nx.shortest_path(cg, src, sink)` or `nx.all_simple_paths(cg, src, sink)` when you need the actual call chain: the backbone of source-to-sink triage in [cocoa](/cocoa/).
-</Aside>
-
 ## Where to go next
 
 <CardGrid>
   <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these calls." href="/cocoa/" />
-  <LinkCard title="Core concepts" description="Analysis levels, call graphs, and reachability explained." href="/guides/concepts/" />
-  <LinkCard title="Java API reference" description="Every method on the richest analysis facade." href="/reference/python-api/java/" />
-  <LinkCard title="Python API reference" description="The Python analysis facade in full." href="/reference/python-api/python/" />
+  <LinkCard title="Core concepts" description="Analysis levels and call graphs explained." href="/guides/concepts/" />
+  <LinkCard title="Java API reference" description="Every method on the Java analysis API." href="/reference/python-api/java/" />
+  <LinkCard title="Python API reference" description="The Python analysis API in full." href="/reference/python-api/python/" />
 </CardGrid>

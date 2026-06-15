@@ -5,7 +5,7 @@ description: "Real, runnable Java examples extracted from the CLDK test suite: s
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-This page mirrors the CLDK SDK test suite, turning verified assertions into illustrative examples. Each snippet below runs against a real codebase (the recurring sample is [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/), `project_path="commons-cli"`), exercises one capability, and shows the exact output the SDK returns. Copy any example, substitute your own project path, and you have working code.
+These examples are derived from the CLDK SDK test suite. Each snippet runs against a real codebase (the recurring sample is [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/), `project_path="commons-cli"`), exercises a single capability, and shows the output the SDK returns. To adapt an example, substitute your own project path.
 
 ## Set up the analysis
 
@@ -83,7 +83,7 @@ Retrieve a method's full declaration and source code body by class name and meth
 ```python
 method = analysis.get_method(
     "org.apache.commons.cli.Options",
-    "addOption(Option)"
+    "addOption(org.apache.commons.cli.Option)"
 )
 print(method.declaration)
 print(method.code)
@@ -108,7 +108,7 @@ Retrieve the list of parameters for a method, including their types and location
 ```python
 params = analysis.get_method_parameters(
     "org.apache.commons.cli.Options",
-    "addOption(Option)"
+    "addOption(org.apache.commons.cli.Option)"
 )
 print(len(params))
 # 1
@@ -137,7 +137,7 @@ for field in fields:
 
 ## Call graph: caller and callee relationships
 
-To query who calls whom, initialize the analysis at `call_graph` level: this builds the `networkx.DiGraph` that powers the next sections.
+To query caller and callee relationships, initialize the analysis at `call_graph` level. This builds the `networkx.DiGraph` used in the following sections.
 
 ### Get the call graph
 
@@ -164,12 +164,12 @@ for source, target, data in cg.edges(data=True):
 
 ### Get all callers of a method
 
-Find every method that invokes a target method (impact analysis: "if I change this, what breaks?").
+Find every method that invokes a target method. This supports impact analysis: determining which callers are affected by a change to the target.
 
 ```python
 callers = analysis.get_callers(
     "org.apache.commons.cli.Options",
-    "addOption(Option)"
+    "addOption(org.apache.commons.cli.Option)"
 )
 print(len(callers["caller_details"]))
 # 18
@@ -183,12 +183,12 @@ for detail in callers["caller_details"]:
 
 ### Get all callees of a method
 
-Find every method that a target method invokes (dependency analysis: "what does this call?").
+Find every method that a target method invokes. This supports dependency analysis: identifying the methods a given method depends on.
 
 ```python
 callees = analysis.get_callees(
     "org.apache.commons.cli.Options",
-    "addOption(Option)"
+    "addOption(org.apache.commons.cli.Option)"
 )
 print(len(callees["callee_details"]))
 # 2
@@ -342,7 +342,7 @@ for file_path, doc_list in docstrings.items():
 
 ## Reachability: graph queries
 
-Use the call graph with `networkx` to answer reachability questions: "can execution flow from method A to method B?"
+Use the call graph with `networkx` to answer reachability questions, such as whether execution can flow from one method to another.
 
 ```python
 import networkx as nx
@@ -355,8 +355,8 @@ analysis = CLDK(language="java").analysis(
 
 cg = analysis.get_call_graph()
 
-# Query: Is method B reachable from method A?
-source = "org.apache.commons.cli.Options.addOption(Option)"
+# Is the target method reachable from the source method?
+source = "org.apache.commons.cli.Options.addOption(org.apache.commons.cli.Option)"
 target = "org.apache.commons.cli.Option.getKey()"
 
 is_reachable = nx.has_path(cg, source, target)
@@ -364,7 +364,7 @@ print(is_reachable)
 # True
 
 # All nodes reachable from a source within k hops
-source = "org.apache.commons.cli.DefaultParser.parse(String[])"
+source = "org.apache.commons.cli.DefaultParser.parse(java.lang.String[])"
 reachable_nodes = nx.descendants(cg, source)
 print(len(reachable_nodes), "methods reachable from parse()")
 # 67 methods reachable from parse()

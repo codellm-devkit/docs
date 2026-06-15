@@ -5,11 +5,11 @@ description: "The CLDK TypeScript/TSX backend: emits the canonical symbol-table 
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-ts** backend analyzes TypeScript and TSX codebases and emits the canonical CLDK `analysis.json`: the same symbol-table and call-graph schema that Python and Java analyses produce. It is a standalone binary that plugs into the CLDK Python SDK.
+The **codeanalyzer-ts** backend analyzes TypeScript and TSX codebases and emits the canonical CLDK `analysis.json`: the same symbol-table and call-graph schema that the Python and Java analyses produce. It is a standalone binary that integrates with the CLDK Python SDK.
 
 ## Architecture
 
-codeanalyzer-ts uses **ts-morph** (the TypeScript compiler API) to parse and resolve a TypeScript project in a single pass. The same `TypeChecker` instance that builds the symbol table also resolves call targets, making the call-graph derivation cheap and precise.
+codeanalyzer-ts uses **ts-morph** (the TypeScript compiler API) to parse and resolve a TypeScript project in a single pass. The same `TypeChecker` instance that builds the symbol table resolves call targets, so call-graph derivation reuses existing resolution and is precise.
 
 ```mermaid
 flowchart LR
@@ -23,7 +23,7 @@ flowchart LR
 ```
 
 ### Materialization
-Before parsing, the analyzer ensures `node_modules` is present (via `npm install`) so the TypeChecker can resolve types. Omit this with `--no-build` if you have a prepared `node_modules`.
+Before parsing, the analyzer ensures `node_modules` is present (via `npm install`) so the TypeChecker can resolve types. Skip this step with `--no-build` when `node_modules` is already prepared.
 
 ### Symbol table (Level 1 default)
 Walks the ts-morph AST and indexes all declarations (classes, methods, interfaces, enums, type aliases, namespaces, functions) into a flat `symbol_table` keyed by project-relative file paths.
@@ -39,7 +39,7 @@ The call graph maintains the no-dangling-edges invariant: every edge endpoint is
 
 ## Installing
 
-The fastest way to get the `cants` CLI is from **PyPI** or **Homebrew**. Both ship a prebuilt, self-contained binary for your platform — no Bun or Node is needed to *run* it:
+The `cants` CLI is available from **PyPI** and **Homebrew**. Both distribute a prebuilt, self-contained binary for the target platform; neither Bun nor Node is required to run it.
 
 <Tabs>
   <TabItem label="pip">
@@ -56,15 +56,15 @@ The fastest way to get the `cants` CLI is from **PyPI** or **Homebrew**. Both sh
   </TabItem>
 </Tabs>
 
-The PyPI package `codeanalyzer-typescript` is also what the CLDK Python SDK depends on to locate this backend — it exposes `bin_path()` to point at the bundled binary.
+The CLDK Python SDK depends on the PyPI package `codeanalyzer-typescript` to locate this backend; the package exposes `bin_path()`, which returns the path to the bundled binary.
 
 <Aside type="note">
-The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on your `PATH` is **`cants`** — the analyzer's short binary name. Run `cants`, not `codeanalyzer-typescript`.
+The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on `PATH` is **`cants`**, the analyzer's binary name. Run `cants`, not `codeanalyzer-typescript`.
 </Aside>
 
 ### Building from source
 
-To hack on the analyzer, build it with **bun** ≥ 1.3 (Node ≥ 20 also works to run from source). **npm** must be on PATH to materialize dependencies:
+To develop the analyzer, build it with **bun** ≥ 1.3 (Node ≥ 20 also works to run from source). **npm** must be on PATH to materialize dependencies:
 
 ```bash
 cd codeanalyzer-ts
@@ -264,7 +264,7 @@ The `call_graph` is an array of edges (`TSCallEdge`) in identity-only form: each
 
 ### External symbols (phantom nodes)
 
-When the analyzer encounters a call to an imported library function, it creates a **phantom node** (a synthetic `TSExternalSymbol`) so the call-graph edge points somewhere real:
+When the analyzer encounters a call to an imported library function, it creates a **phantom node** (a synthetic `TSExternalSymbol`) so the call-graph edge resolves to a defined endpoint:
 
 ```ts
 {
@@ -276,11 +276,11 @@ When the analyzer encounters a call to an imported library function, it creates 
 }
 ```
 
-Disable phantoms with `--no-phantoms` if you want the graph to be internal-only.
+Disable phantoms with `--no-phantoms` to restrict the graph to internal nodes only.
 
 ## TypeScript-native features
 
-Unlike Python or Java, TypeScript brings several language-specific constructs that codeanalyzer-ts models as first-class citizens:
+TypeScript includes several language-specific constructs that codeanalyzer-ts models as first-class entities:
 
 | Feature | Support | Details |
 |---------|---------|---------|
@@ -297,7 +297,7 @@ Unlike Python or Java, TypeScript brings several language-specific constructs th
 
 ## Python SDK integration
 
-TypeScript support in the Python SDK is **coming soon**. When available, you will be able to analyze TypeScript projects with the same `CLDK` facade as Python and Java:
+TypeScript support in the Python SDK is **in development**. Once available, TypeScript projects will be analyzable through the same `CLDK` analysis API as Python and Java:
 
 ```python
 from cldk import CLDK
@@ -308,7 +308,7 @@ analysis = CLDK(language="typescript").analysis(
     analysis_level=AnalysisLevel.call_graph,
 )
 
-# All familiar methods:
+# Standard analysis methods:
 print(analysis.get_classes())      # Dict[str, TSClass]
 graph = analysis.get_call_graph()  # networkx.DiGraph
 ```
@@ -343,7 +343,7 @@ Use `--lazy` (default) to reuse the cache, or `--target-files <list>` to update 
 - **Call graph build**: O(c) in call sites; the checker resolution is constant-time per site
 - **Dataflow enrichment (planned, Jelly)**: not yet implemented; cost will depend on Jelly's analysis time
 
-For large projects (>100k LOC), expect analysis to take seconds to tens of seconds.
+For large projects (>100k LOC), analysis typically takes seconds to tens of seconds.
 
 ## Current maturity
 
@@ -355,8 +355,8 @@ For large projects (>100k LOC), expect analysis to take seconds to tens of secon
 ## See also
 
 <CardGrid>
-  <LinkCard title="What is CLDK?" href="/what-is-cldk/" description="One unified analysis facade across languages." />
-  <LinkCard title="Quickstart" href="/quickstart/" description="Get CLDK running on your first project." />
+  <LinkCard title="What is CLDK?" href="/what-is-cldk/" description="A single analysis API across supported languages." />
+  <LinkCard title="Quickstart" href="/quickstart/" description="Run CLDK on a first project." />
   <LinkCard title="Backends overview" href="/backends/" description="All CLDK analysis backends." />
   <LinkCard title="Contributing: Add a language" href="/contributing/add-language-backend/" description="Scaffold a new backend like codeanalyzer-ts." />
 </CardGrid>

@@ -1,23 +1,23 @@
 ---
 title: What is CLDK?
-description: CLDK gives you one typed analysis facade over your code (call graphs, symbol tables, reachability), the same interface across Python and Java.
+description: CLDK turns a project into typed symbols and call graphs behind a single analysis object.
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK (CodeLLM-DevKit) is a Python library that loads a codebase and hands you back a typed object model of it (classes, methods, fields, and call graphs) through **one consistent `analysis` object**. The interface is the same whether the code is Python or Java: the same methods, the same typed results. You stop parsing files by hand and start asking questions like "what calls this method?" or "is this sink reachable from that entry point?" and getting real answers.
+CLDK (CodeLLM-DevKit) is a Python library that loads a codebase and exposes typed models of its classes, methods, fields, and call graph. All queries are issued through a single `analysis` object, which answers structural questions (such as which methods call a given method, or which methods it invokes) without manual file parsing or ad hoc composition of external tools.
 
-## The mental model
+## The programming model
 
-Every CLDK program follows the same three-step shape: pick a language, build an analysis facade, then query typed models.
+Every CLDK program follows the same three steps: select a language, analyze a project, and query the resulting typed models.
 
 <Steps>
 
-1. **Construct a `CLDK` object** for your language: `CLDK(language="java")`. This selects the analysis backend but does no work yet.
+1. **Construct a `CLDK` object** for the target language, for example `CLDK(language="java")`. This selects the analysis backend; no analysis is performed yet.
 
-2. **Build the analysis facade** by pointing it at a project: `.analysis(project_path="commons-cli")`. This is where the backend engine runs and produces the program model.
+2. **Build the `analysis` object** by pointing it at a project: `.analysis(project_path="commons-cli")`. The backend runs at this step and produces the program model.
 
-3. **Query typed models** off that facade: `get_classes()`, `get_method(...)`, `get_call_graph()`. Everything you get back is a typed object you can read, walk, and feed to an LLM.
+3. **Query the typed models** with `get_classes()`, `get_method(...)`, `get_call_graph()`, and related methods. The returned objects can be read, traversed, serialized, or passed to other tools.
 
 </Steps>
 
@@ -27,7 +27,7 @@ Every CLDK program follows the same three-step shape: pick a language, build an 
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-# 1. pick the language  2. build the facade  3. query
+# 1. select the language  2. analyze the project  3. query
 analysis = CLDK(language="java").analysis(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
@@ -57,49 +57,39 @@ print(analysis.get_call_graph())          # -> networkx.DiGraph
 </Tabs>
 
 <Aside type="note" title="Analysis levels">
-  `analysis_level` defaults to `AnalysisLevel.symbol_table`, which gives you classes, methods, and fields. Call graphs, callers, and callees require `AnalysisLevel.call_graph`: pass it explicitly when you need who-calls-whom.
+  `analysis_level` defaults to `AnalysisLevel.symbol_table`, which resolves classes, methods, and fields. Call graphs, callers, and callees require `AnalysisLevel.call_graph`; pass it explicitly when call relationships are needed.
 </Aside>
 
-The flow is the same regardless of language; only the engine behind the facade changes:
+A language-specific backend sits behind the same API:
 
 ```mermaid
 flowchart LR
     A["CLDK(language)"] --> B["analysis(project_path)"]
-    B --> C["Typed models + schema"]
+    B --> C["Typed program model"]
     C --> D["Symbol table"]
     C --> E["Call graph"]
     C --> F["Class structure / CRUD"]
-    B -.-> J["Java: CodeAnalyzer / WALA"]
-    B -.-> P["Python: Jedi (+ optional CodeQL)"]
-    B -.-> TS["TypeScript (coming soon)"]
-    B -.-> GO["Go (coming soon)"]
-    B -.-> RS["Rust (coming soon)"]
-    classDef planned stroke-dasharray:5 4,opacity:0.55;
-    class TS,GO,RS planned;
 ```
 
-Each language plugs in its own analysis engine (Java uses CodeAnalyzer over WALA, Python uses Jedi with optional CodeQL), but you query them through the **same facade**, so your code barely changes when you switch languages.
-
-## Why it matters for agents
-
-An agent asked "what calls this method?" without CLDK has to *crawl*: reading and grepping file after file, spending tokens to approximate an answer it still can't guarantee. CLDK turns that into a single deterministic lookup against the real program. Give the agent a way to run CLDK (like the [cocoa](/cocoa/) plugin) and it stops crawling and starts querying: reachability is a `networkx` graph query, callers are `get_callers`, and every claim is grounded in ground truth. That difference (one precise call versus a token-heavy crawl) is why agents reach for CLDK.
-
-[Build cocoa →](/cocoa/)
+The backend is selected by language: Java uses CodeAnalyzer over WALA, and Python uses its own static-analysis engine. The query code is largely identical across languages; only the backend differs.
 
 ## Language coverage
 
-You query every language through the same `analysis` facade; only the engine behind it changes. Python and Java are both first-class today (Java's backend currently goes deepest, with class hierarchy and CRUD analysis). More languages (Go, TypeScript, Rust, and C) are on the way.
+Every supported language is queried through the same `analysis` API, backed by a language-specific engine. Java and Python are both supported today, with Java offering the deepest analysis, including class-hierarchy and CRUD extraction. Additional languages (TypeScript, Go, and Rust) are under active development.
 
-| Language | Status | Symbol table | Call graph / callers / callees |
-| -------- | ------ | ------------ | ------------------------------ |
-| Java     | Full   | Yes          | Yes                            |
-| Python   | Strong | Yes          | Yes                            |
+| Language   | Status         | Symbol table | Call graph / callers / callees |
+| ---------- | -------------- | ------------ | ------------------------------ |
+| Java       | Supported      | Yes          | Yes                            |
+| Python     | Supported      | Yes          | Yes                            |
+| TypeScript | In development | Planned      | Planned                        |
+| Go         | In development | Planned      | Planned                        |
+| Rust       | In development | Planned      | Planned                        |
 
 ## Next steps
 
 <CardGrid>
   <LinkCard title="Quickstart" description="Install CLDK and run your first analysis in a couple of minutes." href="/quickstart/" />
-  <LinkCard title="Core concepts" description="Symbol tables, call graphs, reachability, and analysis levels in depth." href="/guides/concepts/" />
+  <LinkCard title="Core concepts" description="Symbol tables, call graphs, and analysis levels." href="/guides/concepts/" />
   <LinkCard title="Common tasks" description="Task-oriented snippets: get methods, build a call graph, find callers." href="/guides/common-tasks/" />
-  <LinkCard title="API reference" description="Per-language analysis facades and the typed data models." href="/reference/python-api/" />
+  <LinkCard title="API reference" description="Per-language analysis APIs and the typed data models." href="/reference/python-api/" />
 </CardGrid>

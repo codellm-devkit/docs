@@ -5,10 +5,10 @@ description: "Extend CLDK along two axes: add a language backend that emits the 
 
 import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-CLDK extends along two clean axes, and they're independent. Understanding the split is the whole game.
+CLDK has two independent extension points: language backends and frontend SDKs.
 
-<Aside type="tip" title="There's a skill for adding language packs">
-Adding a whole new language (a `codeanalyzer-<lang>` backend plus the SDK bindings) is scaffolded end to end by a CLDK skill that takes you to a validated level-1 analysis on a branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). The guides below are the manual walkthroughs behind what it automates.
+<Aside type="tip" title="Language backend scaffolding">
+The `cldk-language-pack` skill scaffolds a `codeanalyzer-<lang>` backend plus SDK bindings through a validated level-1 analysis branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). The guides below are manual walkthroughs of that workflow.
 </Aside>
 
 ```mermaid
@@ -27,13 +27,13 @@ flowchart LR
     Backends -->|typed JSON| Frontends
 ```
 
-- **A backend** teaches CLDK to *understand a new language*. It parses source, builds a symbol table and call graph, and serializes them to the canonical JSON schema. Backends are standalone tools (the [codeanalyzer-* family](/backends/)) and can be written in whatever language suits the analysis: Python analysis in Python, Java analysis in Java, and so on.
-- **A frontend** is an SDK that *consumes* that JSON and exposes an ergonomic `analysis` API. Today there's one frontend: the Python SDK. A second (Rust) is on the roadmap.
+- **A backend** adds support for a new language. It parses source, builds a symbol table and call graph, and serializes them to the canonical JSON schema. Backends are standalone tools (the [codeanalyzer-* family](/backends/)) and may be implemented in whichever language suits the analysis: Python analysis in Python, Java analysis in Java, and so on.
+- **A frontend** is an SDK that consumes that JSON and exposes an `analysis` API. One frontend exists today, the Python SDK; a Rust frontend is on the roadmap.
 
-Add a backend and every existing frontend can analyze the new language. Add a frontend and it inherits every existing backend.
+Adding a backend makes the new language available to every existing frontend. Adding a frontend makes every existing backend available through it.
 
-<Aside type="tip" title="There's a skill for this">
-The maintainers use the [`cldk-language-pack`](https://github.com/codellm-devkit/developer-skillset/tree/main/cldk-language-pack) skill to scaffold a new language end-to-end. These guides instead walk the **manual** path (the same stages, done by hand) so you understand every moving part.
+<Aside type="tip" title="Scaffolding skill">
+The maintainers use the [`cldk-language-pack`](https://github.com/codellm-devkit/developer-skillset/tree/main/cldk-language-pack) skill to scaffold a new language end to end. These guides describe the **manual** path through the same stages.
 </Aside>
 
 ## Guides
