@@ -167,11 +167,13 @@ All Py* models support:
 
 ## CLI interface
 
-The backend ships a command-line tool `codeanalyzer`, installed by `pip install codeanalyzer-python`:
+The backend ships a command-line tool `canpy`, installed by `pip install codeanalyzer-python`:
 
 ```bash
-codeanalyzer --input /path/to/my_pkg [OPTIONS]
+canpy --input /path/to/my_pkg [OPTIONS]
 ```
+
+`codeanalyzer` is a deprecated alias kept for backwards compatibility: it prints a deprecation warning to stderr and delegates to `canpy`. Prefer `canpy`.
 
 <Aside type="note">
 The CLI is intended for backend developers and direct analysis runs. CLDK SDK users invoke the backend indirectly through `CLDK.python(...)`, which manages the virtualenv and runs the analysis internally.
@@ -184,6 +186,12 @@ The CLI is intended for backend developers and direct analysis runs. CLDK SDK us
 | `--input` | `-i` | PATH | Required | Project root directory to analyze |
 | `--output` | `-o` | PATH | None | Save `analysis.json` or `analysis.msgpack` to this directory (stdout if None) |
 | `--format` | `-f` | `json \| msgpack` | json | Output serialization format |
+| `--emit` | | `json \| neo4j \| schema` | json | Output target: `json` (analysis.json), `neo4j` (`graph.cypher`, or a live Bolt push with `--neo4j-uri`), or `schema` (Neo4j schema contract; needs no input) |
+| `--app-name` | | str | input dir name | Application name for the graph `:PyApplication` anchor |
+| `--neo4j-uri` | | str | None (`NEO4J_URI`) | Push the graph to a live Neo4j over Bolt (incremental); omit to write `graph.cypher` |
+| `--neo4j-user` | | str | neo4j (`NEO4J_USERNAME`) | Neo4j username |
+| `--neo4j-password` | | str | neo4j (`NEO4J_PASSWORD`) | Neo4j password (prefer the env var) |
+| `--neo4j-database` | | str | server default (`NEO4J_DATABASE`) | Neo4j database name |
 | `--codeql` / `--no-codeql` | | bool | false | Enable CodeQL-based call-graph augmentation (experimental) |
 | `--ray` / `--no-ray` | | bool | false | Enable Ray for distributed analysis |
 | `--eager` / `--lazy` | | bool | lazy | Force rebuild cache (eager) or reuse cached results (lazy) |
@@ -197,37 +205,37 @@ The CLI is intended for backend developers and direct analysis runs. CLDK SDK us
 
 **Basic symbol table analysis:**
 ```bash
-codeanalyzer -i ./my_pkg
+canpy -i ./my_pkg
 ```
 Outputs `analysis.json` to stdout (symbol table + Jedi call graph).
 
 **With CodeQL augmentation:**
 ```bash
-codeanalyzer -i ./my_pkg --codeql
+canpy -i ./my_pkg --codeql
 ```
 Merges Jedi edges with CodeQL-resolved edges; note that CodeQL integration is experimental and may take longer.
 
 **With Ray distributed analysis:**
 ```bash
-codeanalyzer -i ./my_pkg --ray
+canpy -i ./my_pkg --ray
 ```
 Enables Ray for parallel processing across available cores.
 
 **Save to file in msgpack format:**
 ```bash
-codeanalyzer -i ./my_pkg -o ./results --format msgpack
+canpy -i ./my_pkg -o ./results --format msgpack
 ```
 Saves compressed `analysis.msgpack` with 30-50% of JSON size.
 
 **Custom cache, eager rebuild:**
 ```bash
-codeanalyzer -i ./my_pkg --cache-dir /tmp/analysis-cache --eager
+canpy -i ./my_pkg --cache-dir /tmp/analysis-cache --eager
 ```
 Rebuilds virtualenv and analysis cache from scratch, storing in `/tmp/analysis-cache/.codeanalyzer`.
 
 **Single file:**
 ```bash
-codeanalyzer -i ./my_pkg --file-name src/handlers.py
+canpy -i ./my_pkg --file-name src/handlers.py
 ```
 Analyzes only `src/handlers.py`.
 
@@ -237,7 +245,7 @@ A call to `CLDK.python(project_path="my_pkg")` in the Python SDK proceeds as fol
 
 1. **Virtualenv provisioning**: CLDK detects or installs `codeanalyzer-python` into a managed virtualenv in the cache directory (default: `<project_dir>/.codeanalyzer/venv`).
 
-2. **CLI invocation**: The SDK constructs a `codeanalyzer` command with options (`--codeql`, `--eager`, `--cache-dir`, etc.) and runs it as a subprocess. Stdout is parsed as `analysis.json`.
+2. **CLI invocation**: The SDK constructs a `canpy` command with options (`--codeql`, `--eager`, `--cache-dir`, etc.) and runs it as a subprocess. Stdout is parsed as `analysis.json`.
 
 3. **Schema re-export**: `cldk.models.python` re-exports `PyApplication`, `PyModule`, `PyClass`, `PyCallable`, and other Py* types directly from `codeanalyzer.schema.py_schema`, ensuring a single source of truth.
 
@@ -276,7 +284,7 @@ callers = analysis.get_callers("my_pkg.MyClass", "process")
   </TabItem>
   <TabItem label="CLI directly">
 ```bash
-codeanalyzer -i ./my_pkg --codeql --output ./results --format json
+canpy -i ./my_pkg --codeql --output ./results --format json
 cat results/analysis.json | jq '.symbol_table | keys'
 ```
   </TabItem>

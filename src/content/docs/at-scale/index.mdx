@@ -3,7 +3,7 @@ title: Multi-lingual, multi-project analysis at scale
 description: Analyze many projects in many languages once, push the results into a shared Neo4j graph, and let agents query all of it through one read-only analysis API.
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
 In the [default workflow](/quickstart/), CLDK runs the analysis in-process: you point `CLDK.java(...)` at a project, the backend parses it, and the typed models live in memory for the lifetime of that object. That is the right model for a single project on a single machine.
 
@@ -55,13 +55,15 @@ Each backend writes a **namespaced** label set so multiple languages share a sin
 
 Within a language, **multiple projects** coexist too. Every node is scoped to an application anchor identified by its `--app-name`, so one database can hold `payments-service`, `web-frontend`, and `billing-core` side by side. On the read side, `application_name` selects which one a query sees.
 
+**External (phantom) nodes.** The Python and TypeScript graphs add `:PyExternal` / `:TSExternal` nodes for call targets *outside* the analyzed app, third-party libraries, the standard library, and Node built-ins, so call edges never dangle. They carry no `_module` and are shared rather than owned by one app, which is why a query can see that an app calls `os.path.join` or `node:crypto.createHash` even though those are not part of its source.
+
 <Aside type="note" title="Languages supported">
 The Neo4j emit/poll path is implemented for **Java, Python, and TypeScript**. C is analyzed in-process only — it has no Neo4j backend.
 </Aside>
 
 ## Phase 1 — Emit a graph
 
-Every backend takes the same `--emit neo4j` flag. With `--neo4j-uri` set it pushes to a live database over Bolt; without it, it writes a self-contained `graph.cypher` snapshot you can load with `cypher-shell`. Connection settings also read the `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE` environment variables; an explicit flag wins over the environment.
+Every backend takes the same `--emit neo4j` flag. With `--neo4j-uri` set it pushes to a live database over Bolt; without it, it writes a self-contained `graph.cypher` snapshot you can load with `cypher-shell`. The two modes differ in more than destination: the live Bolt push is content-hash incremental (it rewrites only changed modules and prunes orphans on a full run), while the `graph.cypher` snapshot wipes and rebuilds that application's subgraph in full every time it is applied. Connection settings also read the `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE` environment variables; an explicit flag wins over the environment.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -111,12 +113,12 @@ Every backend takes the same `--emit neo4j` flag. With `--neo4j-uri` set it push
 Re-running a job is safe and cheap, which is what makes a scheduled fleet practical:
 
 - **Idempotent** — both writers create the schema constraints and indexes first, then upsert with `MERGE` (never blind `CREATE`). Re-emitting the same project produces the same graph.
-- **Incremental** — a live Bolt push diffs each module against the graph by content hash and rewrites **only what changed**. On a full run, modules whose source file disappeared are pruned, scoped to that application's anchor so a shared database stays consistent.
+- **Incremental** — a live Bolt push diffs each module against the graph by content hash and rewrites **only what changed**. On a full run, modules whose source file disappeared are pruned. The Python writer scopes this prune to the application's anchor, so other apps in a shared database are untouched; the Java and TypeScript writers currently prune any compilation unit or module absent from the current run, regardless of app. On a shared instance, give each Java or TypeScript application its own Neo4j database (or run its full job against a dedicated one) so a full run for app B never deletes app A.
 - **Index-backed** — constraints exist before any `MERGE`, so every upsert is an index seek rather than a scan, even as the database grows.
 
 ### A versioned schema contract
 
-Each backend can emit its graph schema as a machine-readable, version-stamped contract with `--emit schema` (no project needed). The `schema_version` is also stamped on every graph's `:*Application` node, so a consumer can check compatibility before querying.
+Each backend can emit its graph schema as a machine-readable, version-stamped contract with `--emit schema` (no project needed). The `schema_version` is also stamped on every graph's `:*Application` node, so a consumer can check compatibility before querying — read it back per application with `MATCH (a:JApplication {name: $app}) RETURN a.schema_version` (use `:PyApplication` / `:TSApplication` for the others). Each backend versions its schema independently, so pin the contract you generated against rather than assuming one shared version.
 
 ```bash title="Export the schema contract"
 codeanalyzer --emit schema -o ./out   # -> ./out/schema.neo4j.json
@@ -191,8 +193,29 @@ The Neo4j backends (`JNeo4jBackend`, `PyNeo4jBackend`, `TSNeo4jBackend`) expose 
 3. Call the usual `get_classes`, `get_call_graph`, `get_callers`, `get_callees`, and related methods. The graph answers; no source is parsed.
 </Steps>
 
+## Query the graph directly with Cypher
+
+The `analysis` API covers the common structural questions, but the graph is a full Neo4j property graph: anything the API does not model, an agent can reach with raw Cypher over the same Bolt endpoint. The label namespacing is the query contract — scope by the `:*Application` anchor and the language prefix.
+
+**Discover what a shared database holds.** The SDK expects you to know the `application_name` up front (the Neo4j backends raise if it is missing, and offer no enumeration method), so taking inventory is itself a Cypher query:
+
+```cypher
+MATCH (a)
+WHERE a:JApplication OR a:PyApplication OR a:TSApplication
+RETURN labels(a)[0] AS language, a.name AS app, a.schema_version
+```
+
+**Full-text code search.** Every backend creates a Neo4j full-text index over each callable's `code` and `docstring`, named per language (`j_code_fts`, `py_code_fts`, `code_fts`). The CLDK API does not wrap it, so reach it over Bolt:
+
+```cypher
+CALL db.index.fulltext.queryNodes('py_code_fts', 'jwt OR authenticate') YIELD node, score
+RETURN node.signature, score ORDER BY score DESC LIMIT 20
+```
+
+**Java carries more in its graph.** The Java emitter projects CRUD operations and a system dependency graph that the other languages do not, and `JNeo4jBackend` surfaces them with no re-parsing: `get_all_crud_operations()` (plus `get_all_read_operations()` / `…_create…` / `…_update…` / `…_delete…`), `get_system_dependency_graph()`, and `get_all_entry_point_methods()`. See the [Java API reference](/reference/python-api/java/).
+
 <Aside type="caution" title="What “at scale” does and doesn’t mean here">
-Scale here comes from **architecture**, not tuning knobs: idempotent index-backed `MERGE`, content-hash incrementality, and the freedom to fan emit jobs out horizontally. The writers do **not** expose a configurable batch size or `PERIODIC COMMIT`, and a **targeted run** (`--target-files`) skips orphan pruning, so deleted files are only cleaned up on a full run. Plan your jobs as periodic full runs with incremental pushes in between.
+Scale here comes from **architecture**, not tuning knobs: idempotent index-backed `MERGE`, content-hash incrementality, and the freedom to fan emit jobs out horizontally. The writers do **not** expose a configurable batch size or `PERIODIC COMMIT`, and a **targeted run** (`--target-files` on Java/TypeScript, `--file-name` on `canpy`) skips orphan pruning, so deleted files are only cleaned up on a full run. Plan your jobs as periodic full runs with incremental pushes in between.
 </Aside>
 
 ## See also

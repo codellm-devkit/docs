@@ -3,7 +3,7 @@ title: Deploy on Kubernetes
 description: A Job/CronJob topology that emits analysis graphs into a shared Neo4j and serves read-only CLDK agents — walked through end to end on Odoo.
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
 The [emit/poll split](/at-scale/) maps cleanly onto Kubernetes. The expensive analysis becomes scheduled batch work, the database is a stateful service, and the agents are stateless readers that scale on demand.
 
@@ -38,6 +38,10 @@ Three roles:
 
 <Aside type="tip" title="Why CronJobs, not a sidecar">
 Keeping analysis out of the request path is the point. A model that re-analyzes per request can't scale; one that reads a precomputed graph can. Emit on a schedule (or trigger a job from CI on merge), and let the read replicas stay thin.
+</Aside>
+
+<Aside type="tip" title="Eyeball the graph">
+Because the emit step produces a real property graph, you can point Neo4j Browser (or Bloom) at the same Bolt endpoint with read-only credentials to see what landed. Scope to one app and run, e.g., `MATCH (a:JApplication {name: 'payments-service'})-[:J_HAS_UNIT]->(:JCompilationUnit)-[:J_DECLARES_TYPE]->(t:JType) RETURN * LIMIT 50`.
 </Aside>
 
 ## The emit CronJob
@@ -112,18 +116,22 @@ Because no source is parsed at query time, an agent pod starts instantly and ans
 
 ## Walkthrough: Odoo, end to end
 
-[Odoo](https://github.com/odoo/odoo) is a good stress test for "at scale": it is large, it is split into **hundreds of addon modules**, and it is **multi-lingual** — a Python backend plus a JavaScript/OWL web frontend. Analyzing it once and querying the result is exactly the shape this section is built for.
+[Odoo](https://github.com/odoo/odoo) is a good stress test for multi-project analysis at scale: it is large and split into **hundreds of addon modules**, all Python. A real fleet rarely stops at one language, though, so we pair Odoo's Python addons with a **TypeScript service** in the same graph and query both through one API.
 
 <Aside type="note" title="Illustrative">
 The commands below are real and copy-pasteable; the counts and timings are representative of a large multi-module codebase, shown to make the workflow concrete. They are illustrative, not measured.
 </Aside>
 
+<Aside type="note" title="Odoo's frontend is JavaScript, not TypeScript">
+Odoo's web layer (OWL) is JavaScript with JSDoc. `cants` discovers only `.ts`/`.tsx`/`.mts`/`.cts` sources, so it does not analyze Odoo's `web/static/src` today (`allowJs` only resolves `.js` files referenced *from* a TypeScript entry point). The TypeScript half of this walkthrough therefore uses a separate TypeScript service in the same fleet.
+</Aside>
+
 ### 1. Emit both languages into one graph
 
-Run one Python job over the addons and one TypeScript job over the web assets. Both carry `--app-name odoo`, so they land under a single application anchor in the same database — the namespaced labels keep the Python and frontend graphs distinct while letting an agent see both.
+Run one Python job over Odoo's addons and one TypeScript job over the storefront service. They use distinct `--app-name`s, so both land in the same database as separate application anchors — the namespaced labels keep the Python and TypeScript graphs from colliding, and an agent can query either.
 
 <Tabs syncKey="lang">
-  <TabItem label="Python (addons)">
+  <TabItem label="Python (Odoo addons)">
     ```bash title="canpy over the Odoo addons"
     canpy -i ./odoo/addons --emit neo4j \
       --app-name odoo \
@@ -133,53 +141,53 @@ Run one Python job over the addons and one TypeScript job over the web assets. B
     # -> ~hundreds of modules; subsequent runs only rewrite changed files
     ```
   </TabItem>
-  <TabItem label="TypeScript (web frontend)">
-    ```bash title="cants over the web assets"
-    # JavaScript/OWL source is analyzed through the TypeScript backend.
-    cants -i ./odoo/addons/web/static/src -a 2 --emit neo4j \
-      --app-name odoo \
+  <TabItem label="TypeScript (storefront service)">
+    ```bash title="cants over a TypeScript service"
+    cants -i ./storefront/src -a 2 --emit neo4j \
+      --app-name storefront \
       --neo4j-uri bolt://neo4j:7687 \
       --neo4j-user writer --neo4j-password "$NEO4J_PASSWORD"
-    # -> writes :TSApplication {name: "odoo"} and its :TSModule / :TSSymbol graph
+    # -> writes :TSApplication {name: "storefront"} and its :TSModule / :TSSymbol graph
     ```
   </TabItem>
 </Tabs>
 
-In a cluster these are two `CronJob`s on the same schedule. After the first full run, each subsequent run is an incremental Bolt push: only modules whose content hash changed are rewritten.
+In a cluster these are two `CronJob`s on the same schedule. After the first full run, each subsequent run is an incremental Bolt push: only modules whose content hash changed are rewritten. The two apps are different languages, so their full-run prunes never touch each other; keep two same-language apps in separate databases (see the [prune note](/at-scale/#writes-are-idempotent-and-incremental)).
 
 ### 2. Query across modules and languages
 
-An agent now answers structural questions about Odoo without touching the source tree. Construct one analysis per language, both anchored to `application_name="odoo"`:
+An agent now answers structural questions without touching either source tree. Construct one analysis per app, each anchored to its own `application_name`:
 
-```python title="cross-module query against the Odoo graph"
+```python title="cross-module, cross-language query against the shared graph"
 from cldk import CLDK
 from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
 
-def odoo(factory):
+def connect(factory, app):
     return factory(
         backend=Neo4jConnectionConfig(
             uri="bolt://neo4j:7687",
             username="reader",
             password="…",
-            application_name="odoo",
+            application_name=app,
         ),
     )
 
-py = odoo(CLDK.python)       # the addons graph
-ts = odoo(CLDK.typescript)   # the web-frontend graph
+py = connect(CLDK.python, "odoo")            # the Odoo addons graph
+ts = connect(CLDK.typescript, "storefront")  # the TypeScript service graph
 
 # "Which callables across all addons reach SaleOrder.action_confirm?"
-callers = py.get_callers("odoo.addons.sale.models.sale_order.SaleOrder", "action_confirm")
+# Signatures are rooted at the emit -i directory (./odoo/addons), so no "odoo.addons." prefix.
+callers = py.get_callers("sale.models.sale_order.SaleOrder", "action_confirm")
 # -> callers spread across the sale, stock, and account addons — one query, no per-addon parsing
 
-# The same agent inspects the frontend's call graph through the same API.
-frontend = ts.get_call_graph()   # -> networkx.DiGraph over the OWL components
+# The same agent inspects the TypeScript service's call graph through the same API.
+storefront_cg = ts.get_call_graph()   # -> networkx.DiGraph
 ```
 
-The query touched modules from several addons in a single call, and reached into a second language through the same `analysis` vocabulary — the multi-lingual, multi-project payoff. Re-analyzing Odoo from scratch on every such question would be untenable; reading a precomputed graph is constant work.
+The first query touched modules from several addons in a single call, and the agent reached a second language through the same `analysis` vocabulary — the multi-lingual, multi-project payoff. Re-analyzing these projects from scratch on every such question would be untenable; reading a precomputed graph is constant work.
 
 <Aside type="caution" title="Operational notes">
-Schedule the emit jobs as periodic **full** runs (a full run prunes modules whose files were deleted); use `--target-files` only for fast mid-cycle refreshes, since targeted runs skip orphan pruning. Give the agents a **read-only** Neo4j role, and keep write credentials on the CronJobs alone.
+Schedule the emit jobs as periodic **full** runs (a full run prunes modules whose files were deleted); use the backend's targeted-run flag (`--file-name <path>` for `canpy`, `--target-files <paths…>` for `codeanalyzer` and `cants`) only for fast mid-cycle refreshes, since targeted runs skip orphan pruning. Give the agents a **read-only** Neo4j role, and keep write credentials on the CronJobs alone.
 </Aside>
 
 ## See also

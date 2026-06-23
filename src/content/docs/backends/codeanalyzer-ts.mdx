@@ -31,8 +31,8 @@ Walks the ts-morph AST and indexes all declarations (classes, methods, interface
 ### Call graph
 ts-morph's TypeChecker resolves each call site to its declared-type target (exact for static dispatch), plus RTA-style subtype expansion: polymorphic calls on interface/abstract receivers also emit edges to every instantiated concrete override. Provenance: `tsc`.
 
-<Aside type="tip" title="Planned: dataflow enrichment">
-A future enrichment pass will add the dynamic-dispatch and dataflow edges the type checker cannot reach, using [**Jelly**](https://github.com/cs-au-dk/jelly) (a static call-graph analyzer for JavaScript/TypeScript). It is not yet implemented; the analyzer accepts `-a 2` today but produces the same call graph as `-a 1`.
+<Aside type="tip" title="Experimental: dataflow enrichment">
+An experimental, opt-in pass uses [**Jelly**](https://github.com/cs-au-dk/jelly) (a flow-based call-graph analyzer for JavaScript/TypeScript) to resolve the higher-order, callback, and dynamic-dispatch edges the type checker misses. Select it with `--call-graph-provider jelly` (or `both` to diff against the `tsc` resolver); `tsc` remains the default. Jelly ships inside the `cants` binary, so no extra install is needed.
 </Aside>
 
 The call graph maintains the no-dangling-edges invariant: every edge endpoint is a real `Callable.signature`.
@@ -257,7 +257,7 @@ The `call_graph` is an array of edges (`TSCallEdge`) in identity-only form: each
   target: "src/db.Database.fetchById",
   type: "CALL_DEP",
   weight: 1,
-  provenance: ["tsc"],                            // "tsc" today; "jelly" once dataflow enrichment lands
+  provenance: ["tsc"],                            // "tsc" by default; "jelly" with --call-graph-provider jelly|both (experimental)
   tags: { "ts.dispatch": "rta" }                  // RTA subtype expansion tag
 }
 ```
@@ -378,7 +378,7 @@ Use `--lazy` (default) to reuse the cache, or `--target-files <list>` to update 
 
 - **Symbol table build**: O(n) in source lines; ts-morph's parse is linear
 - **Call graph build**: O(c) in call sites; the checker resolution is constant-time per site
-- **Dataflow enrichment (planned, Jelly)**: not yet implemented; cost will depend on Jelly's analysis time
+- **Dataflow enrichment (experimental, Jelly)**: opt-in via `--call-graph-provider jelly` (or `both` to diff against `tsc`); adds a separate whole-program Jelly pass, so cost depends on Jelly's analysis time
 
 For large projects (>100k LOC), analysis typically takes seconds to tens of seconds.
 
