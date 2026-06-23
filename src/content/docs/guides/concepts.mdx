@@ -24,7 +24,7 @@ Use it to enumerate or look up code structure: for example, to list a project's 
     ```python
     from cldk import CLDK
 
-    analysis = CLDK(language="java").analysis(project_path="commons-cli")
+    analysis = CLDK.java(project_path="commons-cli")
 
     # Whole-project inventory: file path -> JCompilationUnit
     symbol_table = analysis.get_symbol_table()
@@ -47,7 +47,7 @@ Use it to enumerate or look up code structure: for example, to list a project's 
     ```python
     from cldk import CLDK
 
-    analysis = CLDK(language="python").analysis(project_path="my_pkg")
+    analysis = CLDK.python(project_path="my_pkg")
 
     # Whole-project inventory: module name -> PyModule
     symbol_table = analysis.get_symbol_table()
@@ -86,7 +86,7 @@ CLDK exposes the graph as a `networkx.DiGraph` (edges point from caller to calle
     from cldk import CLDK
     from cldk.analysis import AnalysisLevel
 
-    analysis = CLDK(language="java").analysis(
+    analysis = CLDK.java(
         project_path="commons-cli",
         analysis_level=AnalysisLevel.call_graph,  # required for call edges
     )
@@ -112,7 +112,7 @@ CLDK exposes the graph as a `networkx.DiGraph` (edges point from caller to calle
     from cldk import CLDK
     from cldk.analysis import AnalysisLevel
 
-    analysis = CLDK(language="python").analysis(
+    analysis = CLDK.python(
         project_path="my_pkg",
         analysis_level=AnalysisLevel.call_graph,
     )
@@ -136,10 +136,10 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # Default: symbol table only (call edges are NOT populated)
-st = CLDK(language="java").analysis(project_path="commons-cli")
+st = CLDK.java(project_path="commons-cli")
 
 # Opt in to call-graph depth when you need call relationships
-cg = CLDK(language="java").analysis(
+cg = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -149,7 +149,7 @@ cg = CLDK(language="java").analysis(
 If `get_call_graph`, `get_callers`, or `get_callees` return empty results, the `analysis` object was most likely built at the default `symbol_table` level. Rebuild it with `analysis_level=AnalysisLevel.call_graph`; the default does **not** populate call edges.
 </Aside>
 
-Java supports a single-file mode via `analysis(source_code="...")` for quick syntactic work; Python requires `project_path`. Both expose the same symbol-table and call-graph methods through `analysis`.
+Java supports a single-file mode via `CLDK.java(source_code="...")` for quick syntactic work, though it is deprecated; prefer `project_path`. Python requires `project_path`. Both expose the same symbol-table and call-graph methods through `analysis`.
 
 ## Where to go next
 

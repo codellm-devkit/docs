@@ -174,7 +174,7 @@ codeanalyzer --input /path/to/my_pkg [OPTIONS]
 ```
 
 <Aside type="note">
-The CLI is intended for backend developers and direct analysis runs. CLDK SDK users invoke the backend indirectly through `CLDK(language="python").analysis(...)`, which manages the virtualenv and invokes the CLI internally.
+The CLI is intended for backend developers and direct analysis runs. CLDK SDK users invoke the backend indirectly through `CLDK.python(...)`, which manages the virtualenv and runs the analysis internally.
 </Aside>
 
 ### Options
@@ -233,7 +233,7 @@ Analyzes only `src/handlers.py`.
 
 ## How the SDK consumes it
 
-A call to `CLDK(language="python").analysis(project_path="my_pkg")` in the Python SDK proceeds as follows:
+A call to `CLDK.python(project_path="my_pkg")` in the Python SDK proceeds as follows:
 
 1. **Virtualenv provisioning**: CLDK detects or installs `codeanalyzer-python` into a managed virtualenv in the cache directory (default: `<project_dir>/.codeanalyzer/venv`).
 
@@ -253,11 +253,12 @@ A call to `CLDK(language="python").analysis(project_path="my_pkg")` in the Pytho
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
+from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
 
-analysis = CLDK(language="python").analysis(
+analysis = CLDK.python(
     project_path="my_pkg",
     analysis_level=AnalysisLevel.call_graph,
-    use_codeql=True,  # optional; merges CodeQL edges
+    backend=PyCodeAnalyzerConfig(use_codeql=True),  # optional; merges CodeQL edges
 )
 
 # Query the symbol table
@@ -281,14 +282,55 @@ cat results/analysis.json | jq '.symbol_table | keys'
   </TabItem>
 </Tabs>
 
+### Choosing a backend
+
+The backend is selected by the **type** of the `backend=` config passed to `CLDK.python(...)`:
+
+- **In-memory codeanalyzer** (default): omit `backend=`, or pass `backend=PyCodeAnalyzerConfig(...)`. The Python-only call-graph knobs `use_codeql=...` and `use_ray=...` live on this config, as does `cache_dir=...`.
+- **Read-only Neo4j**: pass `backend=Neo4jConnectionConfig(...)` to query a graph populated out of band (no local analysis is run).
+
+```python
+from cldk import CLDK
+from cldk.analysis.commons.backend_config import (
+    PyCodeAnalyzerConfig,
+    Neo4jConnectionConfig,
+)
+
+# In-memory backend with Ray + custom cache directory
+analysis = CLDK.python(
+    project_path="my_pkg",
+    backend=PyCodeAnalyzerConfig(
+        use_codeql=True,
+        use_ray=True,
+        cache_dir="/tmp/analysis-cache",
+    ),
+)
+
+# Read-only Neo4j backend
+analysis = CLDK.python(
+    project_path="my_pkg",
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="neo4j",
+        database=None,
+        application_name="my_pkg",
+    ),
+)
+```
+
+`Neo4jConnectionConfig` is importable from `cldk.analysis.commons.backend_config` (and also from `cldk.analysis.python.neo4j`).
+
+`CLDK.python(...)` keeps the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The old `CLDK(language="python").analysis(...)` form still works but is **deprecated**; prefer `CLDK.python(...)`. The `from cldk import CLDK` import is unchanged.
+
 ### Caching and virtualenv management
 
-- **Cache location**: Stored in `cache_dir/.codeanalyzer/` (default: `<project_dir>/.codeanalyzer/`).
-- **Virtualenv**: Auto-created at `.codeanalyzer/<project_name>/virtualenv/`. The backend installs dependencies from `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile`, etc.
+- **Cache location**: A single language-keyed `cache_dir` (default: `<project_dir>/.codeanalyzer`); Python artifacts live under `<cache_dir>/python/`. Set it via `backend=PyCodeAnalyzerConfig(cache_dir=...)`.
+- **Virtualenv**: Auto-created under the cache directory. The backend installs dependencies from `requirements.txt`, `pyproject.toml`, `setup.py`, `Pipfile`, etc.
 - **Analysis cache**: Indexed by file content hash; unchanged files reuse cached results.
-- **CodeQL database**: Stored in `.codeanalyzer/codeql/` if `--codeql` is enabled; downloaded on first use.
+- **CodeQL database**: Stored under the cache directory if CodeQL is enabled; downloaded on first use.
 
-To force a clean rebuild, pass `--eager` (or `eager_analysis=True` in the SDK), or delete the cache directory.
+To force a clean rebuild, pass `eager=True` to `CLDK.python(...)` (or `--eager` on the CLI), or delete the cache directory.
 
 ## Design principles
 

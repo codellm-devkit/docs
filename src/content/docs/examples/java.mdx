@@ -16,13 +16,13 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # Symbol table only: classes, methods, fields
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.symbol_table,
 )
 
 # Call graph included: all of the above plus caller/callee edges
-analysis_cg = CLDK(language="java").analysis(
+analysis_cg = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -146,7 +146,7 @@ Retrieve the full call graph as a `networkx.DiGraph`. Edges point from caller â†
 ```python
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -348,7 +348,7 @@ Use the call graph with `networkx` to answer reachability questions, such as whe
 import networkx as nx
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )

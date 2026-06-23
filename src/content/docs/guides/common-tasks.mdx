@@ -20,7 +20,7 @@ Enumerate every method declared on a class.
     ```python
     from cldk import CLDK
 
-    analysis = CLDK(language="python").analysis(project_path="my_pkg")
+    analysis = CLDK.python(project_path="my_pkg")
 
     pyclass = analysis.get_classes()["my_pkg.options.Options"]
     for method in pyclass.methods.values():
@@ -35,7 +35,7 @@ Enumerate every method declared on a class.
     ```python
     from cldk import CLDK
 
-    analysis = CLDK(language="java").analysis(project_path="commons-cli")
+    analysis = CLDK.java(project_path="commons-cli")
 
     klass = "org.apache.commons.cli.Options"
     methods = analysis.get_methods()[klass]
@@ -98,7 +98,7 @@ The call graph is a `networkx.DiGraph` whose edges point from **caller** to **ca
     from cldk import CLDK
     from cldk.analysis import AnalysisLevel
 
-    analysis = CLDK(language="python").analysis(
+    analysis = CLDK.python(
         project_path="my_pkg",
         analysis_level=AnalysisLevel.call_graph,  # required for call edges
     )
@@ -113,7 +113,7 @@ The call graph is a `networkx.DiGraph` whose edges point from **caller** to **ca
     from cldk import CLDK
     from cldk.analysis import AnalysisLevel
 
-    analysis = CLDK(language="java").analysis(
+    analysis = CLDK.java(
         project_path="commons-cli",
         analysis_level=AnalysisLevel.call_graph,  # required for call edges
     )

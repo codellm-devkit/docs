@@ -53,7 +53,7 @@ A CLDK skill scaffolds a whole new language (a `codeanalyzer-<lang>` backend plu
 
 Each SDK exposes the same `analysis` vocabulary because they all read the single schema the backends serialize:
 
-- `CLDK(language=...).analysis(project_path=...)` constructs the analysis object.
+- A per-language factory, e.g. `CLDK.java(project_path=...)`, constructs the analysis object.
 - The core methods (`get_symbol_table`, `get_call_graph`, `get_callers`, `get_callees`, and related calls) return the same typed models.
 - Adding a backend makes the new language available to every SDK that consumes the shared schema.
 

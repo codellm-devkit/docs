@@ -20,17 +20,27 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # Symbol table only (default)
-analysis = CLDK(language="python").analysis(project_path="my_pkg")
+analysis = CLDK.python(project_path="my_pkg")
 
 # Symbol table + call graph (required for callers/callees/reachability)
-analysis = CLDK(language="python").analysis(
+analysis = CLDK.python(
     project_path="my_pkg",
     analysis_level=AnalysisLevel.call_graph,
 )
 ```
 
 <Aside type="tip" title="Parallel backends">
-Set `use_codeql=False` to skip CodeQL augmentation and analyze faster (Jedi-only call graph). Defaults to `True` for enhanced inter-procedural accuracy. Also set `cache_dir` to control where the backend stores its virtualenv and analysis cache.
+Backend options live in a `PyCodeAnalyzerConfig` passed as `backend=`. Set `use_codeql=False` to skip CodeQL augmentation and analyze faster (Jedi-only call graph); it defaults to `True` for enhanced inter-procedural accuracy. Use `cache_dir` to control where the backend stores its virtualenv and analysis cache (default `<project>/.codeanalyzer`).
+
+```python
+from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
+
+analysis = CLDK.python(
+    project_path="my_pkg",
+    analysis_level=AnalysisLevel.call_graph,
+    backend=PyCodeAnalyzerConfig(use_codeql=False, cache_dir="/tmp/my_pkg_cache"),
+)
+```
 </Aside>
 
 ## Symbol table: modules, classes, methods
@@ -182,7 +192,7 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 import networkx as nx
 
-analysis = CLDK(language="python").analysis(
+analysis = CLDK.python(
     project_path="my_pkg",
     analysis_level=AnalysisLevel.call_graph,
 )

@@ -3,59 +3,87 @@ title: "Core"
 description: "Core CLDK API: the top-level entry point."
 ---
 
-The `CLDK` class is the top-level entry point. Construct it with a language, then
-ask it for an `analysis` object over your project. You never instantiate
-`JavaAnalysis` or `PythonAnalysis` directly; `CLDK` hands you the correct one.
+The `CLDK` class is the top-level entry point. Call the per-language factory,
+e.g. `CLDK.java(project_path=...)`, to get an analysis object over your project.
+You never instantiate `JavaAnalysis` or `PythonAnalysis` directly; the factory
+hands you the correct one.
 
 ## Overview
 
-Two steps, always the same shape:
+One call per language, always the same shape:
 
 ```python
 from cldk import CLDK
-from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="java").analysis(project_path="commons-cli")
+analysis = CLDK.java(project_path="commons-cli")
 # -> JavaAnalysis, ready to query
 ```
 
-`CLDK(language=...)` accepts `"java"` and `"python"` today (Go, TypeScript, Rust,
-and C are on the way). The object it returns exposes the primary method used in
-most workflows:
+The per-language factory methods are the top-level API:
 
-- **`.analysis(...)`**: returns the language-specific analysis object
-  ([`JavaAnalysis`](/reference/python-api/java/) or
-  [`PythonAnalysis`](/reference/python-api/python/)) backed by the appropriate
-  static analysis engine. This is where the symbol table and call graph are
-  produced.
+- **`CLDK.java(...)`** -> [`JavaAnalysis`](/reference/python-api/java/)
+- **`CLDK.python(...)`** -> [`PythonAnalysis`](/reference/python-api/python/)
+- **`CLDK.typescript(...)`** -> `TypeScriptAnalysis`
+- **`CLDK.c(project_path)`** -> C analysis
+
+Each is backed by the appropriate static analysis engine, where the symbol table
+and call graph are produced.
 
 ```mermaid
 flowchart LR
-    C["CLDK(language)"] --> A[".analysis(project_path)"]
-    A --> J[JavaAnalysis]
-    A --> P[PythonAnalysis]
+    C["CLDK"] --> JF["CLDK.java(project_path)"]
+    C --> PF["CLDK.python(project_path)"]
+    JF --> J[JavaAnalysis]
+    PF --> P[PythonAnalysis]
     J --> M[Typed models]
     P --> M
 ```
 
-**Analysis levels.** The depth of `.analysis()` is governed by `analysis_level`.
+<aside>
+The legacy `CLDK(language="java").analysis(project_path=...)` form still works but
+is **deprecated** (it emits a `DeprecationWarning` and forwards to the factories).
+Prefer `CLDK.java(project_path=...)` in new code.
+</aside>
+
+**Analysis levels.** The depth of analysis is governed by `analysis_level`.
 The default, `AnalysisLevel.symbol_table`, populates classes, methods, and
 fields. Call-graph computation incurs additional cost: `get_call_graph`,
 `get_callers`, and `get_callees` require `AnalysisLevel.call_graph`. Set it up
 front when call relationships are needed.
 
-### Key `.analysis()` arguments
+### Common factory arguments
 
 | Argument | Applies to | What it does |
 | -------- | ---------- | ------------ |
 | `project_path` | all | Path to the project directory to analyze. |
 | `analysis_level` | all | `AnalysisLevel.symbol_table` (default) or `AnalysisLevel.call_graph`. The latter is required for call graphs, callers, and callees. |
-| `analysis_backend_path` | Java only | Path to a `codeanalyzer-*.jar`. Omit to auto-download. |
-| `cache_dir` | Python only | Directory for the codeanalyzer-python cache (virtualenv, CodeQL DB, analysis cache). Defaults to `<project_path>/.codeanalyzer`. |
-| `use_codeql` | Python only | When `True` (default), augments Jedi call-graph resolution with CodeQL for more complete edges. Set `False` for faster, Jedi-only analysis. |
+| `target_files` | all | Restrict analysis to specific files. |
+| `eager` | all | Force a fresh analysis even when a cached artifact exists. |
+| `backend` | all | A Parameter Object selecting the backend. Omit for the default in-process analyzer; pass `Neo4jConnectionConfig(...)` for a read-only Neo4j backend. |
 
-See the [generated reference](#api-reference) below for the full signature,
-including `eager`, `target_files`, `analysis_json_path`, and `use_ray`.
+### Backend selection
+
+The backend is chosen by the **type** of the `backend=` config object:
+
+- Omit `backend=` to use the default in-process analyzer. To tune it, pass
+  `CodeAnalyzerConfig(...)` (Java/TypeScript) or `PyCodeAnalyzerConfig(...)`
+  (Python, which adds `use_codeql` and `use_ray`).
+- Pass `Neo4jConnectionConfig(uri=..., username=..., password=..., database=...,
+  application_name=...)` for a read-only Neo4j backend.
+
+```python
+from cldk.analysis.commons.backend_config import (
+    CodeAnalyzerConfig,
+    PyCodeAnalyzerConfig,
+    Neo4jConnectionConfig,
+)
+```
+
+Analysis artifacts are cached under `cache_dir` (default `<project>/.codeanalyzer`,
+with per-language artifacts under `<cache_dir>/<language>/`). Caching is on by
+default for Java and TypeScript.
+
+See the [generated reference](#api-reference) below for the full signature.
 
 ## Worked example
 
@@ -69,7 +97,7 @@ The recurring sample project is
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,   # needed for call-graph methods
 )
@@ -78,22 +106,23 @@ print(type(analysis).__name__)        # JavaAnalysis
 print(len(analysis.get_classes()))    # 23
 ```
 
-The first run may download the CodeAnalyzer backend JAR; later runs reuse the
-cache. From here, every method lives on `analysis`; see the
-[Java API reference](/reference/python-api/java/) for the full surface.
+The CodeAnalyzer backend ships with the package; results are cached under
+`<project>/.codeanalyzer` and reused on later runs. From here, every method lives
+on `analysis`; see the [Java API reference](/reference/python-api/java/) for the
+full surface.
 
 ### Construct a Python analysis
 
 ```python
 from cldk import CLDK
 
-analysis = CLDK(language="python").analysis(project_path="my_pkg")
+analysis = CLDK.python(project_path="my_pkg")
 
 print(type(analysis).__name__)        # PythonAnalysis
 classes = analysis.get_classes()      # Dict[str, PyClass]
 ```
 
-Same two-step shape, same method names, only `language` changed. Methods
+Same shape, same method names; just call `CLDK.python(...)` instead. Methods
 are documented on the [Python API reference](/reference/python-api/python/).
 
 For an introduction, see [What is CLDK?](/what-is-cldk/) and the
@@ -113,7 +142,29 @@ The full generated reference follows.
 
 [![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk)
 
-Core module
+Core CLDK module.
+
+This module provides the top-level entry point for the Code Language Development
+Kit (CLDK), a unified framework for performing static analysis across multiple
+programming languages. The primary interface is the `CLDK` class, which
+serves as a factory for creating language-specific analysis objects, tree-sitter
+parsers, and sanitization utilities.
+
+> **The CLDK supports the following languages**
+> - **Java**: Full static analysis via CodeAnalyzer backend, including symbol
+>   tables, call graphs, and code metrics.
+> - **Python**: Static analysis via codeanalyzer-python backend with optional
+>   CodeQL-augmented call graph resolution.
+> - **C**: Basic analysis via libclang for parsing and extracting code structure.
+
+Typical usage involves instantiating `CLDK` with a target language, then
+calling `analysis` to obtain a language-specific analysis facade.
+
+> **Note**
+> This module requires language-specific backends to be available:
+> - Java: ``codeanalyzer-*.jar`` (auto-downloaded or specified via path)
+> - Python: ``codeanalyzer-python`` (auto-installed in virtualenv)
+> - C: ``libclang`` (must be installed on the system)
 
 ## `CLDK`
 
@@ -121,17 +172,32 @@ Core module
 class CLDK
 ```
 
-The CLDK base class.
+Core class for the Code Language Development Kit (CLDK).
 
-Parameters
-----------
-language : str
-    The programming language of the project.
+The CLDK class serves as the primary entry point and factory for all code
+analysis operations. It provides a unified interface for initializing
+language-specific analysis facades, tree-sitter parsers, and code
+sanitization utilities.
 
-Attributes
-----------
-language : str
-    The programming language of the project.
+This class follows the factory pattern, where the ``language`` parameter
+determines which concrete analysis implementation is returned by the
+`analysis`, `treesitter_parser`, and `tree_sitter_utils`
+methods.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `language` | `str` | The target programming language for analysis. Supported values are ``"java"``, ``"python"``, and ``"c"`` (case-sensitive). |
+
+**Raises:**
+
+- `NotImplementedError`: Raised by factory methods when the specified language is not yet supported.
+
+> **See Also**
+> - `JavaAnalysis`: Java-specific analysis facade.
+> - `PythonAnalysis`: Python-specific analysis facade.
+> - `CAnalysis`: C-specific analysis facade.
 
 ### Attributes
 
@@ -141,84 +207,173 @@ language : str
 
 ### Methods
 
-#### `CLDK.analysis`
+#### `CLDK.java`
 
 ```python
-analysis(project_path: str | Path | None = None, source_code: str | None = None, eager: bool = False, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, analysis_backend_path: str | None = None, analysis_json_path: str | Path = None) -> JavaAnalysis
+java(project_path: str | Path | None = None, source_code: str | None = None, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, eager: bool = False, backend: JavaBackend | None = None) -> JavaAnalysis
 ```
 
-Initialize the preprocessor based on the specified language.
-
-Parameters
-----------
-project_path : str or Path
-    The directory path of the project.
-source_code : str, optional
-    The source code of the project, defaults to None. If None, it is assumed that the whole project is being
-    analyzed.
-analysis_backend_path : str, optional
-    The path to the analysis backend, defaults to None where it assumes the default backend path.
-analysis_json_path : str or Path, optional
-    The path save the to the analysis database (analysis.json), defaults to None. If None, the analysis database
-    is not persisted.
-eager : bool, optional
-    A flag indicating whether to perform eager analysis, defaults to False. If True, the analysis is performed
-    eagerly. That is, the analysis.json file is created during analysis every time even if it already exists.
-analysis_level: str, optional
-    Analysis levels. Refer to AnalysisLevel.
-target_files: List[str] | None, optional
-    The target files (paths) for which the analysis will run or get modified. Currently, this feature only supported
-    with symbol table analysis. In the future, we will add this feature to other analysis levels.
-Returns
--------
-JavaAnalysis
-    The initialized JavaAnalysis object.
-
-Raises
-------
-CldkInitializationException
-    If neither project_path nor source_code is provided.
-NotImplementedError
-    If the specified language is not implemented yet.
+Create a Java analysis facade.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `analysis_level` | `str` |  |
-| `target_files` | `List[str] \| None` |  |
-| `analysis_level` | `str` |  |
+| `project_path` | `str \| Path \| None` | Path to the Java project directory. |
+| `source_code` | `str \| None` | Single Java source string (deprecated; pass ``project_path`` instead). |
+| `analysis_level` | `str` | Analysis depth (see `AnalysisLevel`). |
+| `target_files` | `List[str] \| None` | Restrict analysis to these files. |
+| `eager` | `bool` | Force regeneration of cached analysis. |
+| `backend` | `JavaBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`. |
+
+**Raises:**
+
+- `CldkInitializationException`: If neither or both of ``project_path`` / ``source_code`` are provided.
+
+#### `CLDK.python`
+
+```python
+python(project_path: str | Path | None = None, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, eager: bool = False, backend: PyBackend | None = None) -> PythonAnalysis
+```
+
+Create a Python analysis facade.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `project_path` | `str \| Path \| None` | Path to the Python project directory. Optional only when ``backend`` is a `Neo4jConnectionConfig` (the graph is populated out of band). |
+| `analysis_level` | `str` | Analysis depth (see `AnalysisLevel`). |
+| `target_files` | `List[str] \| None` | Restrict analysis to these files. |
+| `eager` | `bool` | Force regeneration of cached analysis. |
+| `backend` | `PyBackend \| None` | Backend configuration. Defaults to `PyCodeAnalyzerConfig`; pass a `Neo4jConnectionConfig` to use the read-only Neo4j backend. |
+
+#### `CLDK.typescript`
+
+```python
+typescript(project_path: str | Path | None = None, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, eager: bool = False, backend: TSBackend | None = None) -> TypeScriptAnalysis
+```
+
+Create a TypeScript analysis facade.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `project_path` | `str \| Path \| None` | Path to the TypeScript project directory. Optional only when ``backend`` is a `Neo4jConnectionConfig` (the graph is populated out of band). |
+| `analysis_level` | `str` | Analysis depth (see `AnalysisLevel`). |
+| `target_files` | `List[str] \| None` | Restrict analysis to these files. |
+| `eager` | `bool` | Force regeneration of cached analysis. |
+| `backend` | `TSBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`; pass a `Neo4jConnectionConfig` to use the read-only Neo4j backend. |
+
+#### `CLDK.c`
+
+```python
+c(project_path: str | Path) -> CAnalysis
+```
+
+Create a C analysis facade for the given project directory.
+
+#### `CLDK.analysis`
+
+```python
+analysis(project_path: str | Path | None = None, source_code: str | None = None, eager: bool = False, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, analysis_backend_path: str | None = None, analysis_json_path: str | Path | None = None, cache_dir: str | Path | None = None, use_codeql: bool = True, use_ray: bool = False, neo4j_config: Neo4jConnectionConfig | None = None) -> JavaAnalysis | PythonAnalysis | CAnalysis | TypeScriptAnalysis
+```
+
+Deprecated entry point. Use the per-language factory methods instead.
+
+``CLDK(language).analysis(...)`` is retained as a thin compatibility shim that forwards to
+`java` / `python` / `typescript` / `c` with an appropriate
+``backend=`` configuration object.
+
+The former ``analysis_json_path`` is folded into the unified ``cache_dir`` (it is used as
+the cache root when ``cache_dir`` is not given). ``analysis_backend_path`` is no longer
+supported: the backend binary ships with the packaged dependency, and passing it is ignored.
+
+.. deprecated::
+    Use `java`, `python`, `typescript`, or `c`
+    with a ``backend=<config>`` object.
 
 #### `CLDK.treesitter_parser`
 
 ```python
-treesitter_parser()
+treesitter_parser() -> TreesitterJava
 ```
 
-Parse the project using treesitter.
+Return a Tree-sitter parser for the selected language.
 
-Returns
--------
-List
-    A list of treesitter nodes.
+Creates and returns a language-specific Tree-sitter parser instance
+that can be used for syntactic analysis, AST traversal, and code
+querying operations. Tree-sitter provides incremental parsing with
+excellent performance characteristics for real-time code analysis.
+
+> **The returned parser provides methods for**
+> - Parsing source code into an AST
+> - Running Tree-sitter queries to extract code patterns
+> - Extracting syntactic elements (methods, classes, imports, etc.)
+> - Performing lexical analysis
+
+**Returns:**
+
+- `TreesitterJava`: A Tree-sitter parser wrapper for Java source code. The parser provides methods such as `is_parsable`, `get_raw_ast`, `get_all_imports`, and various code extraction utilities.
+
+**Raises:**
+
+- `NotImplementedError`: If the language specified during CLDK initialization does not have a Tree-sitter parser implementation. Currently, only Java is supported.
+
+> **Note**
+> The Tree-sitter parser operates at the syntactic level only and
+> does not perform semantic analysis. For semantic information like
+> resolved types or call graphs, use `analysis` instead.
+
+> **See Also**
+> - `TreesitterJava`:
+>   Java Tree-sitter parser implementation.
 
 #### `CLDK.tree_sitter_utils`
 
 ```python
-tree_sitter_utils(source_code: str) -> [TreesitterSanitizer | NotImplementedError]
+tree_sitter_utils(source_code: str) -> TreesitterSanitizer
 ```
 
-Parse the project using treesitter.
+Return Tree-sitter-based code sanitization utilities for the selected language.
 
-Parameters
-----------
-source_code : str, optional
-    The source code of the project, defaults to None. If None, it is assumed that the whole project is being
-    analyzed.
+Creates and returns a utility class that provides code transformation
+and sanitization operations using Tree-sitter for parsing. These utilities
+are particularly useful for preparing code for LLM consumption, test
+generation, and code analysis tasks.
 
-Returns
--------
-List
-    A list of treesitter nodes.
+> **The sanitization utilities provide operations such as**
+> - Removing unused imports from source code
+> - Keeping only focal methods and their callees for context reduction
+> - Extracting and manipulating test assertions
+> - Identifying and removing dead code
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `source_code` | `str` | The source code string to initialize the utilities with. This code will be parsed and made available for transformation operations. Must be valid syntax for the target language. |
+
+**Returns:**
+
+- `TreesitterSanitizer`: A utility wrapper that provides sanitization and transformation methods for Java source code, including: - `keep_only_focal_method_and_its_callees` - `remove_unused_imports`
+
+**Raises:**
+
+- `NotImplementedError`: If the language specified during CLDK initialization does not have sanitization utilities implemented. Currently, only Java is supported.
+
+> **Note**
+> The sanitization utilities modify code at the syntactic level using
+> Tree-sitter patterns. For complex refactoring that requires semantic
+> understanding, consider using the full analysis capabilities via
+> `analysis`.
+
+> **See Also**
+> - `TreesitterSanitizer`:
+>   Java sanitization utility implementation.
+> - `treesitter_parser`: For raw Tree-sitter parsing without
+>   sanitization utilities.
 
 <!-- CLDK:API:END -->
+

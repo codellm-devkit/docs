@@ -20,7 +20,7 @@ flowchart LR
 This separation lets a single `analysis` API span languages. The SDK does not parse code itself; it invokes the appropriate backend, then maps the backend JSON onto typed models (`JApplication`, `PyModule`, and others). A backend that emits the canonical JSON makes its language available to the SDK with only binding work required. See [Add a language backend](/contributing/add-language-backend/).
 
 <Aside type="note" title="Backends are managed by the SDK">
-The SDK manages the backend automatically: it downloads the Java JAR and provisions the Python analyzer in a virtualenv. These pages document the backend layer for readers who want to understand or contribute to it.
+The SDK manages the backend automatically: each `codeanalyzer-*` backend binary ships with its packaged PyPI dependency (the JVM-free Java backend runs via `python -m codeanalyzer_java`; the TypeScript binary ships in `codeanalyzer-typescript`), and the Python analyzer is provisioned in a virtualenv. There is no separate JAR download or `analysis_backend_path` override. These pages document the backend layer for readers who want to understand or contribute to it.
 </Aside>
 
 This is the **backend** layer. For the SDKs that consume it, see the [SDKs overview](/reference/sdks/).

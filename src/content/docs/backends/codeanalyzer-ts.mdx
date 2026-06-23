@@ -56,7 +56,7 @@ The `cants` CLI is available from **PyPI** and **Homebrew**. Both distribute a p
   </TabItem>
 </Tabs>
 
-The CLDK Python SDK depends on the PyPI package `codeanalyzer-typescript` to locate this backend; the package exposes `bin_path()`, which returns the path to the bundled binary.
+The CLDK Python SDK depends on the PyPI package `codeanalyzer-typescript` to locate this backend; the package exposes `bin_path()`, which returns the path to the bundled binary. There is no `analysis_backend_path` argument. To override the binary out of band (for example, a locally built `cants`), set the `$CODEANALYZER_TS_BIN` environment variable to its path; this is the sole override.
 
 <Aside type="note">
 The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on `PATH` is **`cants`**, the analyzer's binary name. Run `cants`, not `codeanalyzer-typescript`.
@@ -297,13 +297,13 @@ TypeScript includes several language-specific constructs that codeanalyzer-ts mo
 
 ## Python SDK integration
 
-TypeScript support in the Python SDK is **in development**. Once available, TypeScript projects will be analyzable through the same `CLDK` analysis API as Python and Java:
+TypeScript projects are analyzable through the same `CLDK` analysis API as Python and Java, via the `CLDK.typescript(...)` factory:
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="typescript").analysis(
+analysis = CLDK.typescript(
     project_path="/path/to/ts/project",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -313,9 +313,42 @@ print(analysis.get_classes())      # Dict[str, TSClass]
 graph = analysis.get_call_graph()  # networkx.DiGraph
 ```
 
-<Aside type="note">
-The codeanalyzer-ts backend is complete and production-ready. The Python SDK integration is in progress on the `add-typescript-support` branch.
-</Aside>
+The old `CLDK(language="typescript").analysis(...)` form still works but is **deprecated**; prefer `CLDK.typescript(...)`. The `from cldk import CLDK` import is unchanged.
+
+### Choosing a backend
+
+`CLDK.typescript(...)` keeps the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The backend is selected by the **type** of the `backend=` config:
+
+- **In-memory codeanalyzer** (default): omit `backend=`, or pass `backend=CodeAnalyzerConfig(cache_dir=...)` to override where artifacts are cached.
+- **Read-only Neo4j**: pass `backend=Neo4jConnectionConfig(...)` to query a graph populated out of band.
+
+```python
+from cldk import CLDK
+from cldk.analysis.commons.backend_config import (
+    CodeAnalyzerConfig,
+    Neo4jConnectionConfig,
+)
+
+# In-memory backend with a custom cache directory
+analysis = CLDK.typescript(
+    project_path="/path/to/ts/project",
+    backend=CodeAnalyzerConfig(cache_dir="/tmp/analysis-cache"),
+)
+
+# Read-only Neo4j backend
+analysis = CLDK.typescript(
+    project_path="/path/to/ts/project",
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="neo4j",
+        database=None,
+        application_name="my_project",
+    ),
+)
+```
+
+`Neo4jConnectionConfig` is importable from `cldk.analysis.commons.backend_config` (and also from `cldk.analysis.typescript.neo4j`).
 
 ## Schema invariants
 
@@ -330,7 +363,7 @@ This ensures every call-graph edge points to a real symbol-table entry.
 
 ## Caching and incremental analysis
 
-The analyzer maintains a cache under `<project>/.codeanalyzer/` (or `-c <dir>`), stamped with the analyzer version. The cache is invalidated on:
+The analyzer maintains a cache under a single language-keyed `cache_dir` (default: `<project>/.codeanalyzer`), with TypeScript artifacts under `<cache_dir>/typescript/`, stamped with the analyzer version. Caching is **on by default**. From the SDK, set the cache root via `backend=CodeAnalyzerConfig(cache_dir=...)`; on the CLI, use `-c <dir>`. The cache is invalidated on:
 - Analyzer version change
 - Any source file modification (content hash mismatch)
 - `--eager` flag (forces clean rebuild)

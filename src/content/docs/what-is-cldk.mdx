@@ -13,9 +13,9 @@ Every CLDK program follows the same three steps: select a language, analyze a pr
 
 <Steps>
 
-1. **Construct a `CLDK` object** for the target language, for example `CLDK(language="java")`. This selects the analysis backend; no analysis is performed yet.
+1. **Call the per-language factory** for the target language, for example `CLDK.java(...)`. This selects the analysis backend.
 
-2. **Build the `analysis` object** by pointing it at a project: `.analysis(project_path="commons-cli")`. The backend runs at this step and produces the program model.
+2. **Build the `analysis` object** by pointing it at a project: `CLDK.java(project_path="commons-cli")`. The backend runs at this step and produces the program model.
 
 3. **Query the typed models** with `get_classes()`, `get_method(...)`, `get_call_graph()`, and related methods. The returned objects can be read, traversed, serialized, or passed to other tools.
 
@@ -28,7 +28,7 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # 1. select the language  2. analyze the project  3. query
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -45,7 +45,7 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # Python requires a project_path (no single-file mode)
-analysis = CLDK(language="python").analysis(
+analysis = CLDK.python(
     project_path="my_pkg",
     analysis_level=AnalysisLevel.call_graph,
 )
@@ -64,7 +64,7 @@ A language-specific backend sits behind the same API:
 
 ```mermaid
 flowchart LR
-    A["CLDK(language)"] --> B["analysis(project_path)"]
+    A["CLDK.<lang>(project_path)"] --> B["analysis object"]
     B --> C["Typed program model"]
     C --> D["Symbol table"]
     C --> E["Call graph"]

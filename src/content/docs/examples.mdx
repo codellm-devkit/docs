@@ -8,7 +8,7 @@ import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 These examples are derived from the CLDK SDK test suite, so each snippet reflects behavior the SDK verifies. They are grouped by task and use the recurring samples from these docs: a generic `my_pkg` for Python and [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java.
 
 <Aside type="tip" title="One API, two languages">
-The Python and Java pages follow the same pattern: construct `CLDK(language=...).analysis(project_path=...)`, then call the analysis method for the required task.
+The Python and Java pages follow the same pattern: construct the analysis with the per-language factory (`CLDK.java(project_path=...)`, `CLDK.python(project_path=...)`), then call the analysis method for the required task.
 </Aside>
 
 <CardGrid>

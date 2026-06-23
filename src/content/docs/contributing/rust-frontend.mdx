@@ -37,7 +37,7 @@ Mirror the Python SDK's structure, module by module. None of this is built yet; 
 
 4. **Invoke the backends.** Reuse the same CLI contract the Python SDK uses to invoke `codeanalyzer-*` (input project directory, output JSON, analysis level). See the backend's [CLI interface](/backends/codeanalyzer-java/); the wire format is shared, so this step is primarily process management and JSON parsing.
 
-5. **Register languages.** A `CLDK::new(Language::Java).analysis(project_path)` entry point that dispatches to the correct implementation, mirroring `cldk/core.py`.
+5. **Register languages with per-language factories.** Mirror the *current* `cldk/core.py`, which no longer dispatches on a `language` enum inside one `analysis()` method. Instead it exposes a per-language factory — `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)` — and each facade then selects its *backend* by the **type** of a `backend=` config object (`CodeAnalyzerConfig` for the in-process codeanalyzer vs `Neo4jConnectionConfig` for the read-only graph). The Rust port should mirror this: per-language constructors like `CLDK::java(project_path)` (rather than `CLDK::new(Language::Java).analysis(...)`), with the backend chosen by config type — e.g. an enum or trait object `Backend::CodeAnalyzer { cache_dir }` vs `Backend::Neo4j { uri, .. }` that each `LanguageAnalysis` impl matches on. (Python keeps a deprecated `CLDK(language).analysis(...)` shim that forwards to the factories; a Rust port need not replicate the shim.)
 
 6. **Validate against the same fixtures.** Run it against Apache Commons CLI and assert the same facts the Python test suite asserts: same project, same results, different host language.
 

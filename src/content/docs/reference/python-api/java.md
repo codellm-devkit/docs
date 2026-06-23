@@ -9,14 +9,15 @@ comments. [cocoa](/cocoa/) builds on these calls.
 
 ## Overview
 
-`CLDK(language="java").analysis(...)` returns a `JavaAnalysis` object backed by
+`CLDK.java(project_path=...)` returns a `JavaAnalysis` object backed by
 **CodeAnalyzer**, a WALA-based static analysis engine: symbol table, call graph,
-subclass/interface relationships, CRUD operations, and comments. The backend JAR
-is downloaded automatically (or point at one with `analysis_backend_path`).
+subclass/interface relationships, CRUD operations, and comments. The backend
+ships with the package; results are cached under `<project>/.codeanalyzer` (on by
+default) and reused on later runs.
 
 ```mermaid
 flowchart LR
-    P[Java project] --> A["CLDK(language=java).analysis()"]
+    P[Java project] --> A["CLDK.java(project_path)"]
     A --> S[Symbol table]
     A --> CG[Call graph]
     A --> H[Subclasses & interfaces]
@@ -33,9 +34,30 @@ call relationships:
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
+)
+```
+
+To run against a read-only Neo4j backend instead of the in-process analyzer, pass
+a `Neo4jConnectionConfig` as `backend=`:
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="password",
+        database="neo4j",
+        application_name="commons-cli",
+    ),
 )
 ```
 
@@ -88,13 +110,68 @@ follows.
 
 ## Analysis
 
-Java module
+Java analysis facade module.
+
+This module provides the `JavaAnalysis` class, which serves as the
+primary high-level interface for performing static analysis on Java projects
+and source files. It combines Tree-sitter-based parsing with the CodeAnalyzer
+backend to provide comprehensive code analysis capabilities.
+
+> **The analysis supports two modes of operation**
+> - **Project mode**: Analyze an entire Java project directory, providing
+>   access to cross-file analysis features like call graphs and class
+>   hierarchies.
+> - **Source code mode**: Analyze a single Java source code string, useful
+>   for quick syntactic analysis without a full project structure.
+
+> **Key capabilities include**
+> - Symbol table extraction (classes, methods, fields, imports)
+> - Call graph construction and traversal
+> - Class hierarchy and inheritance analysis
+> - Method parameter and signature analysis
+> - Comment and Javadoc extraction
+> - CRUD operation detection for enterprise applications
+> - Entry point identification (main methods, REST endpoints)
+
+> **The analysis is powered by**
+> - **Tree-sitter**: Fast incremental parsing for syntactic analysis
+> - **CodeAnalyzer**: Semantic analysis backend (JAR-based)
+
+> **See Also**
+> - `PythonAnalysis`: Python equivalent.
+> - `JCodeanalyzer`: Backend implementation.
 
 ### `JavaAnalysis`
 
 ```python
 class JavaAnalysis
 ```
+
+Analysis facade for Java code.
+
+This class provides a comprehensive interface for performing static analysis
+on Java projects and source files. It combines Tree-sitter-based parsing for
+syntactic analysis with the CodeAnalyzer backend for semantic analysis.
+
+> **The facade supports two modes of operation**
+> - **Project mode**: When initialized with ``project_dir``, provides full
+>   analysis capabilities including cross-file call graphs, class hierarchies,
+>   and symbol tables.
+> - **Source code mode**: When initialized with ``source_code``, provides
+>   syntactic analysis capabilities like parsing and AST extraction.
+
+> **Key features**
+> - Symbol table access with classes, methods, and fields
+> - Call graph construction and traversal
+> - Caller/callee relationship analysis
+> - Class hierarchy and inheritance queries
+> - Comment and Javadoc extraction
+> - CRUD operation detection
+> - Entry point identification
+
+> **See Also**
+> - `PythonAnalysis`: Python equivalent.
+> - `JCodeanalyzer`: Backend.
 
 #### Attributes
 
@@ -103,12 +180,11 @@ class JavaAnalysis
 | `project_dir` | `` |  |
 | `source_code` | `` |  |
 | `analysis_level` | `` |  |
-| `analysis_json_path` | `` |  |
-| `analysis_backend_path` | `` |  |
 | `eager_analysis` | `` |  |
 | `target_files` | `` |  |
+| `backend_config` | `JavaBackend` |  |
 | `treesitter_java` | `TreesitterJava` |  |
-| `backend` | `JCodeanalyzer` |  |
+| `backend` | `JavaAnalysisBackend` |  |
 
 #### Methods
 
@@ -118,51 +194,113 @@ class JavaAnalysis
 get_imports() -> List[str]
 ```
 
-Should return  all the imports in the source code.
+Return all import statements in the source code.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+This method is intended to extract all import declarations from the
+analyzed Java source code, including both single-type imports and
+wildcard imports.
 
 **Returns:**
 
-- `List[str]`: List[str]: List of all the imports.
+- `List[str]`: A list of import statement strings, each representing a fully
+- `List[str]`: qualified import (e.g., ``"java.util.List"``, ``"java.io.*"``).
+
+**Raises:**
+
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_symbol_table`: For accessing compilation units which
+>     contain import information.
 
 ##### `JavaAnalysis.get_variables`
 
 ```python
-get_variables(**kwargs)
+get_variables(**kwargs) -> Dict
 ```
 
-_Returns all the variables.
+Return all variables discovered in the source code.
+
+This method is intended to extract variable declarations from the
+analyzed code, including local variables, fields, and parameters.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `**kwargs` | `` | Implementation-specific filtering options. |
+
+**Returns:**
+
+- `Dict`: An implementation-defined view of variables discovered in the code.
 
 **Raises:**
 
-- `NotImplementedError`: Raised when this functionality is not suported.
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_fields`: For class-level field access (implemented).
 
 ##### `JavaAnalysis.get_service_entry_point_classes`
 
 ```python
-get_service_entry_point_classes(**kwargs)
+get_service_entry_point_classes(**kwargs) -> Dict[str, JType]
 ```
 
-Should return  all service entry point classes.
+Return all service entry-point classes.
+
+This method is intended to identify classes that serve as entry points
+for services, such as JAX-RS resources, Spring controllers, or servlet
+classes.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `**kwargs` | `` | Framework-specific filtering options (e.g., annotation filters for ``@RestController``, ``@Path``, etc.). |
+
+**Returns:**
+
+- `Dict[str, JType]`: A dictionary mapping qualified class names to `JType` objects
+- `Dict[str, JType]`: for classes identified as service entry points.
 
 **Raises:**
 
-- `NotImplementedError`: Raised when this functionality is not suported.
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_entry_point_classes`: For general entry point detection.
 
 ##### `JavaAnalysis.get_service_entry_point_methods`
 
 ```python
-get_service_entry_point_methods(**kwargs)
+get_service_entry_point_methods(**kwargs) -> Dict[str, Dict[str, JCallable]]
 ```
 
-Should return  all the service entry point methods.
+Return all service entry-point methods.
+
+This method is intended to identify methods that serve as entry points
+for services, such as REST endpoint handlers, servlet methods, or
+message handlers.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `**kwargs` | `` | Framework-specific filtering options (e.g., HTTP method filters, annotation filters for ``@GET``, ``@POST``, etc.). |
+
+**Returns:**
+
+- `Dict[str, Dict[str, JCallable]]`: A nested dictionary mapping class names to method signatures to
+- `Dict[str, Dict[str, JCallable]]`: class:`JCallable` objects for methods identified as service
+- `Dict[str, Dict[str, JCallable]]`: entry points.
 
 **Raises:**
 
-- `NotImplementedError`: Raised when this functionality is not suported.
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_entry_point_methods`: For general entry point detection.
 
 ##### `JavaAnalysis.get_application_view`
 
@@ -170,15 +308,24 @@ Should return  all the service entry point methods.
 get_application_view() -> JApplication
 ```
 
-Should return  application view of the java code.
+Return the complete analyzed application model.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+Returns the top-level `JApplication` object that represents
+the entire analyzed Java project. This object contains all compilation
+units, classes, methods, and their relationships discovered during
+analysis.
 
 **Returns:**
 
-- `JApplication`: Application view of the java code.
+- `JApplication`: class:`~cldk.models.java.JApplication` object containing: - All compilation units (``symbol_table`` attribute) - Project-level metadata - Aggregated statistics about the codebase
+
+**Raises:**
+
+- `NotImplementedError`: If called in single-file mode (``source_code`` was provided instead of ``project_dir``).
+
+> **See Also**
+> `get_symbol_table`: For direct access to the symbol table.
+> `get_compilation_units`: For a list of compilation units.
 
 ##### `JavaAnalysis.get_symbol_table`
 
@@ -186,11 +333,20 @@ Should return  application view of the java code.
 get_symbol_table() -> Dict[str, JCompilationUnit]
 ```
 
-Should return  symbol table.
+Return the symbol table mapping file paths to compilation units.
+
+Returns a dictionary that maps each analyzed Java file's path to its
+corresponding `JCompilationUnit` object. This is the primary
+data structure for accessing analyzed code structure.
 
 **Returns:**
 
-- `Dict[str, JCompilationUnit]`: Dict[str, JCompilationUnit]: Symbol table
+- `Dict[str, JCompilationUnit]`: A dictionary where keys are file paths (as strings) and values are
+- `Dict[str, JCompilationUnit]`: class:`~cldk.models.java.JCompilationUnit` objects containing: - Package declaration - Import statements - Type declarations (classes, interfaces, enums) - Method and field definitions
+
+> **See Also**
+> `get_compilation_units`: For a list without file paths.
+> `get_java_compilation_unit`: For direct lookup by path.
 
 ##### `JavaAnalysis.get_compilation_units`
 
@@ -198,15 +354,19 @@ Should return  symbol table.
 get_compilation_units() -> List[JCompilationUnit]
 ```
 
-Should return  a list of all compilation units in the java code.
+Return all compilation units in the project as a list.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not supported.
+Returns all `JCompilationUnit` objects discovered during
+analysis as a flat list. Each compilation unit represents a single
+Java source file.
 
 **Returns:**
 
-- `List[JCompilationUnit]`: List[JCompilationUnit]: Compilation units of the Java code.
+- `List[JCompilationUnit]`: A list of `JCompilationUnit` objects,
+- `List[JCompilationUnit]`: one for each Java source file analyzed in the project.
+
+> **See Also**
+> `get_symbol_table`: For file-path-keyed access.
 
 ##### `JavaAnalysis.get_class_hierarchy`
 
@@ -214,15 +374,25 @@ Should return  a list of all compilation units in the java code.
 get_class_hierarchy() -> nx.DiGraph
 ```
 
-Should return  class hierarchy of the java code.
+Return the complete class inheritance hierarchy as a graph.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+This method is intended to return a NetworkX directed graph representing
+the full class inheritance relationships in the project, including
+extends and implements relationships.
 
 **Returns:**
 
-- `nx.DiGraph`: nx.DiGraph: The class hierarchy of the Java code.
+- `nx.DiGraph`: Would return a ``networkx.DiGraph`` with classes as nodes and
+- `nx.DiGraph`: edges representing inheritance (subclass -> superclass).
+
+**Raises:**
+
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_sub_classes`: For finding subclasses of a specific class.
+> `get_extended_classes`: For finding superclasses.
+> `get_implemented_interfaces`: For interface implementations.
 
 ##### `JavaAnalysis.is_parsable`
 
@@ -230,13 +400,26 @@ Should return  class hierarchy of the java code.
 is_parsable(source_code: str) -> bool
 ```
 
-Check if the code is parsable
-Args:
-    source_code: source code
+Check if the given source code is valid Java syntax.
+
+Uses the Tree-sitter Java parser to attempt parsing the source code.
+This is useful for validating code snippets before further processing
+or for filtering out malformed code.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `source_code` | `str` | A string containing Java source code to validate. Can be a complete compilation unit, a class definition, or any syntactically valid Java code fragment. |
 
 **Returns:**
 
-- `bool`: True if the code is parsable, False otherwise
+- `bool`: ``True`` if the source code parses without syntax errors,
+- `bool`: ``False`` otherwise. Note that this only checks syntactic validity,
+- `bool`: not semantic correctness (e.g., type errors won't be caught).
+
+> **See Also**
+> `get_raw_ast`: To obtain the full AST for valid code.
 
 ##### `JavaAnalysis.get_raw_ast`
 
@@ -244,13 +427,31 @@ Args:
 get_raw_ast(source_code: str) -> Tree
 ```
 
-Get the raw AST
-Args:
-    code: source code
+Parse source code and return the Tree-sitter AST.
+
+Parses the provided Java source code using Tree-sitter and returns
+the resulting abstract syntax tree. The AST can be traversed to
+extract syntactic information about the code structure.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `source_code` | `str` | A string containing Java source code to parse. Should be syntactically valid Java code. |
 
 **Returns:**
 
-- `Tree`: the raw AST
+- `Tree`: A Tree-sitter ``Tree`` object representing the parsed AST. The tree
+- `Tree`: contains nodes representing all syntactic elements of the code,
+- `Tree`: including classes, methods, statements, and expressions.
+
+> **Note**
+> If the source code contains syntax errors, Tree-sitter will still
+> return a tree but with ERROR nodes at the locations of parse errors.
+> Use `is_parsable` to check for valid syntax first.
+
+> **See Also**
+> `is_parsable`: To validate syntax before parsing.
 
 ##### `JavaAnalysis.get_call_graph`
 
@@ -258,11 +459,23 @@ Args:
 get_call_graph() -> nx.DiGraph
 ```
 
-Should return  the call graph of the Java code.
+Return the project call graph as a NetworkX directed graph.
+
+Constructs and returns a directed graph representing method call
+relationships across the entire project. Each node represents a
+method, and each edge represents a call from one method to another.
+
+The call graph requires ``analysis_level`` to be set to ``"call_graph"``
+during initialization for accurate results.
 
 **Returns:**
 
-- `nx.DiGraph`: nx.DiGraph: The call graph of the Java code.
+- `nx.DiGraph`: A ``networkx.DiGraph`` where: - Nodes represent methods with attributes containing method metadata (class name, signature, etc.) - Edges represent call relationships, directed from caller to callee - Edge attributes may include call site information
+
+> **See Also**
+> `get_callers`: For finding callers of a specific method.
+> `get_callees`: For finding callees of a specific method.
+> `get_class_call_graph`: For class-scoped call graphs.
 
 ##### `JavaAnalysis.get_call_graph_json`
 
@@ -270,15 +483,24 @@ Should return  the call graph of the Java code.
 get_call_graph_json() -> str
 ```
 
-Should return  a serialized call graph in json.
+Return the complete analysis results serialized as JSON.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+Serializes the full analysis results, including the call graph and
+symbol table, to a JSON string. This is useful for persisting
+analysis results, sharing with other tools, or debugging.
 
 **Returns:**
 
-- `str`: Call graph in json.
+- `str`: A JSON-formatted string containing the complete analysis data,
+- `str`: including compilation units, classes, methods, and call
+- `str`: relationships.
+
+**Raises:**
+
+- `NotImplementedError`: If called in single-file mode (``source_code`` was provided instead of ``project_dir``).
+
+> **See Also**
+> `get_call_graph`: For the graph object directly.
 
 ##### `JavaAnalysis.get_callers`
 
@@ -286,23 +508,31 @@ Should return  a serialized call graph in json.
 get_callers(target_class_name: str, target_method_declaration: str, using_symbol_table: bool = False) -> Dict
 ```
 
-Should return  a dictionary of callers of the target method.
+Return all methods that call the specified target method.
+
+Finds and returns information about all methods that invoke the
+specified target method. This is useful for impact analysis and
+understanding how a method is used throughout the codebase.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `target_class_name` | `str` | Qualified target class name. |
-| `target_method_declaration` | `str` | Target method names |
-| `using_symbol_table` | `bool` | Whether to use symbol table. Defaults to False. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+| `target_class_name` | `str` | The fully qualified name of the class containing the target method (e.g., ``"com.example.service.UserService"``). |
+| `target_method_declaration` | `str` | The method signature to find callers for (e.g., ``"getUser(String)"`` or ``"process())"``). |
+| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for resolution (faster but may be less accurate). If ``False`` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `Dict`: A dictionary of callers of target method.
+- `Dict`: A dictionary containing information about all callers, including: - Caller method signatures - Call site locations (file and line) - Caller class information
+
+**Raises:**
+
+- `NotImplementedError`: If called in single-file mode (``source_code`` was provided instead of ``project_dir``).
+
+> **See Also**
+> `get_callees`: For the reverse direction (what a method calls).
+> `get_call_graph`: For the complete call relationship graph.
 
 ##### `JavaAnalysis.get_callees`
 
@@ -310,23 +540,31 @@ Should return  a dictionary of callers of the target method.
 get_callees(source_class_name: str, source_method_declaration: str, using_symbol_table: bool = False) -> Dict
 ```
 
-Should return  a dictionary of callees by the given method in the given class.
+Return all methods called by the specified source method.
+
+Finds and returns information about all methods that are invoked by
+the specified source method. This is useful for understanding method
+dependencies and tracing execution paths.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `source_class_name` | `str` | Qualified class name where the given method is. |
-| `source_method_declaration` | `str` | Given method |
-| `using_symbol_table` | `bool` | Whether to use symbol table. Defaults to false. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when this functionality is not suported.
+| `source_class_name` | `str` | The fully qualified name of the class containing the source method (e.g., ``"com.example.service.OrderService"``). |
+| `source_method_declaration` | `str` | The method signature to find callees for (e.g., ``"processOrder(Order)"``). |
+| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for resolution (faster but may be less accurate). If ``False`` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `Dict`: Dictionary with callee details.
+- `Dict`: A dictionary containing information about all callees, including: - Callee method signatures - Target class information - Call site locations within the source method
+
+**Raises:**
+
+- `NotImplementedError`: If called in single-file mode (``source_code`` was provided instead of ``project_dir``).
+
+> **See Also**
+> `get_callers`: For the reverse direction (who calls a method).
+> `get_call_graph`: For the complete call relationship graph.
 
 ##### `JavaAnalysis.get_methods`
 
@@ -334,15 +572,22 @@ Should return  a dictionary of callees by the given method in the given class.
 get_methods() -> Dict[str, Dict[str, JCallable]]
 ```
 
-Should return  all methods in the Java code.
+Return all methods in the project grouped by class.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Retrieves all methods from all classes in the analyzed project,
+organized in a nested dictionary structure by qualified class name
+and then method signature.
 
 **Returns:**
 
-- `Dict[str, Dict[str, JCallable]]`: Dict[str, Dict[str, JCallable]]: Dictionary of dictionaries of all methods in the Java code with qualified class name as key and dictionary of methods in that class.
+- `Dict[str, Dict[str, JCallable]]`: A nested dictionary with structure:: { "com.example.ClassName": { "methodName(ParamType)": JCallable, "anotherMethod()": JCallable, ... }, ... }
+- `Dict[str, Dict[str, JCallable]]`: class:`~cldk.models.java.JCallable` contains the method's
+- `Dict[str, Dict[str, JCallable]]`: signature, parameters, return type, body, annotations, and other
+- `Dict[str, Dict[str, JCallable]]`: metadata.
+
+> **See Also**
+> `get_methods_in_class`: For methods of a specific class.
+> `get_method`: For a single method by name.
 
 ##### `JavaAnalysis.get_classes`
 
@@ -350,38 +595,52 @@ Should return  all methods in the Java code.
 get_classes() -> Dict[str, JType]
 ```
 
-Should return  all classes in the Java code.
+Return all classes in the project.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Retrieves all type declarations (classes, interfaces, enums, records)
+discovered during analysis, organized by their fully qualified names.
 
 **Returns:**
 
-- `Dict[str, JType]`: Dict[str, JType]: A dictionary of all classes in the Java code, with qualified class names as keys.
+- `Dict[str, JType]`: A dictionary mapping fully qualified class names (strings) to
+- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects containing class metadata,
+- `Dict[str, JType]`: methods, fields, and inheritance information.
+
+> **See Also**
+> `get_class`: For a single class by name.
+> `get_classes_by_criteria`: For filtered class retrieval.
 
 ##### `JavaAnalysis.get_classes_by_criteria`
 
 ```python
-get_classes_by_criteria(inclusions = None, exclusions = None) -> Dict[str, JType]
+get_classes_by_criteria(inclusions: List[str] | None = None, exclusions: List[str] | None = None) -> Dict[str, JType]
 ```
 
-Should return  a dictionary of all classes with the given criteria, in the Java code.
+Return classes matching inclusion/exclusion filter criteria.
+
+Filters the project's classes based on substring matching against
+their qualified names. Classes are included if their name contains
+any inclusion substring AND does not contain any exclusion substring.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `inclusions` | `List` | inlusion criteria for the classes. Defaults to None. |
-| `exclusions` | `List` | exclusion criteria for the classes. Defaults to None. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `inclusions` | `List[str] \| None` | List of substrings that class names must contain to be included. If ``None`` or empty, no inclusion filtering is applied (effectively includes nothing unless you have at least one inclusion pattern). |
+| `exclusions` | `List[str] \| None` | List of substrings that class names must NOT contain. Classes matching any exclusion pattern are filtered out, even if they match an inclusion pattern. |
 
 **Returns:**
 
-- `Dict[str, JType]`: Dict[str, JType]: A dict of all classes in the Java code, with qualified class names as keys
+- `Dict[str, JType]`: A dictionary mapping qualified class names to
+- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for classes matching
+- `Dict[str, JType]`: the criteria.
+
+> **Note**
+> The filtering uses substring matching (``in`` operator), not
+> regular expressions or glob patterns.
+
+> **See Also**
+> `get_classes`: For all classes without filtering.
 
 ##### `JavaAnalysis.get_class`
 
@@ -389,21 +648,26 @@ Should return  a dictionary of all classes with the given criteria, in the Java 
 get_class(qualified_class_name: str) -> JType
 ```
 
-Should return  a class object given qualified class name.
+Return a specific class by its qualified name.
+
+Retrieves detailed information about a single class, including its
+methods, fields, annotations, modifiers, and inheritance information.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.service.UserService"``). |
 
 **Returns:**
 
-- `JType`: Class object for the given qualified class name.
+- `JType`: class:`~cldk.models.java.JType` object containing all analyzed
+- `JType`: information about the class. Returns ``None`` if the class is not
+- `JType`: found in the analyzed project.
+
+> **See Also**
+> `get_classes`: For all classes in the project.
+> `get_java_file`: To find which file contains a class.
 
 ##### `JavaAnalysis.get_method`
 
@@ -411,22 +675,27 @@ Should return  a class object given qualified class name.
 get_method(qualified_class_name: str, qualified_method_name: str) -> JCallable
 ```
 
-Should return  a method object given qualified class and method names.
+Return a specific method by class and method signature.
+
+Retrieves detailed information about a single method, including its
+signature, parameters, return type, annotations, body, and metrics.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-| `qualified_method_name` | `str` | The qualified name of the method. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class containing the method (e.g., ``"com.example.service.UserService"``). |
+| `qualified_method_name` | `str` | The method signature to retrieve (e.g., ``"getUser(String)"`` or ``"process())"``). |
 
 **Returns:**
 
-- `JCallable`: A method for the given qualified method name.
+- `JCallable`: class:`~cldk.models.java.JCallable` object containing all
+- `JCallable`: analyzed information about the method. Returns ``None`` if the
+- `JCallable`: method is not found.
+
+> **See Also**
+> `get_methods_in_class`: For all methods of a class.
+> `get_method_parameters`: For just the parameter list.
 
 ##### `JavaAnalysis.get_method_parameters`
 
@@ -434,22 +703,26 @@ Should return  a method object given qualified class and method names.
 get_method_parameters(qualified_class_name: str, qualified_method_name: str) -> List[str]
 ```
 
-Should return  a list of method parameters given qualified class and method names.
+Return the parameter types for a specific method.
+
+Retrieves the list of parameter type names defined in the method
+signature.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-| `qualified_method_name` | `str` | The qualified name of the method. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class containing the method. |
+| `qualified_method_name` | `str` | The method signature to get parameters for. |
 
 **Returns:**
 
-- `List[str]`: A method for the given qualified method name.
+- `List[str]`: A list of parameter type names as strings, in the order they
+- `List[str]`: appear in the method signature. Returns an empty list if the
+- `List[str]`: method is not found or has no parameters.
+
+> **See Also**
+> `get_method`: For complete method information.
 
 ##### `JavaAnalysis.get_java_file`
 
@@ -457,21 +730,26 @@ Should return  a list of method parameters given qualified class and method name
 get_java_file(qualified_class_name: str) -> str
 ```
 
-Should return  a class given qualified class name.
+Return the file path containing a class with the given name.
+
+Given a qualified class name, returns the file path where that class
+is defined. This is useful for navigating from class references back
+to source files.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class to locate (e.g., ``"com.example.service.UserService"``). |
 
 **Returns:**
 
-- `str`: Java file name containing the given qualified class.
+- `str`: The file path (as a string) containing the class definition.
+- `str`: Returns ``None`` if no class with the given name is found.
+
+> **See Also**
+> `get_class`: To get the full class object by name.
+> `get_java_compilation_unit`: To get the compilation unit.
 
 ##### `JavaAnalysis.get_java_compilation_unit`
 
@@ -479,145 +757,186 @@ Should return  a class given qualified class name.
 get_java_compilation_unit(file_path: str) -> JCompilationUnit
 ```
 
-Given the path of a Java source file, returns the compilation unit object from the symbol table.
+Return the compilation unit for a specific file path.
+
+Retrieves the `JCompilationUnit` object corresponding to a
+specific Java source file in the analyzed project.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `file_path` | `str` | Absolute path to Java source file |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `file_path` | `str` | The path to the Java file, which should be an absolute path or a path relative to the project root. |
 
 **Returns:**
 
-- `JCompilationUnit`: Compilation unit object for Java source file
+- `JCompilationUnit`: class:`~cldk.models.java.JCompilationUnit` for the file,
+- `JCompilationUnit`: containing all analyzed information about package, imports,
+- `JCompilationUnit`: and type declarations. Returns ``None`` if the file is not
+- `JCompilationUnit`: part of the analyzed project.
+
+> **See Also**
+> `get_symbol_table`: For bulk access to all compilation units.
+> `get_java_file`: For reverse lookup (class to file).
 
 ##### `JavaAnalysis.get_methods_in_class`
 
 ```python
-get_methods_in_class(qualified_class_name) -> Dict[str, JCallable]
+get_methods_in_class(qualified_class_name: str) -> Dict[str, JCallable]
 ```
 
-Should return  a dictionary of all methods of the given class.
+Return all methods defined in a specific class.
+
+Retrieves all methods belonging to the specified class, including
+instance methods, static methods, and constructors.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | qualified class name |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.service.UserService"``). |
 
 **Returns:**
 
-- `Dict[str, JCallable]`: Dict[str, JCallable]: A dictionary of all constructors of the given class.
+- `Dict[str, JCallable]`: A dictionary mapping method signatures (strings) to
+- `Dict[str, JCallable]`: class:`~cldk.models.java.JCallable` objects. Returns an empty
+- `Dict[str, JCallable]`: dictionary if the class is not found or has no methods.
+
+> **See Also**
+> `get_method`: For a single method by signature.
+> `get_constructors`: For constructors specifically.
 
 ##### `JavaAnalysis.get_constructors`
 
 ```python
-get_constructors(qualified_class_name) -> Dict[str, JCallable]
+get_constructors(qualified_class_name: str) -> Dict[str, JCallable]
 ```
 
-Should return  a dictionary of all constructors of the given class.
+Return all constructors of a specific class.
+
+Retrieves all constructor methods defined in the specified class.
+Constructors are methods with the same name as the class.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | qualified class name |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.model.User"``). |
 
 **Returns:**
 
-- `Dict[str, JCallable]`: Dict[str, JCallable]: A dictionary of all constructors of the given class.
+- `Dict[str, JCallable]`: A dictionary mapping constructor signatures to
+- `Dict[str, JCallable]`: class:`~cldk.models.java.JCallable` objects. Returns an empty
+- `Dict[str, JCallable]`: dictionary if the class has no explicit constructors.
+
+> **See Also**
+> `get_methods_in_class`: For all methods including constructors.
 
 ##### `JavaAnalysis.get_fields`
 
 ```python
-get_fields(qualified_class_name) -> List[JField]
+get_fields(qualified_class_name: str) -> List[JField]
 ```
 
-Should return  a dictionary of all fields of the given class
+Return all fields (member variables) of a specific class.
+
+Retrieves all field declarations in the specified class, including
+instance fields, static fields, and constants.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | qualified class name |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.model.User"``). |
 
 **Returns:**
 
-- `List[JField]`: List[JField]: A list of all fields of the given class.
+- `List[JField]`: A list of `JField` objects, each
+- `List[JField]`: containing information about a field's name, type, modifiers,
+- `List[JField]`: and annotations.
+
+> **See Also**
+> `get_class`: For complete class information.
 
 ##### `JavaAnalysis.get_nested_classes`
 
 ```python
-get_nested_classes(qualified_class_name) -> List[JType]
+get_nested_classes(qualified_class_name: str) -> List[JType]
 ```
 
-Should return  a dictionary of all nested classes of the given class
+Return all nested (inner) classes of a specific class.
+
+Retrieves all classes that are defined inside the specified class,
+including static nested classes and inner classes.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | qualified class name |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the outer class (e.g., ``"com.example.model.Container"``). |
 
 **Returns:**
 
-- `List[JType]`: List[JType]: A list of nested classes for the given class.
+- `List[JType]`: A list of `JType` objects for each
+- `List[JType]`: nested class. Returns an empty list if no nested classes exist.
+
+> **See Also**
+> `get_class`: For the outer class information.
 
 ##### `JavaAnalysis.get_sub_classes`
 
 ```python
-get_sub_classes(qualified_class_name) -> Dict[str, JType]
+get_sub_classes(qualified_class_name: str) -> Dict[str, JType]
 ```
 
-Should return  a dictionary of all sub-classes of the given class
+Return all classes that extend the specified class.
+
+Finds all classes in the project that directly extend the specified
+base class. This is useful for understanding class hierarchies and
+finding implementations of abstract classes.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | qualified class name |
+| `qualified_class_name` | `str` | The fully qualified name of the base class to find subclasses of (e.g., ``"com.example.base.BaseService"``). |
 
 **Returns:**
 
-- `Dict[str, JType]`: Dict[str, JType]: A dictionary of all sub-classes of the given class, and class details
+- `Dict[str, JType]`: A dictionary mapping qualified class names to
+- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for all classes that
+- `Dict[str, JType]`: extend the specified class.
+
+> **See Also**
+> `get_extended_classes`: For the reverse (what a class extends).
+> `get_class_hierarchy`: For the full inheritance graph.
 
 ##### `JavaAnalysis.get_extended_classes`
 
 ```python
-get_extended_classes(qualified_class_name) -> List[str]
+get_extended_classes(qualified_class_name: str) -> List[str]
 ```
 
-Should return  a list of all extended classes for the given class.
-Args:
-    qualified_class_name (str): The qualified name of the class.
+Return the superclass(es) that a class extends.
 
-**Raises:**
+Retrieves the parent class for the specified class. In Java, a class
+can extend at most one other class (single inheritance).
 
-- `NotImplementedError`: Raised when we do not support this function.
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `qualified_class_name` | `str` | The fully qualified name of the class to get the superclass for. |
 
 **Returns:**
 
-- `List[str]`: List[str]: A list of extended classes for the given class.
+- `List[str]`: A list of superclass names (typically containing zero or one
+- `List[str]`: element, since Java has single inheritance). Returns empty list
+- `List[str]`: if the class directly extends Object or is not found.
+
+> **See Also**
+> `get_sub_classes`: For finding classes that extend this class.
+> `get_implemented_interfaces`: For interface implementations.
 
 ##### `JavaAnalysis.get_implemented_interfaces`
 
@@ -625,21 +944,24 @@ Args:
 get_implemented_interfaces(qualified_class_name: str) -> List[str]
 ```
 
-Should return  a list of all implemented interfaces for the given class.
+Return all interfaces implemented by a class.
+
+Retrieves the list of interfaces that the specified class implements.
+A Java class can implement multiple interfaces.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class to get implemented interfaces for. |
 
 **Returns:**
 
-- `List[str]`: List[str]: A list of implemented interfaces for the given class.
+- `List[str]`: A list of interface names (as strings) that the class implements.
+- `List[str]`: Returns empty list if the class implements no interfaces.
+
+> **See Also**
+> `get_extended_classes`: For class inheritance.
 
 ##### `JavaAnalysis.get_class_call_graph`
 
@@ -647,23 +969,30 @@ Should return  a list of all implemented interfaces for the given class.
 get_class_call_graph(qualified_class_name: str, method_signature: str | None = None, using_symbol_table: bool = False) -> List[Tuple[JMethodDetail, JMethodDetail]]
 ```
 
-A call graph for a given class and (optionally) a given method.
+Return call graph edges reachable from a class or method.
+
+Extracts a subset of the call graph containing only edges reachable
+from the specified class (and optionally a specific method within
+that class). This is useful for understanding the call structure
+of a specific component without the noise of the full project graph.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The qualified name of the class. |
-| `method_signature` | `str \| None` | The signature of the method in the class.. Defaults to None. |
-| `using_symbol_table` | `bool` | Generate call graph using symbol table. Defaults to False. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `qualified_class_name` | `str` | The fully qualified name of the class to start traversal from (e.g., ``"com.example.service.UserService"``). |
+| `method_signature` | `str \| None` | Optional method signature to further constrain the starting point. If provided, only edges reachable from that specific method are included. If ``None``, edges from all methods in the class are included. |
+| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for faster but potentially less accurate resolution. If ``False`` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `List[Tuple[JMethodDetail, JMethodDetail]]`: List[Tuple[JMethodDetail, JMethodDetail]]: An edge list of the call graph for the given class and method.
+- `List[Tuple[JMethodDetail, JMethodDetail]]`: A list of tuples ``(caller, callee)`` where each element is a
+- `List[Tuple[JMethodDetail, JMethodDetail]]`: class:`~cldk.models.java.JMethodDetail` object representing
+- `List[Tuple[JMethodDetail, JMethodDetail]]`: a method in the call relationship.
+
+> **See Also**
+> `get_call_graph`: For the complete project call graph.
+> `get_callees`: For direct callees of a single method.
 
 ##### `JavaAnalysis.get_entry_point_classes`
 
@@ -671,15 +1000,20 @@ A call graph for a given class and (optionally) a given method.
 get_entry_point_classes() -> Dict[str, JType]
 ```
 
-Should return  a dictionary of all entry point classes in the Java code.
+Return all classes identified as application entry points.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Identifies classes that serve as entry points for the application,
+such as classes containing main methods, servlet classes, or
+framework-specific entry point classes.
 
 **Returns:**
 
-- `Dict[str, JType]`: Dict[str, JType]: A dict of all entry point classes in the Java code, with qualified class names as keys
+- `Dict[str, JType]`: A dictionary mapping qualified class names to
+- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for classes identified
+- `Dict[str, JType]`: as entry points.
+
+> **See Also**
+> `get_entry_point_methods`: For entry point methods.
 
 ##### `JavaAnalysis.get_entry_point_methods`
 
@@ -687,15 +1021,20 @@ Should return  a dictionary of all entry point classes in the Java code.
 get_entry_point_methods() -> Dict[str, Dict[str, JCallable]]
 ```
 
-Should return  a dictionary of all entry point methods in the Java code with qualified class name as key and dictionary of methods in that class as value
+Return all methods identified as application entry points.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Identifies methods that serve as entry points for the application,
+such as main methods, servlet doGet/doPost methods, or framework-
+specific handler methods.
 
 **Returns:**
 
-- `Dict[str, Dict[str, JCallable]]`: Dict[str, Dict[str, JCallable]]: A dictionary of dictionaries of entry point methods in the Java code.
+- `Dict[str, Dict[str, JCallable]]`: A nested dictionary mapping class names to method signatures
+- `Dict[str, Dict[str, JCallable]]`: class:`~cldk.models.java.JCallable` objects for methods
+- `Dict[str, Dict[str, JCallable]]`: identified as entry points.
+
+> **See Also**
+> `get_entry_point_classes`: For entry point classes.
 
 ##### `JavaAnalysis.remove_all_comments`
 
@@ -705,13 +1044,22 @@ remove_all_comments() -> str
 
 Remove all comments from the source code.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Strips all single-line (``//``) and multi-line (``/* */``) comments
+from the source code, including Javadoc comments. This is useful
+for code analysis that should ignore comment content.
 
 **Returns:**
 
-- `str`: The source code with all comments removed.
+- `str`: A string containing the source code with all comments removed.
+- `str`: Whitespace where comments were removed may be preserved or
+- `str`: collapsed depending on the implementation.
+
+> **Note**
+> This method operates on the ``source_code`` provided during
+> initialization. It requires single-file mode.
+
+> **See Also**
+> `get_all_comments`: For extracting comments instead.
 
 ##### `JavaAnalysis.get_methods_with_annotations`
 
@@ -719,21 +1067,30 @@ Remove all comments from the source code.
 get_methods_with_annotations(annotations: List[str]) -> Dict[str, List[Dict]]
 ```
 
-Should return  a dictionary of method names and method bodies.
+Return methods decorated with specific annotations.
+
+This method is intended to find all methods that have any of the
+specified annotations, such as ``@Override``, ``@Test``,
+``@RequestMapping``, or custom annotations.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `annotations` | `List[str]` | List of annotation strings. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `annotations` | `List[str]` | List of annotation names to search for (e.g., ``["Override", "Test", "RequestMapping"]``). The ``@`` symbol should not be included. |
 
 **Returns:**
 
-- `Dict[str, List[Dict]]`: Dict[str, List[Dict]]: Dictionary with annotations as keys and a list of dictionaries containing method names and bodies, as values.
+- `Dict[str, List[Dict]]`: Would return a dictionary mapping annotation names to lists of
+- `Dict[str, List[Dict]]`: method information dictionaries containing method details and
+- `Dict[str, List[Dict]]`: bodies.
+
+**Raises:**
+
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_test_methods`: For finding test methods specifically.
 
 ##### `JavaAnalysis.get_test_methods`
 
@@ -741,15 +1098,24 @@ Should return  a dictionary of method names and method bodies.
 get_test_methods() -> Dict[str, str]
 ```
 
-Should return  a dictionary of method names and method bodies
+Return methods identified as test methods.
 
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+Finds all test methods in the source code by looking for methods
+annotated with common test framework annotations (e.g., ``@Test``
+from JUnit).
 
 **Returns:**
 
-- `Dict[str, str]`: Dict[str, str]: Dictionary of method names and method bodies.
+- `Dict[str, str]`: A dictionary mapping test method signatures to their source
+- `Dict[str, str]`: code bodies.
+
+> **Note**
+> This method operates on the ``source_code`` provided during
+> initialization. It requires single-file mode.
+
+> **See Also**
+> `get_methods_with_annotations`: For finding methods with
+>     any annotation.
 
 ##### `JavaAnalysis.get_calling_lines`
 
@@ -757,21 +1123,27 @@ Should return  a dictionary of method names and method bodies
 get_calling_lines(target_method_name: str) -> List[int]
 ```
 
-Should return  a list of line numbers in source method block where target method is called.
+Return line numbers where a method is called.
+
+This method is intended to find all line numbers in the source code
+where the specified method is invoked.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `target_method_name` | `str` | target method name. |
-
-**Raises:**
-
-- `NotImplementedError`: Raised when we do not support this function.
+| `target_method_name` | `str` | The name of the method to find calls to. |
 
 **Returns:**
 
-- `List[int]`: List[int]: List of line numbers within in source method code block.
+- `List[int]`: Would return a list of line numbers (integers) where calls occur.
+
+**Raises:**
+
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_callers`: For finding caller methods instead of lines.
 
 ##### `JavaAnalysis.get_call_targets`
 
@@ -779,17 +1151,28 @@ Should return  a list of line numbers in source method block where target method
 get_call_targets(declared_methods: dict) -> Set[str]
 ```
 
-Uses simple name resolution for finding the call targets. Nothing sophiscticed here. Just a simple search over the AST.
+Return call targets using simple name resolution.
+
+This method is intended to find all methods that could be called
+based on simple name matching in the AST, without full semantic
+analysis.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `declared_methods` | `dict` | A dictionary of all declared methods in the class. |
+| `declared_methods` | `dict` | Dictionary of declared method names and signatures to match against. |
 
 **Returns:**
 
-- `Set[str]`: Set[str]: A list of call targets (methods).
+- `Set[str]`: Would return a set of method names that are call targets.
+
+**Raises:**
+
+- `NotImplementedError`: This functionality is not yet implemented.
+
+> **See Also**
+> `get_call_graph`: For full semantic call resolution.
 
 ##### `JavaAnalysis.get_all_crud_operations`
 
@@ -797,11 +1180,22 @@ Uses simple name resolution for finding the call targets. Nothing sophiscticed h
 get_all_crud_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]
 ```
 
-Should return  a dictionary of all CRUD operations in the source code.
+Return all CRUD (Create, Read, Update, Delete) operations.
+
+Identifies and returns all database operations in the project by
+analyzing JPA/Hibernate annotations, repository patterns, and SQL
+statements. This is useful for understanding data access patterns
+in enterprise applications.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]: A list of all CRUD operations in the source code.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries, each containing: - ``"class"``: The `JType` containing the operation - ``"method"``: The `JCallable` performing the operation - ``"operations"``: List of `JCRUDOperation` objects
+
+> **See Also**
+> `get_all_create_operations`: For create operations only.
+> `get_all_read_operations`: For read operations only.
+> `get_all_update_operations`: For update operations only.
+> `get_all_delete_operations`: For delete operations only.
 
 ##### `JavaAnalysis.get_all_create_operations`
 
@@ -809,11 +1203,18 @@ Should return  a dictionary of all CRUD operations in the source code.
 get_all_create_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]
 ```
 
-Should return  a list of all create operations in the source code.
+Return all Create operations from CRUD analysis.
+
+Identifies database insert/create operations by analyzing
+``save()``, ``persist()``, ``insert()``, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]: A list of all create operations in the source code.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+
+> **See Also**
+> `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_read_operations`
 
@@ -821,11 +1222,18 @@ Should return  a list of all create operations in the source code.
 get_all_read_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]
 ```
 
-Should return  a list of all read operations in the source code.
+Return all Read operations from CRUD analysis.
+
+Identifies database read/select operations by analyzing
+``find()``, ``get()``, ``select()``, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]: A list of all read operations in the source code.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+
+> **See Also**
+> `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_update_operations`
 
@@ -833,11 +1241,18 @@ Should return  a list of all read operations in the source code.
 get_all_update_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]
 ```
 
-Should return  a list of all update operations in the source code.
+Return all Update operations from CRUD analysis.
+
+Identifies database update operations by analyzing
+``update()``, ``merge()``, ``set()``, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]: A list of all update operations in the source code.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+
+> **See Also**
+> `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_delete_operations`
 
@@ -845,11 +1260,18 @@ Should return  a list of all update operations in the source code.
 get_all_delete_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]
 ```
 
-Should return  a list of all delete operations in the source code.
+Return all Delete operations from CRUD analysis.
+
+Identifies database delete operations by analyzing
+``delete()``, ``remove()``, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]: A list of all delete operations in the source code.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
+- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+
+> **See Also**
+> `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_comments_in_a_method`
 
@@ -857,18 +1279,26 @@ Should return  a list of all delete operations in the source code.
 get_comments_in_a_method(qualified_class_name: str, method_signature: str) -> List[JComment]
 ```
 
-Get all comments in a method.
+Return all comments contained within a specific method.
+
+Retrieves all comment nodes (single-line, multi-line, and Javadoc)
+that appear within the body of the specified method.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | Qualified name of the class. |
-| `method_signature` | `str` | Signature of the method. |
+| `qualified_class_name` | `str` | The fully qualified name of the class containing the method. |
+| `method_signature` | `str` | The method signature to get comments from. |
 
 **Returns:**
 
-- `List[JComment]`: List[str]: List of comments in the method.
+- `List[JComment]`: A list of `JComment` objects found
+- `List[JComment]`: within the method body. Returns empty list if method not found.
+
+> **See Also**
+> `get_comments_in_a_class`: For class-level comments.
+> `get_all_comments`: For all comments in the project.
 
 ##### `JavaAnalysis.get_comments_in_a_class`
 
@@ -876,17 +1306,26 @@ Get all comments in a method.
 get_comments_in_a_class(qualified_class_name: str) -> List[JComment]
 ```
 
-Get all comments in a class.
+Return all comments contained within a specific class.
+
+Retrieves all comment nodes that appear within the class body,
+including Javadoc comments, method-level comments, and inline
+comments.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | Qualified name of the class. |
+| `qualified_class_name` | `str` | The fully qualified name of the class. |
 
 **Returns:**
 
-- `List[JComment]`: List[str]: List of comments in the class.
+- `List[JComment]`: A list of `JComment` objects found
+- `List[JComment]`: within the class. Returns empty list if class not found.
+
+> **See Also**
+> `get_comments_in_a_method`: For method-specific comments.
+> `get_comment_in_file`: For file-level comments.
 
 ##### `JavaAnalysis.get_comment_in_file`
 
@@ -894,17 +1333,24 @@ Get all comments in a class.
 get_comment_in_file(file_path: str) -> List[JComment]
 ```
 
-Get all comments in a file.
+Return all comments in a specific file.
+
+Retrieves all comment nodes from the specified source file,
+including file-level comments, class comments, and method comments.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `file_path` | `str` | Path to the file. |
+| `file_path` | `str` | The path to the Java file. |
 
 **Returns:**
 
-- `List[JComment]`: List[str]: List of comments in the file.
+- `List[JComment]`: A list of `JComment` objects found
+- `List[JComment]`: in the file. Returns empty list if file not found.
+
+> **See Also**
+> `get_all_comments`: For comments across all files.
 
 ##### `JavaAnalysis.get_all_comments`
 
@@ -912,11 +1358,18 @@ Get all comments in a file.
 get_all_comments() -> Dict[str, List[JComment]]
 ```
 
-Get all comments in the Java application.
+Return all comments in the project grouped by file.
+
+Retrieves all comment nodes from all analyzed files, organized
+by file path.
 
 **Returns:**
 
-- `Dict[str, List[JComment]]`: Dict[str, List[str]]: Dictionary of file paths and their corresponding comments.
+- `Dict[str, List[JComment]]`: A dictionary mapping file paths (strings) to lists of
+- `Dict[str, List[JComment]]`: class:`~cldk.models.java.JComment` objects.
+
+> **See Also**
+> `get_all_docstrings`: For Javadoc comments only.
 
 ##### `JavaAnalysis.get_all_docstrings`
 
@@ -924,15 +1377,46 @@ Get all comments in the Java application.
 get_all_docstrings() -> Dict[str, List[JComment]]
 ```
 
-Get all docstrings in the Java application.
+Return all Javadoc comments in the project grouped by file.
+
+Retrieves only Javadoc-style comments (``/** ... */``) from all
+analyzed files. These typically document classes, methods, and
+fields.
 
 **Returns:**
 
-- `Dict[str, List[JComment]]`: Dict[str, List[str]]: Dictionary of file paths and their corresponding docstrings.
+- `Dict[str, List[JComment]]`: A dictionary mapping file paths (strings) to lists of
+- `Dict[str, List[JComment]]`: class:`~cldk.models.java.JComment` objects where
+- `Dict[str, List[JComment]]`: ``is_javadoc`` is ``True``.
+
+> **See Also**
+> `get_all_comments`: For all comment types.
 
 ## Schema
 
-Models module
+Java data models module.
+
+This module defines Pydantic model classes for representing Java code elements
+extracted during static analysis. These models form the core data structures
+returned by `JavaAnalysis` and related classes.
+
+> **The models represent**
+> - **Types**: Classes, interfaces, enums, records (`JType`)
+> - **Callables**: Methods, constructors (`JCallable`)
+> - **Fields**: Class and instance variables (`JField`)
+> - **Comments**: Javadoc and inline comments (`JComment`)
+> - **Imports**: Import declarations (`JImport`)
+> - **CRUD Operations**: Database operations (`JCRUDOperation`)
+> - **Call Information**: Method call details (`JMethodDetail`, `JCallSite`)
+
+All models inherit from Pydantic's `BaseModel`, providing:
+    - Automatic validation of field types
+    - JSON serialization/deserialization
+    - Schema generation for documentation
+
+> **See Also**
+> - `JavaAnalysis`: Analysis facade using these models.
+> - `enums`: Related enumeration types.
 
 ### `JComment`
 
@@ -952,6 +1436,22 @@ Represents a comment in Java code.
 | `start_column` | `int` |  |
 | `end_column` | `int` |  |
 | `is_javadoc` | `bool` |  |
+
+### `JImport`
+
+```python
+class JImport(BaseModel)
+```
+
+Represents a Java import declaration.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `path` | `str` |  |
+| `is_static` | `bool` |  |
+| `is_wildcard` | `bool` |  |
 
 ### `JRecordComponent`
 
@@ -992,6 +1492,7 @@ Represents a field in a Java class or interface.
 | `variables` | `List[str]` |  |
 | `modifiers` | `List[str]` |  |
 | `annotations` | `List[str]` |  |
+| `variable_initializers` | `Dict[str, str] \| None` |  |
 
 ### `JCallableParameter`
 
@@ -1226,8 +1727,29 @@ Represents a compilation unit in Java.
 | `package_name` | `str` |  |
 | `comments` | `List[JComment]` |  |
 | `imports` | `List[str]` |  |
+| `import_declarations` | `List[JImport]` |  |
 | `type_declarations` | `Dict[str, JType]` |  |
 | `is_modified` | `bool` |  |
+
+#### Methods
+
+##### `JCompilationUnit.normalize_import_fields`
+
+```python
+normalize_import_fields(data: Any) -> Any
+```
+
+Normalize legacy and structured import payloads into both model fields.
+
+**Parameters:**
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `data` | `Any` | Raw input payload for ``JCompilationUnit``. |
+
+**Returns:**
+
+- `Any`: Input payload with ``imports`` and ``import_declarations`` synchronized.
 
 ### `JMethodDetail`
 
@@ -1321,3 +1843,4 @@ validate_source(symbol_table) -> Dict[str, JCompilationUnit]
 ```
 
 <!-- CLDK:API:END -->
+

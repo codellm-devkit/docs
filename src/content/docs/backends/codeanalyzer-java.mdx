@@ -18,7 +18,7 @@ codeanalyzer-java is a **standalone JAR tool** that takes a Java project (or a s
 - **Comments & Javadoc**: Extracted and positioned for each entity
 - **Entry points**: Main methods and framework-identified entry points (REST endpoints, Struts actions)
 
-The Python SDK invokes this JAR, parses the JSON, and wraps it in `JavaAnalysis`, so callers interact with an `analysis` object rather than the backend directly.
+The Python SDK invokes this backend, parses the JSON, and wraps it in `JavaAnalysis`, so callers interact with an `analysis` object rather than the backend directly. The backend is a JVM-free binary that ships with the packaged `codeanalyzer-java` PyPI dependency and is run via `python -m codeanalyzer_java`; there is no separate JAR download or `analysis_backend_path` override.
 
 ## Architecture
 
@@ -329,10 +329,10 @@ java -jar codeanalyzer-2.3.7.jar \
 
 ## How the Python SDK uses it
 
-The Python SDK (`JavaAnalysis`) automates JAR invocation:
+The Python SDK (`JavaAnalysis`) automates backend invocation:
 
-1. **JAR discovery**: If `analysis_backend_path` is not provided, searches the package resources for `codeanalyzer-*.jar` (bundled)
-2. **Invocation**: Calls `java -jar codeanalyzer-*.jar -i <project> -a <level> -o <tmpdir>` (or reads from stdout)
+1. **Backend discovery**: The JVM-free backend ships with the packaged `codeanalyzer-java` PyPI dependency and is run via `python -m codeanalyzer_java`. There is no `analysis_backend_path` override anymore.
+2. **Invocation**: Calls the backend with `-i <project> -a <level> -o <cache_dir>` (or reads from stdout)
 3. **JSON parsing**: Deserializes the output into Pydantic models (`JApplication`, `JType`, `JCallable`, etc.)
 4. **Facade**: Wraps the models in `JavaAnalysis`, exposing query methods like `get_classes()`, `get_call_graph()`, `get_callers()`
 
@@ -341,27 +341,47 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 # Behind the scenes:
-# 1. CLDK detects language="java" -> uses JCodeanalyzer backend
-# 2. JCodeanalyzer finds/downloads codeanalyzer-2.3.7.jar
-# 3. Invokes: java -jar ... -i commons-cli -a 2 -o /tmp/...
-# 4. Parses JSON -> JApplication (symbol_table + call_graph)
-# 5. Returns JavaAnalysis
+# 1. CLDK.java(...) selects the codeanalyzer-java backend (default CodeAnalyzerConfig)
+# 2. Runs the packaged backend: python -m codeanalyzer_java -i commons-cli -a 2 -o <cache_dir>
+# 3. Parses JSON -> JApplication (symbol_table + call_graph)
+# 4. Returns JavaAnalysis
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
-    analysis_backend_path="/path/to/jar/dir"  # Optional: custom JAR location
 )
 ```
 
-To point at a custom JAR location (for example, a locally built version):
+The old `CLDK(language="java").analysis(...)` form still works but is **deprecated**; prefer the `CLDK.java(...)` factory shown above. The `from cldk import CLDK` import is unchanged.
+
+To control where analysis artifacts are cached, pass a backend config:
 
 ```python
-analysis = CLDK(language="java").analysis(
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
+
+analysis = CLDK.java(
     project_path="my_project",
     analysis_level=AnalysisLevel.call_graph,
-    analysis_backend_path="/path/containing/codeanalyzer-custom.jar"
+    backend=CodeAnalyzerConfig(cache_dir="/tmp/analysis-cache"),
 )
+```
+
+### Keyword arguments
+
+`CLDK.java(...)` accepts `project_path`, `analysis_level`, `target_files`, and `eager`. The backend is selected by the **type** of the `backend=` config; for Java the only backend is the in-memory codeanalyzer (`CodeAnalyzerConfig`), so omit `backend=` for the default. Pass `backend=CodeAnalyzerConfig(cache_dir=...)` only to override where artifacts are cached. Caching is **on by default**; the cache root defaults to `<project>/.codeanalyzer` and artifacts are written under a language-keyed subdirectory (`<cache_dir>/java/`).
+
+Java also accepts `source_code=...` for analyzing a single Java source string, but this is **deprecated**; prefer `project_path`.
+
+```python
+analysis = CLDK.java(source_code="public class Test {}")  # deprecated; prefer project_path
+```
+
+Import the config objects from:
+
+```python
+from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
 ```
 
 ## Building & testing

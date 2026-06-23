@@ -41,7 +41,7 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 import networkx as nx
 
-analysis = CLDK(language="java").analysis(
+analysis = CLDK.java(
     project_path=".",
     analysis_level=AnalysisLevel.call_graph,   # needed for callers/reachability
 )
@@ -168,7 +168,7 @@ The trace is reconstructed from call-graph edges.
    from cldk.analysis import AnalysisLevel
    import networkx as nx
 
-   analysis = CLDK(language="java").analysis(
+   analysis = CLDK.java(
        project_path=".", analysis_level=AnalysisLevel.call_graph,
    )
    # ... query analysis (get_callers / get_callees / get_call_graph) and print() ...
@@ -203,7 +203,7 @@ The trace is reconstructed from call-graph edges.
      from cldk import CLDK
      from cldk.analysis import AnalysisLevel
 
-     analysis = CLDK(language="java").analysis(
+     analysis = CLDK.java(
          project_path=".", analysis_level=AnalysisLevel.call_graph,
      )
      callers = analysis.get_callers("<CLASS>", "<METHOD>")
@@ -230,7 +230,7 @@ The trace is reconstructed from call-graph edges.
      from cldk.analysis import AnalysisLevel
      import networkx as nx
 
-     analysis = CLDK(language="java").analysis(
+     analysis = CLDK.java(
          project_path=".", analysis_level=AnalysisLevel.call_graph,
      )
      cg = analysis.get_call_graph()
