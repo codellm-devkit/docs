@@ -20,6 +20,7 @@ and a `!^_` filter (private members hidden).
 from __future__ import annotations
 
 import argparse
+import importlib.metadata
 import re
 import sys
 from pathlib import Path
@@ -374,9 +375,33 @@ GITHUB_BADGE = (
 )
 
 
-def build_body(root, page: dict) -> str:
+def cldk_version() -> str:
+    """The version of the installed `cldk` these pages were generated from."""
+    try:
+        return importlib.metadata.version("cldk")
+    except importlib.metadata.PackageNotFoundError:
+        return ""
+
+
+def version_badge(version: str) -> str:
+    """A shields.io badge stating the python-sdk version, linked to PyPI."""
+    if not version:
+        return ""
+    safe = version.replace("-", "--")
+    return (
+        f"[![cldk {version}]"
+        f"(https://img.shields.io/badge/cldk-{safe}-3776AB?logo=pypi&logoColor=white)]"
+        f"(https://pypi.org/project/cldk/{version}/)"
+    )
+
+
+def build_body(root, page: dict, version: str = "") -> str:
     """The generated symbol reference body (no frontmatter)."""
-    out: list[str] = [GITHUB_BADGE, ""]
+    badge = version_badge(version)
+    header = f"{GITHUB_BADGE} {badge}" if badge else GITHUB_BADGE
+    out: list[str] = [header, ""]
+    if version:
+        out += [f"_API reference generated from cldk {version}._", ""]
     multi = len(page["sections"]) > 1
     for heading, dotted in page["sections"]:
         module = get_object(root, dotted)
@@ -470,9 +495,16 @@ def main() -> int:
         )
         return 1
 
+    version = cldk_version()
+    if version:
+        print(f"generating from cldk {version}")
+    else:
+        print("warning: could not determine the cldk version (is it installed?)",
+              file=sys.stderr)
+
     args.out.mkdir(parents=True, exist_ok=True)
     for page in PAGES:
-        body = build_body(root, page)
+        body = build_body(root, page, version)
         dest = args.out / page["file"]
         text = inject_or_create(dest, page, body)
         mode = "injected into" if dest.exists() and MARK_START in dest.read_text(encoding="utf-8") else "wrote"
