@@ -28,7 +28,7 @@ CLDK?](/what-is-cldk/), or the [Quickstart](/quickstart/).
 - **[Python analysis](/reference/python-api/python/)**: symbol table and call graph via Jedi + optional CodeQL.
 - **[Java analysis](/reference/python-api/java/)**, the most complete analyzer: symbol table, call graph, subclasses/interfaces, CRUD.
 
-More languages (Go, TypeScript, Rust, and C) are on the way.
+TypeScript is available in beta through `CLDK.typescript()` (symbol table and call graph; entrypoint detection is still in progress). Go, Rust, and C are on the way.
 
 For runnable patterns rather than symbol lists, see [Common
 tasks](/guides/common-tasks/) and the [cocoa](/cocoa/).

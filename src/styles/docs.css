@@ -280,6 +280,7 @@ html {
 .sidebar-content a[data-cldk-icon="polygon-16"] { --cldk-icon: url("/icons/cldk/polygon-16.svg"); }
 .sidebar-content a[data-cldk-icon="results-16"] { --cldk-icon: url("/icons/cldk/results-16.svg"); }
 .sidebar-content a[data-cldk-icon="globe-network-16"] { --cldk-icon: url("/icons/cldk/globe-network-16.svg"); }
+.sidebar-content a[data-cldk-icon="cloud-16"] { --cldk-icon: url("/icons/cldk/cloud-16.svg"); }
 .sidebar-content a[data-cldk-icon="python"] { --cldk-icon: url("/icons/cldk/python.svg"); }
 .sidebar-content a[data-cldk-icon="java"] { --cldk-icon: url("/icons/cldk/java.svg"); }
 .sidebar-content a[data-cldk-icon="typescript"] { --cldk-icon: url("/icons/cldk/typescript.svg"); }

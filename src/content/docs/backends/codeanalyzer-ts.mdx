@@ -350,6 +350,10 @@ analysis = CLDK.typescript(
 
 `Neo4jConnectionConfig` is importable from `cldk.analysis.commons.backend_config` (and also from `cldk.analysis.typescript.neo4j`).
 
+<Aside type="tip" title="Where the graph comes from">
+The read-only backend queries a graph that codeanalyzer-ts itself populates with `cants --emit neo4j`. Running analysis as scheduled jobs and serving agents from the shared graph is the [analysis-at-scale](/at-scale/) workflow.
+</Aside>
+
 ## Schema invariants
 
 All signatures follow one canonical `signatureOf()` rule: **project-relative file path (without extension) + dot-separated members**. For example:
@@ -380,10 +384,14 @@ For large projects (>100k LOC), analysis typically takes seconds to tens of seco
 
 ## Current maturity
 
+codeanalyzer-ts is **beta**: the symbol table and call graph are stable and queryable through the Python SDK, while entrypoint detection is not yet implemented.
+
 - **Symbol table**: Stable; all TypeScript node kinds supported
 - **Call graph**: Stable; tsc resolution + RTA expansion proven correct
-- **Dataflow enrichment (Jelly)**: Planned; not yet implemented
-- **Python SDK integration**: In progress
+- **Python SDK integration**: Available via `CLDK.typescript(...)` (in-process and read-only Neo4j backends)
+- **Neo4j graph output**: Available; `--emit neo4j` / `--emit schema` (see [Analysis at scale](/at-scale/))
+- **Entrypoint detection**: Not implemented; `get_entry_point_methods()` and `get_service_entry_point_methods()` raise `NotImplementedError`, and the backend emits an empty `entrypoints` array
+- **Dataflow enrichment (Jelly)**: Experimental; `--call-graph-provider jelly` exists but `tsc` remains the default
 
 ## See also
 

@@ -170,6 +170,13 @@ export default defineConfig({
           ],
         },
         {
+          label: "At scale",
+          items: [
+            { label: "Analysis at scale", slug: "at-scale", attrs: { "data-cldk-icon": "globe-network-16" } },
+            { label: "Deploy on Kubernetes", slug: "at-scale/kubernetes", attrs: { "data-cldk-icon": "cloud-16" } },
+          ],
+        },
+        {
           label: "SDKs",
           items: [
             { label: "Overview", slug: "reference/sdks", attrs: { "data-cldk-icon": "manual-16" } },

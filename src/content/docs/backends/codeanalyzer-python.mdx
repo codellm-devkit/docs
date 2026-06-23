@@ -321,6 +321,10 @@ analysis = CLDK.python(
 
 `Neo4jConnectionConfig` is importable from `cldk.analysis.commons.backend_config` (and also from `cldk.analysis.python.neo4j`).
 
+<Aside type="tip" title="Where the graph comes from">
+The read-only backend queries a graph that codeanalyzer-python itself populates with `canpy --emit neo4j`. Emitting once and serving many agents from the shared graph is the [analysis-at-scale](/at-scale/) workflow.
+</Aside>
+
 `CLDK.python(...)` keeps the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The old `CLDK(language="python").analysis(...)` form still works but is **deprecated**; prefer `CLDK.python(...)`. The `from cldk import CLDK` import is unchanged.
 
 ### Caching and virtualenv management

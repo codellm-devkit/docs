@@ -100,9 +100,9 @@ analysis = CLDK.python(
     backend=PyCodeAnalyzerConfig(use_codeql=True, use_ray=False),
 )
 
-# Read-only Neo4j backend (Python / TypeScript); the graph is populated out of band.
+# Read-only Neo4j backend (Java / Python / TypeScript); the graph is populated out of band.
 analysis = CLDK.typescript(
-    backend=Neo4jConnectionConfig(uri="bolt://localhost:7687", username="neo4j", password="neo4j"),
+    backend=Neo4jConnectionConfig(uri="bolt://localhost:7687", username="neo4j", password="neo4j", application_name="my_project"),
 )
 ```
 
@@ -110,7 +110,7 @@ analysis = CLDK.typescript(
 | --- | --- | --- |
 | (omit) / `CodeAnalyzerConfig` | In-process codeanalyzer | Default for Java/TypeScript. `cache_dir` only. |
 | `PyCodeAnalyzerConfig` | In-process codeanalyzer (Python) | Default for Python. Adds `use_codeql` / `use_ray`. |
-| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Python and TypeScript. `project_path` is optional; the graph is loaded out of band. |
+| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional; the graph is loaded out of band — see [Analysis at scale](/at-scale/). |
 
 <Aside type="note" title="Caching & removed arguments">
 Caching is **on by default** for Java/TS. Artifacts live under a unified, language-keyed `cache_dir` (default `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`). The old `analysis_backend_path` argument is **removed** (the binary ships with the packaged `codeanalyzer-*`; for the TypeScript backend, override the binary via the `$CODEANALYZER_TS_BIN` environment variable), and `analysis_json_path` is **removed** (folded into `cache_dir`).

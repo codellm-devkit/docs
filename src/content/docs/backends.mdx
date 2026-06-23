@@ -27,7 +27,7 @@ This is the **backend** layer. For the SDKs that consume it, see the [SDKs overv
 
 ## Maturity tiers
 
-<Badge text="Mature" variant="success" /> production-ready &nbsp;·&nbsp; <Badge text="Medium" variant="tip" /> usable, gaps remain &nbsp;·&nbsp; <Badge text="Help wanted" variant="danger" /> contributors wanted &nbsp;·&nbsp; <Badge text="Stub" variant="default" /> not started
+<Badge text="Mature" variant="success" /> production-ready &nbsp;·&nbsp; <Badge text="Beta" variant="caution" /> stable core, gaps remain &nbsp;·&nbsp; <Badge text="Medium" variant="tip" /> usable, gaps remain &nbsp;·&nbsp; <Badge text="Help wanted" variant="danger" /> contributors wanted &nbsp;·&nbsp; <Badge text="Stub" variant="default" /> not started
 
 ## Backends (analyzers)
 
@@ -37,7 +37,7 @@ The `codeanalyzer-*` tools parse a language and serialize the canonical symbol-t
 | --- | --- | --- |
 | **Java** | [codeanalyzer-java](/backends/codeanalyzer-java/) | <Badge text="Mature" variant="success" /> |
 | **Python** | [codeanalyzer-python](/backends/codeanalyzer-python/) | <Badge text="Mature" variant="success" /> |
-| **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Mature" variant="success" /> |
+| **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Beta" variant="caution" /> |
 | **JavaScript** | via [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
 | **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
@@ -50,6 +50,6 @@ The `codeanalyzer-*` tools parse a language and serialize the canonical symbol-t
 <CardGrid>
   <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation; emits the canonical Py* schema." href="/backends/codeanalyzer-python/" />
   <LinkCard title="codeanalyzer-java" description="WALA and Javaparser; produces symbol tables, call graphs, type hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
-  <LinkCard title="codeanalyzer-ts" description="Stable. The TypeScript/TSX analyzer, emitting the canonical symbol-table and call-graph schema." href="/backends/codeanalyzer-ts/" />
+  <LinkCard title="codeanalyzer-ts" description="Beta. The TypeScript/TSX analyzer, emitting the canonical symbol-table and call-graph schema; entrypoint detection is still in progress." href="/backends/codeanalyzer-ts/" />
   <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# are not yet built. A backend that emits the canonical JSON makes that language available to every SDK." href="/contributing/add-language-backend/" />
 </CardGrid>

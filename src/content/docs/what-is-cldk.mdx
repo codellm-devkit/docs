@@ -75,13 +75,13 @@ The backend is selected by language: Java uses CodeAnalyzer over WALA, and Pytho
 
 ## Language coverage
 
-Every supported language is queried through the same `analysis` API, backed by a language-specific engine. Java and Python are both supported today, with Java offering the deepest analysis, including class-hierarchy and CRUD extraction. Additional languages (TypeScript, Go, and Rust) are under active development.
+Every supported language is queried through the same `analysis` API, backed by a language-specific engine. Java and Python are supported today, with Java offering the deepest analysis, including class-hierarchy and CRUD extraction. TypeScript is available in beta: its symbol table and call graph are solid and queryable through `CLDK.typescript(...)`, while framework entrypoint detection is still in progress. Go and Rust are under active development.
 
 | Language   | Status         | Symbol table | Call graph / callers / callees |
 | ---------- | -------------- | ------------ | ------------------------------ |
 | Java       | Supported      | Yes          | Yes                            |
 | Python     | Supported      | Yes          | Yes                            |
-| TypeScript | In development | Planned      | Planned                        |
+| TypeScript | Beta           | Yes          | Yes                            |
 | Go         | In development | Planned      | Planned                        |
 | Rust       | In development | Planned      | Planned                        |
 
