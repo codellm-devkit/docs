@@ -187,6 +187,7 @@ export default defineConfig({
                 { label: "Core (CLDK)", slug: "reference/python-api/core", attrs: { "data-cldk-icon": "layers-16" } },
                 { label: "Python analysis", slug: "reference/python-api/python", attrs: { "data-cldk-icon": "python" } },
                 { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "java" } },
+                { label: "TypeScript analysis", slug: "reference/python-api/typescript", attrs: { "data-cldk-icon": "typescript" } },
               ],
             },
             {

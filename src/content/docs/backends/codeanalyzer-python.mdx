@@ -245,8 +245,8 @@ A call to `CLDK.python(project_path="my_pkg")` in the Python SDK proceeds as fol
    - `get_symbol_table() → Dict[str, PyModule]`
    - `get_classes() → Dict[str, PyClass]`
    - `get_call_graph() → networkx.DiGraph`
-   - `get_callers(target_class, target_method) → List[Tuple[str, PyCallable]]`
-   - `get_callees(source_callable) → List[PyCallable]`
+   - `get_callers(target_class_name, target_method_declaration) → Dict`
+   - `get_callees(source_class_name, source_method_declaration) → Dict`
 
 <Tabs syncKey="lang">
   <TabItem label="Direct SDK usage">

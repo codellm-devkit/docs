@@ -27,8 +27,9 @@ CLDK?](/what-is-cldk/), or the [Quickstart](/quickstart/).
 - **[Core (CLDK)](/reference/python-api/core/)**, the factory: the per-language `CLDK.java()`, `CLDK.python()`, `CLDK.typescript()`, and `CLDK.c()` entry points.
 - **[Python analysis](/reference/python-api/python/)**: symbol table and call graph via Jedi + optional CodeQL.
 - **[Java analysis](/reference/python-api/java/)**, the most complete analyzer: symbol table, call graph, subclasses/interfaces, CRUD.
+- **[TypeScript analysis](/reference/python-api/typescript/)** <span title="beta">(beta)</span>: symbol table, call graph, interfaces/enums/decorators; entrypoint detection is still in progress.
 
-TypeScript is available in beta through `CLDK.typescript()` (symbol table and call graph; entrypoint detection is still in progress). Go, Rust, and C are on the way.
+Go, Rust, and C are on the way.
 
 For runnable patterns rather than symbol lists, see [Common
 tasks](/guides/common-tasks/) and the [cocoa](/cocoa/).

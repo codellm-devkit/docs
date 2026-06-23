@@ -81,8 +81,17 @@ PAGES: list[dict] = [
             ("Schema", "cldk.models.python"),
         ],
     },
+    {
+        "file": "typescript.md",
+        "title": "TypeScript API",
+        "description": "Program analysis for TypeScript and related data models.",
+        "sections": [
+            ("Analysis", "cldk.analysis.typescript.typescript_analysis"),
+            ("Schema", "cldk.models.typescript"),
+        ],
+    },
     # NOTE: C analysis is intentionally omitted for now; it will return alongside
-    # Go, TypeScript, and Rust. Re-add a PAGES entry + a sidebar item to restore it.
+    # Go and Rust. Re-add a PAGES entry + a sidebar item to restore it.
 ]
 
 

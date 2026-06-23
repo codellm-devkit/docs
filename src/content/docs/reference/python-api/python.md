@@ -1217,7 +1217,264 @@ Re-exports the canonical Python analysis schema from ``codeanalyzer-python``
 so CLDK and the analyzer backend share a single source of truth for the
 data model.
 
-_No public symbols are exposed by this module._
+### `PyApplication`
+
+```python
+class PyApplication(BaseModel)
+```
+
+Represents a Python application.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `symbol_table` | `Dict[str, PyModule]` |  |
+| `call_graph` | `List[PyCallEdge]` |  |
+
+### `PyCallEdge`
+
+```python
+class PyCallEdge(BaseModel)
+```
+
+Identity-only call-graph edge with weight.
+
+Mirrors Java's ``CallDependency``. ``source`` and ``target`` are
+``PyCallable.signature`` strings, nodes of the graph are the existing
+``PyCallable`` entries in the symbol table, not a separate vertex type.
+Rich per-call metadata (receiver, arguments, location, ...) lives on
+``PyCallsite`` inside the source ``PyCallable.call_sites``.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `source` | `str` |  |
+| `target` | `str` |  |
+| `type` | `Literal['CALL_DEP']` |  |
+| `weight` | `int` |  |
+| `provenance` | `List[Literal['jedi', 'codeql', 'joern']]` |  |
+
+### `PyCallable`
+
+```python
+class PyCallable(BaseModel)
+```
+
+Represents a Python callable (function/method).
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `path` | `str` |  |
+| `signature` | `str` |  |
+| `comments` | `List[PyComment]` |  |
+| `decorators` | `List[str]` |  |
+| `parameters` | `List[PyCallableParameter]` |  |
+| `return_type` | `Optional[str]` |  |
+| `code` | `str` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+| `code_start_line` | `int` |  |
+| `accessed_symbols` | `List[PySymbol]` |  |
+| `call_sites` | `List[PyCallsite]` |  |
+| `inner_callables` | `Dict[str, 'PyCallable']` |  |
+| `inner_classes` | `Dict[str, 'PyClass']` |  |
+| `local_variables` | `List[PyVariableDeclaration]` |  |
+| `cyclomatic_complexity` | `int` |  |
+
+### `PyCallableParameter`
+
+```python
+class PyCallableParameter(BaseModel)
+```
+
+Represents a parameter of a Python callable (function/method).
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `type` | `Optional[str]` |  |
+| `default_value` | `Optional[str]` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+| `start_column` | `int` |  |
+| `end_column` | `int` |  |
+
+### `PyCallsite`
+
+```python
+class PyCallsite(BaseModel)
+```
+
+Represents a Python call site (function or method invocation) with contextual metadata.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `method_name` | `str` |  |
+| `receiver_expr` | `Optional[str]` |  |
+| `receiver_type` | `Optional[str]` |  |
+| `argument_types` | `List[str]` |  |
+| `return_type` | `Optional[str]` |  |
+| `callee_signature` | `Optional[str]` |  |
+| `is_constructor_call` | `bool` |  |
+| `start_line` | `int` |  |
+| `start_column` | `int` |  |
+| `end_line` | `int` |  |
+| `end_column` | `int` |  |
+
+### `PyClass`
+
+```python
+class PyClass(BaseModel)
+```
+
+Represents a Python class.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `signature` | `str` |  |
+| `comments` | `List[PyComment]` |  |
+| `code` | `str` |  |
+| `base_classes` | `List[str]` |  |
+| `methods` | `Dict[str, PyCallable]` |  |
+| `attributes` | `Dict[str, PyClassAttribute]` |  |
+| `inner_classes` | `Dict[str, 'PyClass']` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+
+### `PyClassAttribute`
+
+```python
+class PyClassAttribute(BaseModel)
+```
+
+Represents a Python class attribute.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `type` | `Optional[str]` |  |
+| `comments` | `List[PyComment]` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+
+### `PyComment`
+
+```python
+class PyComment(BaseModel)
+```
+
+Represents a Python comment.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `content` | `str` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+| `start_column` | `int` |  |
+| `end_column` | `int` |  |
+| `is_docstring` | `bool` |  |
+
+### `PyImport`
+
+```python
+class PyImport(BaseModel)
+```
+
+Represents a Python import statement.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `module` | `str` |  |
+| `name` | `str` |  |
+| `alias` | `Optional[str]` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+| `start_column` | `int` |  |
+| `end_column` | `int` |  |
+
+### `PyModule`
+
+```python
+class PyModule(BaseModel)
+```
+
+Represents a Python module.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `file_path` | `str` |  |
+| `module_name` | `str` |  |
+| `imports` | `List[PyImport]` |  |
+| `comments` | `List[PyComment]` |  |
+| `classes` | `Dict[str, PyClass]` |  |
+| `functions` | `Dict[str, PyCallable]` |  |
+| `variables` | `List[PyVariableDeclaration]` |  |
+| `content_hash` | `Optional[str]` |  |
+| `last_modified` | `Optional[float]` |  |
+| `file_size` | `Optional[int]` |  |
+
+### `PySymbol`
+
+```python
+class PySymbol(BaseModel)
+```
+
+Represents a symbol used or declared in Python code.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `scope` | `Literal['local', 'nonlocal', 'global', 'class', 'module']` |  |
+| `kind` | `Literal['variable', 'parameter', 'attribute', 'function', 'class', 'module']` |  |
+| `type` | `Optional[str]` |  |
+| `qualified_name` | `Optional[str]` |  |
+| `is_builtin` | `bool` |  |
+| `lineno` | `int` |  |
+| `col_offset` | `int` |  |
+
+### `PyVariableDeclaration`
+
+```python
+class PyVariableDeclaration(BaseModel)
+```
+
+Represents a Python variable declaration.
+
+#### Attributes
+
+| Name | Type | Description |
+| ---- | ---- | ----------- |
+| `name` | `str` |  |
+| `type` | `Optional[str]` |  |
+| `initializer` | `Optional[str]` |  |
+| `value` | `Optional[Any]` |  |
+| `scope` | `Literal['module', 'class', 'function']` |  |
+| `start_line` | `int` |  |
+| `end_line` | `int` |  |
+| `start_column` | `int` |  |
+| `end_column` | `int` |  |
 
 <!-- CLDK:API:END -->
 
