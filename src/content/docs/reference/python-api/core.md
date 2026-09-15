@@ -3,10 +3,10 @@ title: "Core"
 description: "Core CLDK API: the top-level entry point."
 ---
 
-The `CLDK` class is the top-level entry point. Call the per-language factory,
-e.g. `CLDK.java(project_path=...)`, to get an analysis object over your project.
-You never instantiate `JavaAnalysis` or `PythonAnalysis` directly; the factory
-hands you the correct one.
+The `CLDK` class is the top-level entry point. Call the per-language factory, for
+example `CLDK.java(project_path=...)`, to get an analysis object over your
+project. You never build a `JavaAnalysis` or a `PythonAnalysis` yourself. The
+factory hands you the correct one.
 
 ## Overview
 
@@ -23,11 +23,11 @@ The per-language factory methods are the top-level API:
 
 - **`CLDK.java(...)`** -> [`JavaAnalysis`](/reference/python-api/java/)
 - **`CLDK.python(...)`** -> [`PythonAnalysis`](/reference/python-api/python/)
-- **`CLDK.typescript(...)`** -> `TypeScriptAnalysis`
-- **`CLDK.c(project_path)`** -> C analysis
+- **`CLDK.typescript(...)`** -> [`TypeScriptAnalysis`](/reference/python-api/typescript/)
 
-Each is backed by the appropriate static analysis engine, where the symbol table
-and call graph are produced.
+A language-specific backend sits behind each factory and builds the symbol table
+and the call graph. CLDK 1.x also has `CLDK.c(project_path)`, and CLDK 2.0
+removes it.
 
 ```mermaid
 flowchart LR
@@ -45,29 +45,32 @@ is **deprecated** (it emits a `DeprecationWarning` and forwards to the factories
 Prefer `CLDK.java(project_path=...)` in new code.
 </aside>
 
-**Analysis levels.** The depth of analysis is governed by `analysis_level`.
-The default, `AnalysisLevel.symbol_table`, populates classes, methods, and
-fields. Call-graph computation incurs additional cost: `get_call_graph`,
-`get_callers`, and `get_callees` require `AnalysisLevel.call_graph`. Set it up
-front when call relationships are needed.
+**Analysis levels.** `analysis_level` controls the depth of the analysis. The
+default, `AnalysisLevel.symbol_table`, populates classes, methods, and fields.
+`AnalysisLevel.call_graph` costs more and is required for `get_call_graph`,
+`get_callers`, and `get_callees`. CLDK 2.0 adds
+`AnalysisLevel.program_dependency_graph` and
+`AnalysisLevel.system_dependency_graph` for dataflow. See
+[Dataflow graphs](/guides/dataflow/). If you need call relationships, set the
+level when you build the analysis.
 
 ### Common factory arguments
 
 | Argument | Applies to | What it does |
 | -------- | ---------- | ------------ |
 | `project_path` | all | Path to the project directory to analyze. |
-| `analysis_level` | all | `AnalysisLevel.symbol_table` (default) or `AnalysisLevel.call_graph`. The latter is required for call graphs, callers, and callees. |
+| `analysis_level` | all | `symbol_table` (default), `call_graph`, `program_dependency_graph`, or `system_dependency_graph`. The call graph, callers, and callees need `call_graph`. Dataflow and taint need level 3 or 4. |
 | `target_files` | all | Restrict analysis to specific files. |
 | `eager` | all | Force a fresh analysis even when a cached artifact exists. |
-| `backend` | all | A Parameter Object selecting the backend. Omit for the default in-process analyzer; pass `Neo4jConnectionConfig(...)` for a read-only Neo4j backend. |
+| `backend` | all | A configuration object that selects the backend. Omit it for the default in-process backend. Pass `Neo4jConnectionConfig(...)` for a read-only Neo4j backend. |
 
 ### Backend selection
 
-The backend is chosen by the **type** of the `backend=` config object:
+The **type** of the `backend=` configuration object selects the backend:
 
-- Omit `backend=` to use the default in-process analyzer. To tune it, pass
-  `CodeAnalyzerConfig(...)` (Java/TypeScript) or `PyCodeAnalyzerConfig(...)`
-  (Python, which adds `use_codeql` and `use_ray`).
+- Omit `backend=` to use the default in-process backend. To tune it, pass
+  `CodeAnalyzerConfig(...)` for Java and TypeScript, or
+  `PyCodeAnalyzerConfig(...)` for Python, which adds `use_ray`.
 - Pass `Neo4jConnectionConfig(uri=..., username=..., password=..., database=...,
   application_name=...)` for a read-only Neo4j backend.
 
@@ -106,10 +109,11 @@ print(type(analysis).__name__)        # JavaAnalysis
 print(len(analysis.get_classes()))    # 23
 ```
 
-The CodeAnalyzer backend ships with the package; results are cached under
-`<project>/.codeanalyzer` and reused on later runs. From here, every method lives
-on `analysis`; see the [Java API reference](/reference/python-api/java/) for the
-full surface.
+In CLDK 2.0 the Java backend is the optional extra `cldk[java]`. Its wheel
+carries the analyzer jar and its own JVM. Results are cached under
+`<project>/.codeanalyzer` and reused on later runs. Every method lives on
+`analysis`. For the full surface, see the
+[Java API reference](/reference/python-api/java/).
 
 ### Construct a Python analysis
 
@@ -122,15 +126,15 @@ print(type(analysis).__name__)        # PythonAnalysis
 classes = analysis.get_classes()      # Dict[str, PyClass]
 ```
 
-Same shape, same method names; just call `CLDK.python(...)` instead. Methods
-are documented on the [Python API reference](/reference/python-api/python/).
+The shape and the method names are the same. Only the factory changes. The
+[Python API reference](/reference/python-api/python/) documents the methods.
 
 For an introduction, see [What is CLDK?](/what-is-cldk/) and the
 [Quickstart](/quickstart/). For task-oriented snippets, see
 [Common tasks](/guides/common-tasks/) and the
-[cocoa](/cocoa/); the [concepts](/guides/concepts/) page
+[COCOA](/cocoa/). The [concepts](/guides/concepts/) page
 explains analysis levels and call graphs in detail, and the
-[cheat sheet](/resources/cheatsheet/) provides a one-page summary.
+[cheat sheet](/resources/cheatsheet/) is a one-page summary.
 
 ## API reference
 
@@ -140,9 +144,9 @@ The full generated reference follows.
 
 <!-- AUTO-GENERATED by scripts/gen_api_docs.py, do not edit by hand. -->
 
-[![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk) [![cldk 1.4.0](https://img.shields.io/badge/cldk-1.4.0-3776AB?logo=pypi&logoColor=white)](https://pypi.org/project/cldk/1.4.0/)
+[![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk) [![cldk 2.0.0rc7](https://img.shields.io/badge/cldk-2.0.0rc7-3776AB?logo=pypi&logoColor=white)](https://pypi.org/project/cldk/2.0.0rc7/)
 
-_API reference generated from cldk 1.4.0._
+_API reference generated from cldk 2.0.0rc7._
 
 Core CLDK module.
 
@@ -157,16 +161,14 @@ parsers, and sanitization utilities.
 >   tables, call graphs, and code metrics.
 > - **Python**: Static analysis via codeanalyzer-python backend (Jedi plus
 >   PyCG call-graph construction).
-> - **C**: Basic analysis via libclang for parsing and extracting code structure.
 
 Typical usage involves instantiating `CLDK` with a target language, then
 calling `analysis` to obtain a language-specific analysis facade.
 
 > **Note**
 > This module requires language-specific backends to be available:
-> - Java: ``codeanalyzer-*.jar`` (auto-downloaded or specified via path)
+> - Java: ``codeanalyzer-java`` (the ``cldk[java]`` extra; carries the jar and its JVM)
 > - Python: ``codeanalyzer-python`` (auto-installed in virtualenv)
-> - C: ``libclang`` (must be installed on the system)
 
 ## `CLDK`
 
@@ -190,7 +192,7 @@ methods.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `language` | `str` | The target programming language for analysis. Supported values are ``"java"``, ``"python"``, and ``"c"`` (case-sensitive). |
+| `language` | `str` | The target programming language for analysis. Supported values are ``"java"``, ``"python"``, and ``"typescript"`` (case-sensitive). |
 
 **Raises:**
 
@@ -199,7 +201,6 @@ methods.
 > **See Also**
 > - `JavaAnalysis`: Java-specific analysis facade.
 > - `PythonAnalysis`: Python-specific analysis facade.
-> - `CAnalysis`: C-specific analysis facade.
 
 ### Attributes
 
@@ -212,7 +213,7 @@ methods.
 #### `CLDK.java`
 
 ```python
-java(project_path: str | Path | None = None, source_code: str | None = None, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, eager: bool = False, backend: JavaBackend | None = None) -> JavaAnalysis
+java(project_path: str | Path | None = None, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, eager: bool = False, backend: JavaBackend | None = None) -> JavaAnalysis
 ```
 
 Create a Java analysis facade.
@@ -222,15 +223,14 @@ Create a Java analysis facade.
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | `project_path` | `str \| Path \| None` | Path to the Java project directory. Optional only when ``backend`` is a `Neo4jConnectionConfig` (the graph is read out of band over Bolt). When provided, the path is validated, it must exist and be a directory, regardless of backend. |
-| `source_code` | `str \| None` | Single Java source string (deprecated; pass ``project_path`` instead). |
 | `analysis_level` | `str` | Analysis depth (see `AnalysisLevel`). |
 | `target_files` | `List[str] \| None` | Restrict analysis to these files. |
 | `eager` | `bool` | Force regeneration of cached analysis. |
-| `backend` | `JavaBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`. |
+| `backend` | `JavaBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`; pass a `Neo4jConnectionConfig` to use the read-only Neo4j backend. |
 
 **Raises:**
 
-- `CldkInitializationException`: If neither or both of ``project_path`` / ``source_code`` are provided.
+- `CldkInitializationException`: If ``project_path`` is missing and the backend is not Neo4j. (The 1.x ``source_code`` single-file mode was removed in 2.0.)
 
 #### `CLDK.python`
 
@@ -266,26 +266,18 @@ Create a TypeScript analysis facade.
 | `analysis_level` | `str` | Analysis depth (see `AnalysisLevel`). |
 | `target_files` | `List[str] \| None` | Restrict analysis to these files. |
 | `eager` | `bool` | Force regeneration of cached analysis. |
-| `backend` | `TSBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`; pass a `TSCodeAnalyzerConfig` to set TypeScript-only knobs such as ``tsc_only`` (passes ``--tsc-only``), or a `Neo4jConnectionConfig` to use the read-only Neo4j backend. |
-
-#### `CLDK.c`
-
-```python
-c(project_path: str | Path) -> CAnalysis
-```
-
-Create a C analysis facade for the given project directory.
+| `backend` | `TSBackend \| None` | Backend configuration. Defaults to `CodeAnalyzerConfig`; pass a `TSCodeAnalyzerConfig` (its ``tsc_only`` is a deprecated no-op, codeanalyzer-typescript removed ``--tsc-only`` in 1.0.0), or a `Neo4jConnectionConfig` to use the read-only Neo4j backend. |
 
 #### `CLDK.analysis`
 
 ```python
-analysis(project_path: str | Path | None = None, source_code: str | None = None, eager: bool = False, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, analysis_backend_path: str | None = None, analysis_json_path: str | Path | None = None, cache_dir: str | Path | None = None, use_ray: bool = False, neo4j_config: Neo4jConnectionConfig | None = None) -> JavaAnalysis | PythonAnalysis | CAnalysis | TypeScriptAnalysis
+analysis(project_path: str | Path | None = None, source_code: str | None = None, eager: bool = False, analysis_level: str = AnalysisLevel.symbol_table, target_files: List[str] | None = None, analysis_backend_path: str | None = None, analysis_json_path: str | Path | None = None, cache_dir: str | Path | None = None, use_ray: bool = False, neo4j_config: Neo4jConnectionConfig | None = None) -> JavaAnalysis | PythonAnalysis | TypeScriptAnalysis
 ```
 
 Deprecated entry point. Use the per-language factory methods instead.
 
 ``CLDK(language).analysis(...)`` is retained as a thin compatibility shim that forwards to
-`java` / `python` / `typescript` / `c` with an appropriate
+`java` / `python` / `typescript` with an appropriate
 ``backend=`` configuration object.
 
 The former ``analysis_json_path`` is folded into the unified ``cache_dir`` (it is used as
@@ -293,7 +285,7 @@ the cache root when ``cache_dir`` is not given). ``analysis_backend_path`` is no
 supported: the backend binary ships with the packaged dependency, and passing it is ignored.
 
 .. deprecated::
-    Use `java`, `python`, `typescript`, or `c`
+    Use `java`, `python`, or `typescript`
     with a ``backend=<config>`` object.
 
 #### `CLDK.treesitter_parser`

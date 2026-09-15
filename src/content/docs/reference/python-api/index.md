@@ -5,9 +5,9 @@ description: "The CLDK Python SDK: the CLDK factory, per-language analysis APIs,
 
 [![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk)
 
-Every CLDK program follows the same shape: call the per-language factory, e.g.
-`CLDK.java(project_path=...)`, to get an analysis object over your project, then
-call typed methods that return data models.
+Every CLDK program follows the same shape. Call the per-language factory, for
+example `CLDK.java(project_path=...)`, to get an analysis object over your
+project. Then call typed methods that return data models.
 
 ```mermaid
 flowchart LR
@@ -18,18 +18,18 @@ flowchart LR
     J & P --> M[Typed models]
 ```
 
-The analysis API and its methods are the same across languages; only the factory
-you call changes. For an introduction to the library, see [What is
+The analysis API and its methods are the same across languages. Only the factory
+that you call changes. For an introduction to the library, see [What is
 CLDK?](/what-is-cldk/), or the [Quickstart](/quickstart/).
 
 ## Reference pages
 
-- **[Core (CLDK)](/reference/python-api/core/)**, the factory: the per-language `CLDK.java()`, `CLDK.python()`, `CLDK.typescript()`, and `CLDK.c()` entry points.
-- **[Python analysis](/reference/python-api/python/)**: symbol table and call graph via Jedi + optional CodeQL.
-- **[Java analysis](/reference/python-api/java/)**, the most complete analyzer: symbol table, call graph, subclasses/interfaces, CRUD.
-- **[TypeScript analysis](/reference/python-api/typescript/)** <span title="beta">(beta)</span>: symbol table, call graph, interfaces/enums/decorators; entrypoint detection is still in progress.
+- **[Core (CLDK)](/reference/python-api/core/)**, the factory: the per-language `CLDK.java()`, `CLDK.python()`, and `CLDK.typescript()` entry points.
+- **[Python analysis](/reference/python-api/python/)**: symbol table and call graph, from Jedi and the level-2 defuse linker.
+- **[Java analysis](/reference/python-api/java/)**, the most complete analysis: symbol table, call graph, subclasses, and interfaces.
+- **[TypeScript analysis](/reference/python-api/typescript/)** <span title="beta">(beta)</span>: symbol table, call graph, interfaces, enums, decorators, and framework entrypoints.
 
-Go, Rust, and C are on the way.
+CLDK 2.0 adds the dataflow and taint methods to all three. See [Dataflow graphs](/guides/dataflow/). Go and Rust are planned.
 
 For runnable patterns rather than symbol lists, see [Common
 tasks](/guides/common-tasks/) and the [cocoa](/cocoa/).
