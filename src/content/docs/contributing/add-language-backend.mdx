@@ -1,6 +1,6 @@
 ---
 title: Add a language backend (Go)
-description: "Step-by-step guide to add first-class Go support to CLDK by hand: the backend analyzer and the Python SDK frontend."
+description: "Step-by-step guide to add first-class Go support to CLDK by hand: the backend and the Python SDK frontend."
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
@@ -8,12 +8,12 @@ import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from
 This guide shows how to add first-class Go support to CLDK. You build the `codeanalyzer-go` backend, then connect it to the Python SDK. The guide covers the tooling, the schema, and the architecture decisions.
 
 <Aside type="tip" title="Claude Code plugin in progress">
-CLDK ships a Claude Code plugin that scaffolds first-class support for a new language: a `codeanalyzer-<lang>` backend and the SDK bindings, validated through a level-1 analysis branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). This page is the manual walkthrough of the same work.
+The maintainers scaffold first-class support for a new language with the [`cldk-language-pack`](https://github.com/codellm-devkit/developer-skillset/tree/main/cldk-language-pack) skill. The skill generates a `codeanalyzer-<lang>` backend and the SDK bindings, up to a validated symbol-table and call-graph branch. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset). This page is the manual walkthrough of the same work.
 </Aside>
 
 ## Architecture overview
 
-The two-layer design of CLDK separates the backend analyzer, which emits `analysis.json`, from the SDK frontend, which is a Python query API:
+The two-layer design of CLDK separates the backend, which emits `analysis.json`, from the SDK frontend, which is a Python query API:
 
 ```mermaid
 graph LR
@@ -42,12 +42,12 @@ Before you write code, choose the runtime, parser, resolver, materialization for
 - Resolver (Tier 1): `go/packages` and `go/types` (the source-level resolver in the standard library: precise and fast)
 - Build/deps: `go mod download` (materializes the module graph so `go/packages` can load it)
 - Packaging: `go build` → single static binary (zero runtime deps for SDK users)
-- Framework backend (Tier 2, optional): CodeQL Go pack (off by default. You implement level 1)
+- Framework backend (Tier 2, optional): CodeQL Go pack, off by default. You implement only Tier 1, the resolver (`-a 1` and `-a 2`).
 
-This is **separate-tool architecture**. `go/ast` does the parsing. `go/types` does the type resolution. Both are in the standard library, so the analyzer has few dependencies.
+This is **separate-tool architecture**. `go/ast` does the parsing. `go/types` does the type resolution. Both are in the standard library, so the backend has few dependencies.
 </Aside>
 
-Record these choices in the `README.md` of your analyzer, under an **Architecture and Tooling** heading, so that they stay recoverable:
+Record these choices in the `README.md` of your backend, under an **Architecture and Tooling** heading, so that they stay recoverable:
 
 ```markdown
 ## Architecture & Tooling
@@ -67,17 +67,17 @@ Record these choices in the `README.md` of your analyzer, under an **Architectur
 go version  # must be 1.21+
 ```
 
-If it is not present, stop. Tell the user to install it from [golang.org/dl](https://golang.org/dl).
+If it is not present, install it from [golang.org/dl](https://golang.org/dl) before you continue.
 
 ### Step 2: Define the Go schema
 
-Design the data types of the analyzer. Mirror the canonical schema, then add Go-specific nodes. Go differs from Java and Python in four ways. It has no classes, but it has structs and interfaces. Methods always carry a receiver type. Interfaces are structural. Packages are the module unit.
+Design the data types of the backend. Mirror the canonical schema, then add Go-specific nodes. Go differs from Java and Python in four ways. It has no classes, but it has structs and interfaces. Methods always carry a receiver type. Interfaces are structural. Packages are the module unit.
 
 #### Anchor on existing models
 
 Read the Python and Java models side by side:
 - Java: `cldk/models/java/models.py` (`JType`, `JCallable`, `JField`)
-- Python: `python-sdk/cldk/models/python/__init__.py` (`PyClass`, `PyCallable`)
+- Python: `cldk/models/python/__init__.py`, which re-exports `PyClass` and `PyCallable` from the `codeanalyzer-python` package (`codeanalyzer.schema.py_schema`)
 
 Both models mirror the canonical spine (Module/Callable nesting, identity-only edges, `signature` as the primary key).
 
@@ -178,7 +178,7 @@ Define a `GoModule`, `GoStruct`, `GoInterface`, `GoCallable`, `GoCallSite`, and 
 }
 ```
 
-**Key decisions to lock in your `SCHEMA_DECISIONS.md`:**
+**Key decisions to record in a `SCHEMA_DECISIONS.md` file in `codeanalyzer-go`:**
 1. Is `GoPackage` a top-level container, or is `GoModule` (file) the unit?
 2. How do you distinguish `*T.Method` from `T.Method` in signatures?
 3. Do you materialize interface satisfaction (`base_classes`), or record it separately?
@@ -214,12 +214,12 @@ Create the `codeanalyzer-go` project with a **delegating architecture**: a CLI e
 **Checklist for modularity:**
 - CLI (`cmd/*/main.go`) parses flags and calls `core.Analyzer`.
 - The core orchestrator delegates to phases. It never inlines analysis.
-- Symbol table builder is one focused module (or a class-like set of methods), not flat functions.
-- Framework backend (CodeQL) isolated in its own subpackage, scaffolded even when stubbed.
-- `analysis/pass.go` defines `AnalysisPass` interface and a `Registry` for discovery and `run_pipeline`.
+- The symbol table builder is one focused module (or a class-like set of methods), not a set of flat functions.
+- The framework backend (CodeQL) has its own subpackage. Scaffold it even when it is a stub.
+- `analysis/pass.go` defines the `AnalysisPass` interface and a `Registry` for discovery and `run_pipeline`.
 - `frameworks/finder.go` defines `EntrypointFinder` base for extension.
 
-### Step 4: Project materialization
+### Step 4: Materialize the project
 
 Before you parse, materialize the Go module graph, so that `go/packages` can load types from dependencies.
 
@@ -237,13 +237,13 @@ func MaterializeProject(projectDir string) error {
 }
 ```
 
-Run this **before** symbol-table construction so `go/packages.Load()` can access transitive dependencies.
+Run this **before** you build the symbol table, so that `go/packages.Load()` can access transitive dependencies.
 
-**Degradation:** If `go.mod` is absent or `go mod download` fails, log and continue. The symbol table will have unresolved callees, which is acceptable.
+**Degradation:** If `go.mod` is absent or `go mod download` fails, log and continue. The symbol table then has unresolved callees. This is acceptable.
 
-### Step 5: Symbol table construction
+### Step 5: Build the symbol table
 
-Walk the Go packages of the project and build `symbol_table: Dict[file_path, GoModule]`. Follow the pattern in the Python analyzer.
+Walk the Go packages of the project and build `symbol_table: Dict[file_path, GoModule]`. Follow the pattern in the codeanalyzer-python backend.
 
 <Aside type="caution">
 The Go package model is multi-file. All `.go` files in the same directory belong to one package, except those in `vendor`. Discover the packages, then iterate over the files of each package. Compute the type info with `go/packages` once, then reuse it for all files in that package.
@@ -255,7 +255,7 @@ The Go package model is multi-file. All `.go` files in the same directory belong
 2. For each package, iterate over its `.go` files.
 3. Per file:
    - Compute a stable `file_key` (relative path from project root).
-   - Check the cache by file hash or mtime. If the file is unchanged, reuse the cached `GoModule` and go to the next file.
+   - Search the cache for the file by hash or mtime. If the file is unchanged, reuse the cached `GoModule` and go to the next file.
    - Parse the file with `go/ast` → get the `*ast.File`.
    - Walk the AST:
      - For each top-level `ast.FuncDecl`, create a `GoCallable` (unresolved call sites with `callee_signature = null`).
@@ -263,7 +263,7 @@ The Go package model is multi-file. All `.go` files in the same directory belong
        - If it is a struct (`*ast.StructType`), create a `GoStruct` with fields and methods.
        - If it is an interface (`*ast.InterfaceType`), create a `GoInterface` with method signatures.
      - For each method (receiver and FuncDecl), create a `GoCallable` nested in the struct or the interface.
-     - Collect imports, comments (via `go/ast` comment groups).
+     - Collect imports and comments (with `go/ast` comment groups).
    - Assemble the `GoModule` and cache it.
 4. Return `symbol_table[file_key] = module`.
 
@@ -320,7 +320,7 @@ func (b *SymbolTableBuilder) buildModuleFromFile(filePath string, pkg *packages.
 }
 ```
 
-**Signature canonicalization** (the primary identity mechanism):
+**Canonicalize signatures** (the primary identity mechanism):
 
 Define a single `signatureOf()` function and use it everywhere:
 
@@ -347,16 +347,16 @@ type GoCallSite struct {
 }
 ```
 
-**Verify this stage:**
+**Make sure that this stage works:**
 - Run it on a small fixture project, for example a module with 2 or 3 files.
-- The output validates against the SDK `GoApplication` Pydantic model. You create that model in Part 2.
+- The output validates against the `GoApplication` Pydantic model in the SDK. You create that model in Part 2.
 - `symbol_table` is non-empty, keyed by relative file paths.
 - The `GoModule` of a known file has the expected structs, functions, and call sites.
 - A second run reuses the cache for unchanged files, with no rebuild.
 
-### Step 6: Call graph construction (resolver-based)
+### Step 6: Build the call graph with the resolver
 
-Resolve each unresolved call site with `go/types`. This step is **level 1**, and it is cheap because the type resolver is already loaded.
+Resolve each unresolved call site with `go/types`. This step is **level 2**, the call-graph level, and it is cheap because the type resolver is already loaded.
 
 For each recorded call site in every callable:
 1. Get the receiver type and the argument types of the enclosing callable, from the AST or the symbol table.
@@ -423,14 +423,14 @@ func (r *CallGraphResolver) resolveCallSite(site GoCallSite, pkg *packages.Packa
 }
 ```
 
-**Verify this stage:**
+**Make sure that this stage works:**
 - Every edge endpoint is a real signature in the symbol table (no dangling nodes).
 - Output still validates against the SDK model.
 - The call graph of a small fixture is non-empty and correct.
 
 ### Step 7: CLI contract
 
-Give the analyzer a command-line interface that matches what the SDK expects:
+Give the backend a command-line interface that matches what the SDK expects:
 
 ```go
 // cmd/codeanalyzer-go/main.go
@@ -509,7 +509,7 @@ go build -o codeanalyzer-go ./cmd/codeanalyzer-go
 strip codeanalyzer-go
 ```
 
-Version it and distribute it, either bundled in the SDK or downloaded on first use. Add a `VERSION` file, or a tag in Git:
+Give it a version. Step 13 describes how to distribute it. Add a `VERSION` file, or a tag in Git:
 
 ```bash
 git tag v0.1.0
@@ -617,7 +617,7 @@ __all__ = [
 
 ### Step 10: Create the analysis API
 
-Add `cldk/analysis/go/` with the `GoAnalysis` facade and the backend wrapper. The facade takes a `backend=` **config object** and dispatches on its **type** to choose a concrete backend. `JavaAnalysis`, `PythonAnalysis`, and `TypeScriptAnalysis` all work the same way. There is no `analysis_backend_path`, because the binary ships packaged. There is no `analysis_json_path`, because `cache_dir` on the config holds the cache:
+Add `cldk/analysis/go/` with the `GoAnalysis` facade and the backend wrapper. The facade takes a `backend=` **configuration object** and dispatches on its **type** to choose a concrete backend. `JavaAnalysis`, `PythonAnalysis`, and `TypeScriptAnalysis` all work the same way. There is no `analysis_backend_path`, because the binary ships packaged. There is no `analysis_json_path`, because `cache_dir` on the configuration holds the cache:
 
 ```python
 # cldk/analysis/go/go_analysis.py
@@ -765,7 +765,7 @@ class GoAnalysis:
         return hierarchy
 ```
 
-**Backend wrapper** (subprocess):
+**Backend wrapper** (subprocess). Map the `AnalysisLevel` name to the integer that `-a` takes with `analyzer_level()` from `cldk/analysis/commons/levels.py`, as the other wrappers do:
 
 ```python
 # cldk/analysis/go/codeanalyzer/codeanalyzer.py
@@ -831,7 +831,7 @@ class GoCodeanalyzer:
         return "codeanalyzer-go"
 ```
 
-Import `cache_subdir` from the shared backend-config module:
+The wrapper above calls `cache_subdir`. Import it from `cldk/analysis/commons/backend_config.py`:
 
 ```python
 from cldk.analysis.commons.backend_config import cache_subdir
@@ -847,15 +847,15 @@ __all__ = ["GoAnalysis"]
 
 ### Step 11: Register the language (config + factory + shim)
 
-CLDK selects behavior along **two independent axes**. The factory method that you call selects the *language*, for example `CLDK.go(...)`. The **type** of the `backend=` config object that you pass selects the *backend*. To register a language, you therefore make three small additions, not one branch.
+CLDK selects behavior along **two independent axes**. The factory method that you call selects the *language*, for example `CLDK.go(...)`. The **type** of the `backend=` configuration object that you pass selects the *backend*. To register a language, you therefore make three small additions, not one branch.
 
 <Aside type="caution" title="Do not add a language branch">
-Do not add `elif self.language == "go": ...` inside `CLDK.analysis()`. There is no `if/elif` dispatch on language. `CLDK(language).analysis(...)` is a deprecated compatibility **shim** that forwards to the factory methods. Add a factory method instead.
+Do not implement Go inside `CLDK.analysis()`. `CLDK(language).analysis(...)` is a deprecated compatibility **shim** that forwards to the factory methods. Add a factory method first (Step 11b). Then add the shim branch that forwards to it (Step 11c).
 </Aside>
 
 #### Step 11a: Add the backend-config types
 
-In `cldk/analysis/commons/backend_config.py`, add a language-specific codeanalyzer config. It subclasses `CodeAnalyzerConfig`, so it inherits `cache_dir`. Then add a per-language `GoBackend` union that the facade matches on. If Go will never have a Neo4j backend, the union holds only the codeanalyzer config. If Go can have one, add `Neo4jConnectionConfig`, which is already defined there:
+In `cldk/analysis/commons/backend_config.py`, add a language-specific codeanalyzer configuration. It subclasses `CodeAnalyzerConfig`, so it inherits `cache_dir`. Then add a per-language `GoBackend` union that the facade matches on. If Go never gets a Neo4j backend, the union holds only the codeanalyzer configuration. If Go can have one, add `Neo4jConnectionConfig`, which is already defined there:
 
 ```python
 # cldk/analysis/commons/backend_config.py
@@ -865,7 +865,7 @@ class GoCodeAnalyzerConfig(CodeAnalyzerConfig):
 
     Inherits ``cache_dir`` from CodeAnalyzerConfig; add Go-only knobs here if needed.
     """
-    # e.g. use_codeql: bool = False
+    # for example use_ray: bool = False
 
 # Per-language discriminated union the GoAnalysis facade dispatches on.
 GoBackend = Union[GoCodeAnalyzerConfig, Neo4jConnectionConfig]
@@ -878,7 +878,7 @@ This is the same shape as the existing `JavaBackend`, `PyBackend`, and `TSBacken
 
 #### Step 11b: Add the `CLDK.go(...)` factory method
 
-In `cldk/core.py`, add a `@staticmethod` factory beside `CLDK.java`, `CLDK.python`, and `CLDK.typescript`. It normalizes the project path and builds the `GoAnalysis` facade. It forwards the `backend=` config without a change, and the facade picks the concrete backend from its type:
+In `cldk/core.py`, add a `@staticmethod` factory beside `CLDK.java`, `CLDK.python`, and `CLDK.typescript`. It normalizes the project path and builds the `GoAnalysis` facade. It forwards the `backend=` configuration without a change, and the facade picks the concrete backend from its type:
 
 ```python
 # cldk/core.py (add to imports)
@@ -907,7 +907,7 @@ def go(
 
 #### Step 11c: Wire the deprecated shim
 
-`CLDK(language).analysis(...)` exists only for backward compatibility, and it is deprecated. Add a branch that forwards to your new factory. Map the legacy keyword arguments onto a `backend=` config. Put the removed `analysis_json_path` into `cache_dir`, and ignore the removed `analysis_backend_path`:
+`CLDK(language).analysis(...)` exists only for backward compatibility, and it is deprecated. Add a branch that forwards to your new factory. Map the legacy keyword arguments onto a `backend=` configuration. Use the legacy `analysis_json_path` as the cache root when `cache_dir` is absent. Ignore the legacy `analysis_backend_path`:
 
 ```python
 # In CLDK.analysis(), alongside the other language branches:
@@ -922,7 +922,7 @@ elif self.language == "go":
     )
 ```
 
-New code must call `CLDK.go(...)` directly. The shim exists so that existing `CLDK(language="go").analysis(...)` callers keep working.
+New code must call `CLDK.go(...)` directly. The shim branch exists for parity with the other languages, so that `CLDK(language="go").analysis(...)` forwards to the factory and does not raise `NotImplementedError`.
 
 ### Step 12: Add tests
 
@@ -989,16 +989,16 @@ Create fixture JSON under `tests/resources/go/analysis_json/analysis.json`.
 
 ### Step 13: Update SDK dependencies
 
-In `pyproject.toml`, pin the analyzer version:
+In `pyproject.toml`, pin the backend version:
 
 ```toml
 [tool.backend-versions]
 codeanalyzer-go = "0.1.0"
 ```
 
-If you distribute it as a bundled binary, add it to `cldk/analysis/go/codeanalyzer/bin/`. You can also arrange a download on first use.
+Ship the binary as its own PyPI package, `codeanalyzer-go`, in the same way as `codeanalyzer-java` and `codeanalyzer-typescript`. Add it to `[project.dependencies]` or to an extra in `pyproject.toml`. Make `_get_binary_path()` import that package to find the binary. Compare `codeanalyzer_typescript.bin_path()` in `cldk/analysis/typescript/codeanalyzer/codeanalyzer.py`.
 
-## Verification and checklist
+## Final checklist
 
 Before you merge, make sure that all of these are true:
 
@@ -1041,17 +1041,17 @@ Before you merge, make sure that all of these are true:
    ```
 
 7. **Modularity checklist:**
-   - [ ] CLI (`cmd/*/main.go`) parses flags, calls core.
-   - [ ] Core orchestrator delegates to phases. It never inlines.
-   - [ ] Symbol-table builder is one cohesive module, not flat functions.
-   - [ ] Framework backend isolated in its own subpackage.
+   - [ ] The CLI (`cmd/*/main.go`) parses flags and calls the core.
+   - [ ] The core orchestrator delegates to phases. It never inlines analysis.
+   - [ ] The symbol-table builder is one cohesive module, not a set of flat functions.
+   - [ ] The framework backend has its own subpackage.
    - [ ] `analysis/pass.go` and `frameworks/finder.go` exist and are wired.
 
 8. **Schema integrity:**
-   - [ ] All fields from canonical schema are present in Go models.
+   - [ ] All fields from the canonical schema are present in the Go models.
    - [ ] Language-specific nodes (`GoStruct`, `GoInterface`) are first-class.
    - [ ] `signature` is the identity key. Every callable and type has one.
-   - [ ] Receiver types are captured, so that `*T.Method` differs from `T.Method`.
+   - [ ] The backend captures receiver types, so that `*T.Method` differs from `T.Method`.
 
 </Steps>
 
@@ -1059,20 +1059,18 @@ Before you merge, make sure that all of these are true:
 
 After you merge, consider this work:
 
-- **Level-2 (CodeQL) backend**: The stub is ready. Implement the CodeQL Go pack integration for deeper dataflow analysis.
+- **CodeQL framework backend**: The stub is ready. Implement the CodeQL Go pack integration for deeper dataflow analysis (`AnalysisLevel.program_dependency_graph` and above).
 - **Entrypoint detection**: Add framework detection, for example for gRPC services and REST handlers, and return the results through the `get_entry_point_*` methods.
 - **Comments and docstrings**: Extract comments from the AST and attach them to callables.
 - **Testing utilities**: If you ship a Tree-sitter parser, add `is_parsable` and `get_raw_ast`.
 
 ---
 
-## Reference links
+## See also
 
-- <LinkCard title="What is CLDK?" href="/what-is-cldk/" />
-- <LinkCard title="Quickstart" href="/quickstart/" />
-- <LinkCard title="Concepts" href="/guides/concepts/" />
-- <LinkCard title="Java backend reference" href="/backends/codeanalyzer-java/" />
-- <LinkCard title="Python backend reference" href="/backends/codeanalyzer-python/" />
-- <LinkCard title="Python API reference" href="/reference/python-api/" />
-- <LinkCard title="Examples" href="/examples/" />
-- <LinkCard title="Cheatsheet" href="/resources/cheatsheet/" />
+<CardGrid>
+  <LinkCard title="What is CLDK?" href="/what-is-cldk/" description="The analysis object and the programming model." />
+  <LinkCard title="Java backend reference" href="/backends/codeanalyzer-java/" description="The CLI contract that the SDK runs." />
+  <LinkCard title="Python backend reference" href="/backends/codeanalyzer-python/" description="The Py* schema that this guide mirrors." />
+  <LinkCard title="Add a Rust frontend" href="/contributing/rust-frontend/" description="The other extension point." />
+</CardGrid>

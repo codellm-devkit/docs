@@ -15,7 +15,7 @@ import { Steps, Tabs, TabItem, Aside, FileTree, LinkCard, CardGrid, Badge } from
 This guide builds COCOA by hand: a manifest, a code-context subagent, and two skills. All three use the same CLDK heredoc. The technical id of the plugin is the lowercase `cocoa`, so the skills are `/cocoa:callers` and `/cocoa:reachable`.
 
 <Aside type="note" title="Prerequisites">
-You need [Claude Code](https://code.claude.com/docs/en/plugins), `cldk` on your `PATH`, and a JDK for Java projects. If the `analysis` object is new to you, read [What is CLDK?](/what-is-cldk/) first.
+You need [Claude Code](https://code.claude.com/docs/en/quickstart) and the `cldk` package in the Python that `python3` on your `PATH` runs. On CLDK 2.0, install the Java backend with `pip install --pre 'cldk[java]'`. On CLDK 1.5.0, `pip install cldk` includes the Java backend. Both versions provide their own JVM, so you do not need a separate JDK. If the `analysis` object is new to you, read [What is CLDK?](/what-is-cldk/) first.
 </Aside>
 
 ## How COCOA works
@@ -31,12 +31,12 @@ flowchart LR
     A -->|analysis result| CC
 ```
 
-The plugin adds two components on top of this engine:
+The plugin adds two components on top of this mechanism:
 
 - a **subagent** (`code-context`) for open questions about the code
-- **skills** (`/cocoa:callers`, `/cocoa:reachable`), which are named operations that you can call directly
+- **skills** (`/cocoa:callers`, `/cocoa:reachable`), which are named operations that you can run directly
 
-### The engine: CLDK in a heredoc
+### The mechanism: CLDK in a heredoc
 
 Every COCOA component runs a variant of this CLDK heredoc:
 
@@ -58,12 +58,12 @@ PYEOF
 ```
 
 <Aside type="caution" title="Two requirements">
-Call-graph queries need `analysis_level=AnalysisLevel.call_graph`. Each heredoc runs in a new process, so CLDK builds the analysis again on every call. CLDK caches the result on disk (`<project>/.codeanalyzer`). Only the first call pays the full cost.
+Call-graph queries need `analysis_level=AnalysisLevel.call_graph`. Each heredoc runs in a new process, so CLDK constructs the `analysis` object again on every call. CLDK caches the backend output on disk (`<project>/.codeanalyzer`), so only the first call runs the backend.
 </Aside>
 
 ## COCOA in action
 
-After you install COCOA, you stay in Claude Code. Claude can delegate to the `code-context` agent, or you can call a skill such as `/cocoa:reachable` directly. Three cases follow.
+After you install COCOA, you stay in Claude Code. Claude can delegate to the `code-context` agent, or you can run a skill such as `/cocoa:reachable` directly. Three cases follow.
 
 ### Generate a unit test from the callees of a method
 
@@ -135,6 +135,8 @@ COCOA builds the trace from the call-graph edges.
          - SKILL.md
        - reachable/
          - SKILL.md
+     - hooks/
+       - hooks.json
      - README.md
    </FileTree>
 
@@ -271,14 +273,14 @@ COCOA builds the trace from the call-graph edges.
    claude --plugin-dir ./cocoa
    ```
 
-   Then delegate to the agent or call a skill:
+   Then delegate to the agent or run a skill:
 
    ```text frame="terminal"
    > @code-context what calls Options.addOption, and can CLI.main reach CommandLine.execute?
    > /cocoa:callers org.apache.commons.cli.Options addOption(org.apache.commons.cli.Option)
    ```
 
-   After you edit a `SKILL.md`, run `/reload-plugins` to load the change. Changes to agents and hooks need a session restart.
+   After you edit any file in the plugin, run `/reload-plugins` to load the change.
 
 7. **Publish it.** Validate the plugin. Then add a marketplace entry so that others can install it with the `/plugin` command.
 

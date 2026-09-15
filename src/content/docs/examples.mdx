@@ -1,24 +1,27 @@
 ---
 title: Examples
-description: Runnable CLDK examples for Python and Java, grouped by analysis task.
+description: Runnable CLDK examples for Python, Java, TypeScript, JavaScript, and infrastructure-as-code, grouped by analysis task.
 ---
 
 import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-Every example comes from the CLDK SDK test suite. Each snippet shows behavior that the tests cover. The examples are grouped by task. They use the same sample projects as the rest of these docs: a generic `my_pkg` for Python, and [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java.
+Every example calls the public methods of the CLDK Python SDK. The sample output is illustrative. The examples are grouped by task. They use the same sample projects as the rest of these docs: a generic `my_pkg` for Python, [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java, a generic `my_app` for TypeScript and JavaScript, and the [Quarkus Coffee Shop](https://github.com/quarkuscoffeeshop/quarkuscoffeeshop-helm) Helm chart for infrastructure-as-code.
 
-<Aside type="tip" title="One API, two languages">
-The Python and Java pages follow the same pattern. First, the factory for the language builds the analysis (`CLDK.java(project_path=...)`, `CLDK.python(project_path=...)`). Then the analysis method for the task returns the result.
+<Aside type="tip" title="One API, three languages">
+The Python, Java, and TypeScript pages follow the same pattern. First, the factory for the language builds the analysis (`CLDK.java(project_path=...)`, `CLDK.python(project_path=...)`, `CLDK.typescript(project_path=...)`). Then the analysis method for the task returns the result. JavaScript projects use the TypeScript factory. Infrastructure-as-code has no factory yet, so its page uses the `caniac` command, `jq`, and Cypher.
 </Aside>
 
 <CardGrid>
   <LinkCard title="Python examples" description="Symbol tables, call graphs, and the PyClass and PyCallable models." href="/examples/python/" />
-  <LinkCard title="Java examples" description="Symbol tables, call graphs, callers/callees, class relationships, CRUD, comments, and reachability, on Apache Commons CLI." href="/examples/java/" />
+  <LinkCard title="Java examples" description="Symbol tables, call graphs, callers and callees, class relationships, comments, entry points, and reachability, on Apache Commons CLI." href="/examples/java/" />
+  <LinkCard title="TypeScript examples" description="Symbol tables, call graphs, interfaces, enums, decorators, and the TSClass and TSCallable models." href="/examples/typescript/" />
+  <LinkCard title="JavaScript examples" description="The same TypeScript factory on a plain JavaScript project, and what differs." href="/examples/javascript/" />
+  <LinkCard title="IaC examples" description="Helm charts with caniac, jq, and Cypher, on the Quarkus Coffee Shop chart." href="/examples/iac/" />
 </CardGrid>
 
-## Source
+## Related pages
 
-Each example matches an assertion in the SDK test suite (`python-sdk/tests/`). For the full method list instead of worked snippets, see the [API reference](/reference/python-api/). For the model behind them, see [Core concepts](/guides/concepts/).
+For the full method list instead of worked snippets, see the [API reference](/reference/python-api/). For the model behind them, see [Core concepts](/guides/concepts/).
 
 <CardGrid>
   <LinkCard title="Common tasks" description="The same calls in a task-indexed reference." href="/guides/common-tasks/" />

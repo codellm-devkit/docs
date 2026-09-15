@@ -10,7 +10,7 @@ import { Badge, CardGrid, LinkCard, Aside } from "@astrojs/starlight/components"
 ```mermaid
 flowchart LR
     SDK["CLDK Python SDK<br/>(analysis API)"] -->|invokes| CAJ["codeanalyzer-java<br/>(JVM · WALA)"]
-    SDK -->|invokes| CAP["codeanalyzer-python<br/>(Jedi · CodeQL)"]
+    SDK -->|invokes| CAP["codeanalyzer-python<br/>(Jedi · defuse linker)"]
     SDK -->|invokes| CAT["codeanalyzer-ts<br/>(TS compiler)"]
     CAJ -->|canonical JSON| SDK
     CAP -->|canonical JSON| SDK
@@ -19,10 +19,12 @@ flowchart LR
 
 This split lets one `analysis` API cover many languages. The SDK does not parse code itself. It runs the correct backend. Then it maps the backend JSON onto typed models (`JApplication`, `PyModule`, and others).
 
-A new backend that writes the canonical JSON makes its language available to the SDK. Only the bindings remain. See [Add a language backend](/contributing/add-language-backend/).
+A new backend that writes the canonical JSON makes its language available to the SDK. The SDK then needs only the Python bindings for that language. See [Add a language backend](/contributing/add-language-backend/).
 
-<Aside type="note" title="Backends are managed by the SDK">
-The SDK manages the backend for you. Each `codeanalyzer-*` binary ships inside its PyPI package. The Java backend needs no JVM and runs with `python -m codeanalyzer_java`. The TypeScript binary ships in `codeanalyzer-typescript`. CLDK installs the Python backend into a virtualenv. You do not download a JAR or set `analysis_backend_path`.
+<Aside type="note" title="The SDK manages the backends">
+The SDK runs each backend for you. <Badge text="2.0" variant="caution" /> The Java backend is the optional extra `cldk[java]`. Its wheel carries the JAR and a bundled JVM, and the SDK runs `java -jar` on that JVM. Analysis level 2 and above also need a JDK 11 or later on `JAVA_HOME`. In CLDK 1.5.0, the SDK downloads a Temurin JDK on first use instead.
+
+The `codeanalyzer-python` and `codeanalyzer-typescript` packages are dependencies of `cldk`. The SDK imports the Python backend in-process, and the backend creates a virtualenv for the dependencies of the analyzed project. You do not download a JAR, and you do not set `analysis_backend_path`.
 
 These pages document the backend layer for readers who want to understand it or add to it.
 </Aside>
@@ -31,7 +33,7 @@ This is the **backend** layer. For the SDKs that consume it, see the [SDKs overv
 
 ## Maturity tiers
 
-<Badge text="Mature" variant="success" /> production-ready &nbsp;·&nbsp; <Badge text="Beta" variant="caution" /> stable core, gaps remain &nbsp;·&nbsp; <Badge text="Medium" variant="tip" /> usable, gaps remain &nbsp;·&nbsp; <Badge text="Help wanted" variant="danger" /> contributors wanted &nbsp;·&nbsp; <Badge text="Stub" variant="default" /> not started
+<Badge text="Mature" variant="success" /> production-ready &nbsp;·&nbsp; <Badge text="Beta" variant="caution" /> stable core, some features missing &nbsp;·&nbsp; <Badge text="Medium" variant="tip" /> usable through another backend &nbsp;·&nbsp; <Badge text="Help wanted" variant="danger" /> contributors wanted &nbsp;·&nbsp; <Badge text="Stub" variant="default" /> not started
 
 ## Backends
 
@@ -44,7 +46,7 @@ The `codeanalyzer-*` tools parse a language. Then they write the canonical symbo
 | **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Beta" variant="caution" /> |
 | **JavaScript** | via [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
 | **IaC (Helm)** | [codeanalyzer-iac](/backends/codeanalyzer-iac/) | <Badge text="Beta" variant="caution" /> |
-| **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
+| **Go** | [codeanalyzer-go](https://github.com/codellm-devkit/codeanalyzer-go) (in development) | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **C** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **C++** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
@@ -53,9 +55,9 @@ The `codeanalyzer-*` tools parse a language. Then they write the canonical symbo
 ## Built backends
 
 <CardGrid>
-  <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation. Writes the canonical Py* schema." href="/backends/codeanalyzer-python/" />
-  <LinkCard title="codeanalyzer-java" description="WALA and Javaparser. Produces symbol tables, call graphs, type hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
-  <LinkCard title="codeanalyzer-ts" description="Beta. The TypeScript and TSX backend. It writes the canonical symbol-table and call-graph schema. Entrypoint detection is not complete." href="/backends/codeanalyzer-ts/" />
+  <LinkCard title="codeanalyzer-python" description="Jedi resolves the symbols, and a defuse linker adds the level-2 call edges. It writes the canonical Py* schema." href="/backends/codeanalyzer-python/" />
+  <LinkCard title="codeanalyzer-java" description="WALA and Javaparser. It produces symbol tables, call graphs, the type hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
+  <LinkCard title="codeanalyzer-ts" description="Beta. The TypeScript and TSX backend. It writes the canonical symbol-table and call-graph schema, with framework entrypoint detection and the level 3 and 4 dataflow graphs." href="/backends/codeanalyzer-ts/" />
   <LinkCard title="codeanalyzer-iac" description="Beta. The infrastructure-as-code backend. It turns Helm charts into the canonical schema v2 IaC model, as JSON or a Neo4j graph." href="/backends/codeanalyzer-iac/" />
   <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# do not exist yet. A backend that writes the canonical JSON makes that language available to every SDK." href="/contributing/add-language-backend/" />
 </CardGrid>

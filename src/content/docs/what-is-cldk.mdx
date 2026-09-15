@@ -15,9 +15,9 @@ Every CLDK program follows the same three steps: select a language, analyze a pr
 
 <Steps>
 
-1. **Call the factory for your language**, for example `CLDK.java(...)`. This factory selects the backend.
+1. **Select the factory for your language**, for example `CLDK.java`. This factory selects the backend.
 
-2. **Build the `analysis` object.** Give it a project path: `CLDK.java(project_path="commons-cli")`. The backend runs at this step and builds the program model.
+2. **Call the factory with a project path** to build the `analysis` object: `CLDK.java(project_path="commons-cli")`. The backend runs at this step and builds the program model.
 
 3. **Query the typed models** with `get_classes()`, `get_method(...)`, `get_call_graph()`, and related methods. You can read these objects, walk them, serialize them, or send them to other tools.
 
@@ -75,26 +75,29 @@ flowchart LR
     C --> F["Class structure / CRUD"]
 ```
 
-The language selects the backend. Java uses CodeAnalyzer over WALA. Python uses its own static-analysis backend. Your query code stays the same for each language. Only the backend changes.
+The language selects the backend. Java uses [codeanalyzer-java](/backends/codeanalyzer-java/) over WALA. Python uses [codeanalyzer-python](/backends/codeanalyzer-python/) over Jedi. TypeScript uses [codeanalyzer-ts](/backends/codeanalyzer-ts/) over the TypeScript compiler. Your query code stays the same for each language. Only the backend changes.
 
 ## Language coverage
 
-You query every language through the same `analysis` API. A different backend answers for each one. Java and Python work today. Java goes deepest, because it adds class-hierarchy analysis and CRUD extraction.
+You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java and Python. Java goes deepest, because it adds class-hierarchy analysis and CRUD extraction.
 
-TypeScript is in beta. Its symbol table and call graph work through `CLDK.typescript(...)`. Entrypoint detection for frameworks is not complete. Go and Rust are in development.
+TypeScript is in beta. Its symbol table and call graph work through `CLDK.typescript(...)`. The backend does not detect all framework entrypoints yet. Go and Rust backends are not started. Contributors are welcome.
 
 | Language   | Status         | Symbol table | Call graph / callers / callees |
 | ---------- | -------------- | ------------ | ------------------------------ |
 | Java       | Supported      | Yes          | Yes                            |
 | Python     | Supported      | Yes          | Yes                            |
 | TypeScript | Beta           | Yes          | Yes                            |
-| Go         | In development | Planned      | Planned                        |
-| Rust       | In development | Planned      | Planned                        |
+| Go         | Not started    | Planned      | Planned                        |
+| Rust       | Not started    | Planned      | Planned                        |
+
+Infrastructure-as-code (Helm) has a beta backend, [codeanalyzer-iac](/backends/codeanalyzer-iac/), with no `CLDK.iac(...)` factory yet. See [The codeanalyzer backends](/backends/) for every backend and its maturity.
 
 ## Next steps
 
 <CardGrid>
-  <LinkCard title="Quickstart" description="Install CLDK and run your first analysis in a couple of minutes." href="/quickstart/" />
+  <LinkCard title="Quickstart" description="Install CLDK and run your first analysis in three steps." href="/quickstart/" />
+  <LinkCard title="Installation" description="The JDK, Maven, and backend packages that each language needs." href="/installing/" />
   <LinkCard title="Core concepts" description="Symbol tables, call graphs, and analysis levels." href="/guides/concepts/" />
   <LinkCard title="Common tasks" description="Task-oriented snippets: get methods, build a call graph, find callers." href="/guides/common-tasks/" />
   <LinkCard title="API reference" description="Per-language analysis APIs and the typed data models." href="/reference/python-api/" />

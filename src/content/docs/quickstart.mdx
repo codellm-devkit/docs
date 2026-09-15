@@ -13,11 +13,11 @@ This guide has three steps: install CLDK, get a sample project, and run an analy
 
 1. **Install CLDK.**
 
-   ```shell
+   ```bash
    pip install cldk
    ```
 
-   The Java backend ships with the package. To analyze Java projects, you need only a JDK on your `PATH`.
+   The Java backend ships with the package and provides its own JVM. To build the call graph, the backend compiles the project with Maven, so `mvn` and a JDK must be on your `PATH`. For the full prerequisites, see [Installing CLDK](/installing/).
 
 2. **Get a sample project.**
 
@@ -30,12 +30,12 @@ This guide has three steps: install CLDK, get a sample project, and run an analy
    ```
 
    <Aside type="note">
-   Any Java project on disk works here. `JAVA_APP_PATH` must point at the root of the project. Commons CLI is small and well structured, so it analyzes quickly.
+   Any Java project on disk works here. `JAVA_APP_PATH` must be the root directory of the project. Commons CLI is small and well structured, so the analysis runs quickly.
    </Aside>
 
 3. **Run your first analysis.**
 
-   Build a CLDK object for Java. Point it at the project. Print the class count and the call graph. Call graphs, callers, and callees need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table.
+   Build an `analysis` object for Java. Point it at the project. Print the class count and the call graph. Call graphs, callers, and callees need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table.
 
    ```python title="first_analysis.py"
    import os
@@ -84,7 +84,7 @@ flowchart LR
     C --> F[get_callers / get_method]
 ```
 
-One call converts a directory of source files into a typed `analysis` object. Then `get_method(cls, sig)` returns the source body of a method. `get_callers` and `get_callees` walk the graph. The [concepts guide](/guides/concepts/) covers the object model. The [cheat sheet](/resources/cheatsheet/) lists the available methods.
+One call converts a directory of source files into a typed `analysis` object. Then `get_method(qualified_class_name, qualified_method_name)` returns a `JCallable`. Its `code` field holds the source of the method. `get_callers` and `get_callees` walk the graph. The [concepts guide](/guides/concepts/) covers the object model. The [cheat sheet](/resources/cheatsheet/) lists the available methods.
 
 ## Next steps
 
@@ -92,6 +92,6 @@ The same calls can run behind an agent tool. **COCOA** is a Claude Code plugin. 
 
 <CardGrid>
   <LinkCard title="COCOA plugin" description="Build a Claude Code plugin that runs CLDK for callers, reachability, and change impact." href="/cocoa/" />
-  <LinkCard title="What is CLDK?" description="The object model: CLDK object -> analysis object -> typed models." href="/what-is-cldk/" />
+  <LinkCard title="What is CLDK?" description="The programming model: language factory -> analysis object -> typed models." href="/what-is-cldk/" />
   <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, build a call graph, find callers, sanitize a focal method." href="/guides/common-tasks/" />
 </CardGrid>

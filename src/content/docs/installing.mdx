@@ -5,7 +5,7 @@ description: Install the CLDK Python package and the language backends that it n
 
 import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
 
-[`CLDK`](https://github.com/IBM/codellm-devkit) is a Python SDK on [PyPI](https://pypi.org/project/cldk/). You can install it with any Python package manager.
+[`CLDK`](https://github.com/codellm-devkit/python-sdk) is a Python SDK on [PyPI](https://pypi.org/project/cldk/). You can install it with any Python package manager.
 
 ## Installation
 
@@ -13,7 +13,7 @@ Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), 
 
 <Tabs>
   <TabItem label="pip">
-    ```shell
+    ```bash
     pip install cldk
     ```
   </TabItem>
@@ -30,23 +30,23 @@ Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), 
 </Tabs>
 
 <Aside type="note" title="CLDK 2.0 is a release candidate">
-Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable release. `pip install cldk` gives you 1.5.0. To get the pre-release, run `pip install --pre cldk`. See [Dataflow graphs](/guides/dataflow/).
+Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable release. `pip install cldk` gives you 1.5.0. To get the pre-release, run `pip install --pre cldk`. In 2.0, the Java backend is an optional extra. For Java analysis, run `pip install --pre "cldk[java]"` instead. See [Dataflow graphs](/guides/dataflow/).
 </Aside>
 
 ## Language-specific dependencies
 
-`CLDK` analyzes several languages. Each language needs its own dependencies:
+CLDK analyzes several languages. Each language needs its own dependencies:
 
 <Tabs>
   <TabItem label="Python Analysis">
     The CLDK Python SDK and Python analysis both need Python 3.11 or later. [pyenv](https://github.com/pyenv/pyenv) installs and manages several Python versions on one machine.
   </TabItem>
   <TabItem label="Java Analysis">
-    For Java analysis, CLDK uses a companion project, [`codeanalyzer`](https://github.com/ibm/codenet-minerva-code-analyzer). `codeanalyzer` is a Java project, so you need the Java Development Kit (JDK), version 11 or later.
+    For Java analysis, CLDK uses a companion backend, [`codeanalyzer-java`](/backends/codeanalyzer-java/). In CLDK 2.0, install it as an extra: `pip install --pre "cldk[java]"`. The backend carries its own JVM. To build the target project with Maven, you need the Java Development Kit (JDK), version 11 or later.
 
     [SDKMAN](https://sdkman.io/) installs and manages JDK versions.
 
-    - Install SDKMAN. Then follow the instructions on screen:
+    - Install SDKMAN with this command:
 
       ```bash
       curl -s "https://get.sdkman.io" | bash
@@ -105,7 +105,7 @@ Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable rele
       JCL      - edded3f65c based on jdk-11.0.25+9)
       ```
 
-    Finally, CLDK builds Java projects automatically with Maven. Install Maven with SDKMAN:
+    Finally, for call graphs and deeper levels, the Java backend builds your project automatically with Maven or Gradle. For a Maven project, install Maven with SDKMAN:
 
     - Install Maven:
 
@@ -132,7 +132,7 @@ Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable rele
       The command shows the installed Maven version.
   </TabItem>
   <TabItem label="TypeScript Analysis">
-    For TypeScript and JavaScript analysis, CLDK uses a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt binary and does **not** need Bun or Node. Install the `codeanalyzer-typescript` package. The package adds a `cants` command to your `PATH`.
+    For TypeScript and JavaScript analysis, CLDK uses a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). The prebuilt binary itself needs no Bun or Node. To install the dependencies of your project, the backend needs `npm`, which ships with Node. The `cldk` package installs `codeanalyzer-typescript` at the version that CLDK pins, so the SDK needs no separate install. The package adds a `cants` command to your `PATH`. To install only the command, use PyPI or Homebrew.
 
     Install it from PyPI:
 
@@ -152,10 +152,10 @@ Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable rele
     cants --help
     ```
 
-    The package is named `codeanalyzer-typescript`, but the command is **`cants`**. To resolve library call targets, the backend needs the dependencies of the project. Keep `npm` on your `PATH`, and the backend creates `node_modules` for you. To skip this step, use `--no-build`. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
+    The package is named `codeanalyzer-typescript`, but the command is **`cants`**. To resolve library call targets, the backend needs the dependencies of the project. If `npm` is on your `PATH`, the backend creates `node_modules` for you. To skip this step, use `--no-build`. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
   </TabItem>
   <TabItem label="IaC Analysis">
-    For infrastructure-as-code analysis, CLDK uses a companion backend, [`codeanalyzer-iac`](/backends/codeanalyzer-iac/). Its command is `caniac`. It ships as a prebuilt binary and needs no Helm CLI.
+    For infrastructure-as-code analysis, the companion backend is [`codeanalyzer-iac`](/backends/codeanalyzer-iac/). Its command is `caniac`. It ships as a prebuilt binary and needs no Helm CLI.
 
     Install it from PyPI:
 
@@ -178,7 +178,7 @@ Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable rele
     There is no `CLDK.iac(...)` factory yet. Run `caniac` as a command, or read the Neo4j graph that it writes. For the analysis levels and output modes, see the [codeanalyzer-iac backend reference](/backends/codeanalyzer-iac/).
   </TabItem>
   <TabItem label="Rust Installation">
-    Use rustup to install Rust and manage toolchains. rustup keeps Rust versions separate, and you can change between them.
+    CLDK does not analyze Rust yet. You need a Rust toolchain only to contribute Rust code, for example the [Rust frontend](/contributing/rust-frontend/). Use rustup to install Rust and manage toolchains. rustup keeps Rust versions separate, and you can change between them.
 
     - **Install rustup.**
     Run this command in your terminal:
@@ -207,7 +207,7 @@ Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable rele
 
 ## Additional development tools
 
-Some operating systems need additional development tools:
+If you build Python from source, for example with pyenv, some operating systems need additional development tools:
 
 <Tabs>
   <TabItem label="macOS">
@@ -245,7 +245,7 @@ Some operating systems need additional development tools:
 
 ## Supported Python versions
 
-`CLDK` needs Python 3.11 or later:
+CLDK needs Python 3.11 or later:
 
 | Python Version | Compatible `cldk` Versions |
 | -------------- | -------------------------- |

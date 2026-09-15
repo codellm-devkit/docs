@@ -1,13 +1,13 @@
 ---
 title: Taint analysis
-description: "Ask which sources reach which sinks in one traversal, cut the flow with sanitizers, and read what the result claims about the ones that do not."
+description: "Source-to-sink queries in one traversal, with sanitizer cuts and a verdict on the pairs that do not connect."
 ---
 
 import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs/starlight/components";
 
 <p><Badge text="New in 2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
 
-`taint()` asks m sources against n sinks in one traversal. For each pair it reports one of three outcomes: a flow was found, no flow was found, or the search cannot finish.
+`taint()` tests m sources against n sinks in one traversal. For each pair it reports one of three outcomes: a flow was found, no flow was found, or the search cannot finish.
 
 <Aside type="caution" title="This method needs CLDK 2.0">
 `taint()` arrives in CLDK 2.0. Version 2.0 is a release candidate today, so `pip install cldk` gives you 1.5.0 instead. To get the pre-release, run:
@@ -16,7 +16,7 @@ import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs
 pip install --pre cldk
 ```
 
-Taint queries read the dataflow graph, so build the analysis at level 3 or level 4. See [Dataflow graphs](/guides/dataflow/).
+Taint queries read the dataflow graph, so build the analysis at level 3 or level 4. A source and a sink in different callables need level 4. See [Dataflow graphs](/guides/dataflow/).
 </Aside>
 
 ## The call
@@ -50,19 +50,19 @@ for d in result.unresolved:                # neither: read this first
 | --- | --- | --- |
 | `sources` | `Sequence[Tuple[str, str]]` | Where taint enters, each `(name, within)` |
 | `sinks` | `Sequence[Tuple[str, str]]` | Where it must not reach, addressed the same way |
-| `sanitizers` | `Sequence[Tuple[str, str] \| str]` | The cuts. See below |
+| `sanitizers` | `Sequence[Tuple[str, str] \| str]` | The cuts, empty by default. See below |
 | `depth` | `int \| None` | Most hops a path can take. `None` by default |
-| `max_paths` | `int` | Most witnesses **for each pair**, not for the call |
+| `max_paths` | `int` | Most witnesses **for each pair**, not for the call. 10 by default |
 
-`max_paths` counts per pair on purpose. If the cap were flat, one prolific pair with forty sources and one sink starves the other thirty-nine.
+`max_paths` counts per pair on purpose. With forty sources and one sink, a flat cap lets one prolific source starve the other thirty-nine.
 
 ## You supply the sources and sinks
 
-CLDK ships no framework catalogue and derives no default set. A per-language vocabulary of taint sources is policy, and policy rots. This method is the mechanism, and the vocabulary is yours.
+CLDK ships no framework catalog and derives no default set. A per-language list of taint sources is soon out of date. You supply the source and sink names for your application.
 
 ## Two kinds of sanitizer
 
-A sanitizer is two different things wearing one word. The shape you pass tells them apart.
+The word sanitizer covers two different things. The shape of the argument tells them apart.
 
 | Shape | Cuts | Use for |
 | --- | --- | --- |
@@ -71,9 +71,9 @@ A sanitizer is two different things wearing one word. The shape you pass tells t
 
 A bare string names the wrapper **in this application** that calls something like `html.escape`. CLDK resolves it with `resolve_callable`.
 
-A `(name, within)` pair is the only shape that severs a validating guard, because a guard never sits on the data path at all. It checks a value and raises, so a cut on the callable does not cut the flow.
+A `(name, within)` pair is the only shape that cuts a validating guard, because a guard never sits on the data path at all. It tests a value and raises, so a cut on the callable does not cut the flow.
 
-Both cuts are applied inside the search. What comes back is the shortest **unsanitized** route, not a filtered list of sanitized ones.
+The search applies both cuts. What comes back is the shortest **unsanitized** route, not a filtered list of sanitized ones.
 
 ## What the result says
 
@@ -90,9 +90,9 @@ Both cuts are applied inside the search. What comes back is the shortest **unsan
 
 ### `exhausted` is the reason to call this
 
-`paths_between` returns `[]` both when no flow exists and when the flow left the resolved graph. `exhausted` is the refutation that an empty list cannot give you.
+`paths_between` returns an empty `paths` list both when no flow exists and when the flow left the resolved graph. `exhausted` is the refutation that an empty list cannot give you.
 
-A pair is listed in `exhausted` only when all three of these hold:
+CLDK lists a pair in `exhausted` only when all three of these conditions hold:
 
 <Steps>
 1. The call passed `depth=None`.
@@ -100,23 +100,23 @@ A pair is listed in `exhausted` only when all three of these hold:
 3. No diagnostic in `unresolved` implicates that pair.
 </Steps>
 
-An explicit `depth` empties `exhausted` by rule, not by tendency. A bound turns a real long flow into an empty result, and a wrong refutation closes a live alert.
+An explicit `depth` always empties `exhausted`. A bound turns a real long flow into an empty result, and a wrong refutation closes a live alert.
 
 <Aside type="caution" title="What a refutation claims, and what it does not">
 `exhausted` is a claim about **the emitted graph plus the ledger**. It is never a claim about the program. The field is named for the search, not for the conclusion.
 
-The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call structure **under**-approximates wherever dispatch is unresolved, so a real flow can exist with no path in the graph. Absence of a path bounds the program only where the frontier was fully resolved, and `unresolved` is what enumerates where it was not.
+The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call structure **under**-approximates wherever dispatch is unresolved, so a real flow can exist with no path in the graph. A missing path bounds the program only where the walk fully resolved the frontier. The `unresolved` list names where it did not.
 
-The step from "exhausted" to "this alert is a false positive" is yours to take, deliberately.
+You decide whether an `exhausted` pair means that the alert is a false positive.
 </Aside>
 
 ### `complete` is the batch flag, not the pair flag
 
-`complete` is `True` only when nothing was truncated **and** `unresolved` is empty. One skipped or blocked pair makes it `False`, however cleanly the other pairs answered.
+`complete` is `True` only when no cap truncated `paths` **and** `unresolved` is empty. One skipped or blocked pair makes it `False`, however cleanly the other pairs answered.
 
 While `complete` is `False`, no absence claim stands on **any** pair in the result. The ledger voids the whole batch, not just the pair it names.
 
-A `False` here does not mean "raise `max_paths` and ask again". Where `paths` was not truncated, a bigger cap returns the same flag. Read `unresolved` to find out why.
+A `False` here does not mean "raise `max_paths` and ask again". If `max_paths` did not truncate `paths`, a bigger cap returns the same flag. Read `unresolved` to find out why.
 
 ### The ledger
 
@@ -127,10 +127,10 @@ Two diagnostic codes reach `unresolved`:
 | `unresolved_dispatch` | The walk met a frontier that it cannot follow |
 | `degenerate_pair` | A requested pair whose source and sink resolved to the same position |
 
-A degenerate pair is skipped rather than searched. Both codes name the affected pair in the `message` prose.
+CLDK skips a degenerate pair and does not search it. Both codes name the affected pair in the `message` prose.
 
 <Aside type="note" title="Read the message, do not parse it">
-`Diagnostic` has no structured field for a pair today, so `message` is a human-readable explanation. It is not something to compute with. If you need the pair association programmatically, ask for an additive `subject` field on `Diagnostic` rather than parsing the prose.
+`Diagnostic` has no structured field for the pair, so `message` is a human-readable explanation. Do not compute with it. If you need the pair association in code, open an issue on the [python-sdk repository](https://github.com/codellm-devkit/python-sdk/issues). Ask for an additive `subject` field on `Diagnostic`.
 </Aside>
 
 ## Errors
@@ -140,7 +140,7 @@ A degenerate pair is skipped rather than searched. Both codes name the affected 
 | `AmbiguousName` | A name, or the `within` of a sanitizer, matched more than one thing |
 | `SelectorNotInGraph` | A name matched nothing, or a sanitizer shape disagrees with what it resolves to |
 
-Both are raised rather than swallowed, because a selector that silently matches nothing produces an empty result that reads like a refutation.
+CLDK raises both exceptions, because a selector that silently matches nothing produces an empty result that reads like a refutation.
 
 ## How certain a witness is
 
@@ -153,7 +153,7 @@ for path in result.paths:
 
 ## Language support
 
-`taint()` is available on the Java, Python, and TypeScript analysis facades, with the same signature on each.
+`taint()` is available on the Java, Python, and TypeScript `analysis` objects, with the same signature on each.
 
 ## Where to go next
 

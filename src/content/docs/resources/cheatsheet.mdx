@@ -13,7 +13,7 @@ A single-page reference for the common CLDK calls. Build one `analysis` object w
 pip install cldk
 ```
 
-Reachability queries use `networkx`. CLDK depends on it. If you query graphs directly, install it explicitly:
+Reachability queries use `networkx`. `pip install cldk` installs it as a dependency. If your own code imports `networkx` directly, install it explicitly too:
 
 ```bash frame="none"
 pip install cldk networkx
@@ -21,7 +21,7 @@ pip install cldk networkx
 
 ## Construct
 
-Use the per-language factory for the language you want: `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)`, or `CLDK.c(project_path)`. The analysis level controls how much CLDK computes.
+Use the per-language factory for the language you want: `CLDK.java(...)`, `CLDK.python(...)`, or `CLDK.typescript(...)`. The analysis level controls how much CLDK computes.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -63,13 +63,13 @@ print(len(analysis.get_classes()), "classes")
   </TabItem>
 </Tabs>
 
-<Aside type="note" title="Old entry point is deprecated">
-The legacy form `CLDK(language="java").analysis(project_path=...)` still works, but it is **deprecated**. It forwards to the factories above. Use `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)`, or `CLDK.c(...)` instead. `from cldk import CLDK` does not change.
+<Aside type="note" title="Deprecated constructor form">
+The `CLDK(language="java").analysis(project_path=...)` form is **deprecated**. It forwards to the factories above. Use `CLDK.java(...)`, `CLDK.python(...)`, or `CLDK.typescript(...)` instead. `from cldk import CLDK` does not change.
 </Aside>
 
 | Argument | Value | Notes |
 | --- | --- | --- |
-| factory | `CLDK.java` / `CLDK.python` / `CLDK.typescript` / `CLDK.c` | Selects the language facade. |
+| factory | `CLDK.java` / `CLDK.python` / `CLDK.typescript` | Selects the language facade. |
 | `project_path` | path to checkout | The project to analyze. |
 | `analysis_level` | `symbol_table` (default) / `call_graph` / `program_dependency_graph` / `system_dependency_graph` | Call graph, callers, and callees **need** `call_graph`. Dataflow and taint need level 3 or 4. |
 | `target_files` | list of paths (optional) | Restrict analysis to these files. |
@@ -78,7 +78,7 @@ The legacy form `CLDK(language="java").analysis(project_path=...)` still works, 
 
 ## Select a backend
 
-The **type** of the `backend=` config object selects the backend. Import these types from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default in-process codeanalyzer backend. `cache_dir`, `use_codeql`, and `use_ray` live **inside** these configs.
+The **type** of the `backend=` configuration object selects the backend. Import these types from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default in-process codeanalyzer backend. `cache_dir` and `use_ray` live **inside** these configuration objects.
 
 ```python
 from cldk import CLDK
@@ -97,7 +97,7 @@ analysis = CLDK.java(
 # Python codeanalyzer backend with call-graph knobs.
 analysis = CLDK.python(
     project_path="my_pkg",
-    backend=PyCodeAnalyzerConfig(use_codeql=True, use_ray=False),
+    backend=PyCodeAnalyzerConfig(use_ray=True),
 )
 
 # Read-only Neo4j backend (Java / Python / TypeScript); the graph is populated out of band.
@@ -109,25 +109,25 @@ analysis = CLDK.typescript(
 | Config type | Backend | Notes |
 | --- | --- | --- |
 | (omit) / `CodeAnalyzerConfig` | In-process codeanalyzer | Default for Java/TypeScript. `cache_dir` only. |
-| `PyCodeAnalyzerConfig` | In-process codeanalyzer (Python) | Default for Python. Adds `use_codeql` / `use_ray`. |
+| `PyCodeAnalyzerConfig` | In-process codeanalyzer (Python) | Default for Python. Adds `use_ray`. |
 | `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional. The graph is loaded out of band. See [Analysis at scale](/at-scale/). |
 
-<Aside type="note" title="Caching and removed arguments">
-Caching is **on by default** for Java and TypeScript. Artifacts live under one language-keyed `cache_dir`. The default is `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`.
+<Aside type="note" title="Caching and the cache root">
+Caching is **on by default** for Java, Python, and TypeScript. Artifacts live under one language-keyed `cache_dir`. The default is `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`.
 
-The `analysis_backend_path` argument is **removed**. The binary ships inside the packaged `codeanalyzer-*`. For the TypeScript backend, set the binary with the `$CODEANALYZER_TS_BIN` environment variable. The `analysis_json_path` argument is **removed** too, and `cache_dir` replaces it.
+The factories have no `analysis_backend_path` argument. The binary ships inside the packaged `codeanalyzer-*`. For the TypeScript backend, set the binary with the `$CODEANALYZER_TS_BIN` environment variable. The factories have no `analysis_json_path` argument. `cache_dir` sets the cache root.
 </Aside>
 
 ## Symbol table
 
-The layer available at every analysis level: every class, method, and field, typed and queryable.
+The symbol table is available at every analysis level. It holds every class, method, and field, typed and queryable.
 
 | Method | Returns | Description |
 | --- | --- | --- |
-| `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule]` | The entire project, indexed by file. |
-| `get_classes()` | `Dict[str, JType \| PyClass]` | Every class or type, keyed by qualified name. |
-| `get_methods()` | `Dict` | Every method (Java). |
-| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | One method. `.code` holds its source body. |
+| `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule \| TSModule]` | The entire project, indexed by file. |
+| `get_classes()` | `Dict[str, JType \| PyClass \| TSClass]` | Every class or type, keyed by qualified name. |
+| `get_methods()` | `Dict[str, Dict]` | Every method, keyed by class and then by method. |
+| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| TSCallable \| None` | One method. `.code` holds its source body. |
 
 ```python
 m = analysis.get_method(
@@ -150,7 +150,7 @@ These methods need `analysis_level=AnalysisLevel.call_graph`. The default `symbo
 | `get_call_graph_json()` | `str` | Same graph, serialized. |
 | `get_callers(target_class_name, target_method_declaration)` | `Dict` | Methods that call this method. |
 | `get_callees(source_class_name, source_method_declaration)` | `Dict` | Methods that this method calls. |
-| `get_class_call_graph(qualified_class_name, method_signature=None)` | graph | Call graph scoped to one class (Java). |
+| `get_class_call_graph(qualified_class_name, method_signature=None)` | `List[Tuple]` | Call-graph edges reachable from one class or method. |
 
 ```python
 cg = analysis.get_call_graph()          # -> networkx.DiGraph
@@ -170,7 +170,7 @@ print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
 # list(nx.all_simple_paths(cg, src, sink))        # every path
 ```
 
-## Dataflow and taint <Badge text="2.0" variant="caution" />
+## Dataflow and taint <Badge text="New in 2.0" variant="caution" />
 
 CLDK 2.0 adds levels 3 and 4, and the methods over them. Version 2.0 is a release candidate, so install it with `pip install --pre cldk`. Java, Python, and TypeScript all expose this surface.
 
@@ -189,7 +189,7 @@ CLDK 2.0 adds levels 3 and 4, and the methods over them. Version 2.0 is a releas
 | `reaches(src, dst, ...)` | `bool` | Does it reach it at all? |
 | `flows_to_call(src, callee, *, within, ...)` | `bool` | Does it reach a call to this callee? |
 | `flows_to_argument(src, callee, arg, *, within, ...)` | `bool` | Does it reach that argument? |
-| `paths_between(src, dst, ...)` | `FlowPaths` | The routes it takes. |
+| `paths_between(src, dst, *, src_within, dst_within, ...)` | `FlowPaths` | The routes it takes. |
 | `taint(sources, sinks, sanitizers, ...)` | `TaintResult` | m sources against n sinks in one traversal. |
 
 ```python
@@ -213,12 +213,13 @@ The typed objects that each language analysis API returns.
 | --- | --- |
 | Java | `JType`, `JCallable`, `JCompilationUnit`, `JField`, `JComment`, `JCRUDOperation` |
 | Python | `PyModule`, `PyClass`, `PyCallable`, `PyImport`, `PyComment` |
+| TypeScript | `TSModule`, `TSClass`, `TSCallable`, `TSInterface`, `TSEnum`, `TSTypeAlias`, `TSImport`, `TSComment` |
 
 ## Gotchas
 
 <Aside type="caution" title="Common mistakes">
 - **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not have call edges.
-- **Analysis is project-based.** Always pass `project_path=...` to the factory, for example `CLDK.java(project_path=...)`. Point it at the project root. The Neo4j backend is the exception: the graph is populated out of band, so `project_path` is optional.
+- **Analysis is project-based.** Pass `project_path=...` to the factory, for example `CLDK.java(project_path=...)`. Point it at the project root. The Neo4j backend is the exception. Its graph is populated out of band, so `project_path` is optional.
 </Aside>
 
 ## Next steps

@@ -1,6 +1,6 @@
 ---
 title: Add a Rust frontend
-description: "Roadmap and starting points for a second CLDK frontend: a Rust SDK that consumes the same codeanalyzer backends as the Python SDK."
+description: "Roadmap and starting points for a Rust CLDK frontend: a Rust SDK that consumes the same codeanalyzer backends as the Python SDK."
 ---
 
 import { Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
@@ -13,7 +13,7 @@ This page is a **stub**. A Rust frontend does not exist yet. This page describes
 
 A *frontend* is an SDK that reads the canonical analysis JSON from the [codeanalyzer backends](/backends/). It gives you an `analysis` API over that JSON. The [Python SDK](/reference/python-api/) is the reference implementation.
 
-The backends do all the language analysis. A second frontend therefore supports every existing backend with no extra work. A Rust SDK can analyze Python, Java, and later Go from the first day.
+The backends do all the language analysis. A new frontend therefore supports every existing backend with no extra work. A Rust SDK can read Java, Python, and TypeScript analyses from the first day, and Go when that backend exists.
 
 Rust suits this role: strong types for the schema, `serde` for fast deserialization, and `petgraph` for call-graph queries that match the `networkx` graphs of the Python SDK.
 
@@ -37,13 +37,13 @@ Mirror the structure of the Python SDK, module by module. None of this work is d
 
 3. **Build the call graph with `petgraph`.** Deserialize the call-graph edges from the backend into a `petgraph::DiGraph`. Reachability is then `petgraph::algo::has_path_connecting`, the Rust form of `networkx.has_path`.
 
-4. **Run the backends.** Reuse the same CLI contract that the Python SDK uses to run `codeanalyzer-*` (input project directory, output JSON, analysis level). See the [CLI interface](/backends/codeanalyzer-java/) of the backend. The wire format is shared, so this step is mostly process management and JSON parsing.
+4. **Run the backends.** Reuse the same CLI contract that the Python SDK uses to run `codeanalyzer-*` (input project directory, output JSON, analysis level). See the [CLI interface](/backends/codeanalyzer-java/#cli-interface) of the backend. The wire format is shared, so this step is mostly process management and JSON parsing.
 
-5. **Register languages with per-language factories.** The current `cldk/core.py` gives one factory for each language: `CLDK.java(...)`, `CLDK.python(...)`, and `CLDK.typescript(...)`. Each facade then selects its *backend* by the **type** of a `backend=` config object. `CodeAnalyzerConfig` selects the in-process codeanalyzer. `Neo4jConnectionConfig` selects the read-only graph.
+5. **Register languages with per-language factories.** `cldk/core.py` gives one factory for each language: `CLDK.java(...)`, `CLDK.python(...)`, and `CLDK.typescript(...)`. Each facade then selects its *backend* by the **type** of a `backend=` configuration object. `CodeAnalyzerConfig` selects the in-process codeanalyzer. `Neo4jConnectionConfig` selects the read-only graph.
 
-   The Rust port must do the same. Write per-language constructors such as `CLDK::java(project_path)`, and choose the backend by config type. An enum or trait object works here: `Backend::CodeAnalyzer { cache_dir }` against `Backend::Neo4j { uri, .. }`, which each `LanguageAnalysis` impl matches on. (Python keeps a deprecated `CLDK(language).analysis(...)` shim that forwards to the factories. A Rust port does not need this shim.)
+   The Rust port must do the same. Write per-language constructors such as `CLDK::java(project_path)`, and choose the backend by configuration type. An enum or a trait object works here. Each `LanguageAnalysis` implementation matches on `Backend::CodeAnalyzer { cache_dir }` or `Backend::Neo4j { uri, .. }`. (Python keeps a deprecated `CLDK(language).analysis(...)` shim that forwards to the factories. A Rust port does not need this shim.)
 
-6. **Validate against the same fixtures.** Run it against Apache Commons CLI. Assert the same facts that the Python test suite asserts: same project, same results, different host language.
+6. **Validate against the same fixtures.** Run it against the Java fixtures of the Python SDK, DayTrader 8 and PlantsByWebSphere, in `tests/resources/java/application/`. Assert the same facts that the Python test suite asserts: same project, same results, different host language.
 
 </Steps>
 

@@ -9,7 +9,7 @@ import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs
 
 The **codeanalyzer-iac** backend analyzes infrastructure-as-code. Its command is **`caniac`**. It reads a repository, or a Neo4j graph that already holds one, and publishes one typed model of the infrastructure sources.
 
-`caniac` is built on the [Helm](https://helm.sh/) SDK, pinned to version 4.2.4. It never calls the `helm` CLI. Helm is the first dialect. Every other file stays an ordinary `Artifact`, and the analyzer never drops it.
+`caniac` is built on the [Helm](https://helm.sh/) SDK, pinned to version 4.2.4. It never calls the `helm` CLI. Helm is the first dialect. Every other file stays an ordinary `Artifact`, and the backend never removes it.
 
 <Aside type="caution" title="There is no CLDK.iac(...) factory yet">
 The other backends have a matching SDK facade. This one does not. Use `caniac` as a command, or read the graph that it writes. Java, Python, and TypeScript analyses are unaffected.
@@ -47,14 +47,14 @@ caniac --app-name payments --workspace-root . charts/api
 
 Paths can be files or directories, and they can overlap. They are selection filters, not identity roots. Identity comes from `--workspace-root`, which defaults to the current directory. `charts/api/values.yaml` is therefore the same artifact whether you selected the repository, `charts/`, or that one file.
 
-Every input file and every `--config` file must resolve below the workspace root. The analyzer does not follow symlinks out of it, and the walker skips `.git`.
+Every input file and every `--config` file must resolve below the workspace root. The backend does not follow symlinks out of it, and the walker skips `.git`.
 
 With no path, the input is `.`. With no `--app-name`, the application takes the base name of the workspace root. In graph mode a name is mandatory.
 
 ## Analysis levels
 
 <Aside type="caution" title="This scale is not the SDK scale">
-`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and level 4 here is rejected rather than accepted. Read this table, not the [dataflow levels](/guides/dataflow/#the-four-analysis-levels).
+`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and `caniac` rejects level 4. Read this table, not the [dataflow levels](/guides/dataflow/#the-four-analysis-levels).
 </Aside>
 
 | Level | Adds | Never does |
@@ -65,7 +65,7 @@ With no path, the input is `.`. With no `--app-name`, the application takes the 
 
 `-a/--analysis-level` takes 1, 2, or 3, and defaults to 1. The levels are additive. Every fact that a lower level published is present, unchanged, at every higher level.
 
-The graph always receives the deepest implemented level, which is L3 today. `--emit cypher` and `--emit neo4j` therefore raise the level to 3 unless you passed `--analysis-level` yourself. An explicit level below 3 with those targets is rejected rather than raised without a word.
+The graph always receives the deepest implemented level, which is L3 today. `--emit cypher` and `--emit neo4j` therefore raise the level to 3 unless you passed `--analysis-level` yourself. If you pass an explicit level below 3 with those targets, `caniac` rejects the run with an error. It does not silently raise the level.
 
 ```bash
 caniac testdata/helm/l1-v2 --app-name payments --analysis-level 1 > analysis.json
@@ -83,43 +83,43 @@ caniac --workspace-root testdata/helm/profiles --app-name payments \
 | `neo4j` (graph-mode default) | A reconciled generation over Bolt | Nothing | Nothing |
 | `schema` | The embedded graph catalog | `schema.neo4j.json` | `schema.neo4j.json` |
 
-In filesystem mode, `--emit cypher` never consults the target graph. The script is projected from the analysis alone, so it has no hash-conflict guard against facts that are already in the graph. `--emit neo4j` does have that guard.
+In filesystem mode, `--emit cypher` never consults the target graph. The script is projected from the analysis alone, so it has no hash-conflict guard against facts that are already in the graph. `--emit neo4j` does have that guard. In filesystem mode, `--emit neo4j` needs the target database. Give it with `--neo4j-uri <uri>` or with the `NEO4J_URI` environment variable.
 
-`--emit schema` takes no input path. `-f/--format` accepts only `json`. `msgpack` is named so that the analyzer can reject it with a clear message instead of a bad parse. `-j/--jobs` bounds parallel parsing and rendering, and it defaults to the CPU count. The output is byte-identical whatever you set it to.
+`--emit schema` takes no input path. `-f/--format` accepts only `json`. `msgpack` is named so that the backend can reject it with a clear message instead of a bad parse. `-j/--jobs` bounds parallel parsing and rendering, and it defaults to the CPU count. The output is byte-identical whatever you set it to.
 
-Stdout carries analysis data and nothing else. Errors go to stderr, one line each. A successful run leaves stderr empty. The analyzer discards the value-coalescing warnings that Helm itself emits, rather than letting them onto either stream.
+Stdout carries analysis data and nothing else. Errors go to stderr, one line each. A successful run leaves stderr empty. The backend discards the value-coalescing warnings that Helm emits. They reach neither stream.
 
 ## Graph mode
 
-A single positional Neo4j or Bolt URI switches the analyzer into graph mode.
+A single positional Neo4j or Bolt URI switches `caniac` into graph mode.
 
 ```bash
 caniac neo4j://localhost:7687 --app-name payments
 ```
 
-In graph mode the analyzer reads the complete `Artifact.source` for every `can://artifact/<app-name>/...` node, makes sure that each one matches the stored `sha256`, and writes its enrichment back onto those same nodes.
+In graph mode the backend reads the complete `Artifact.source` for every `can://artifact/<app-name>/...` node. It makes sure that each one matches the stored `sha256`. Then it writes its enrichment back onto those same nodes.
 
-`--app-name` is required here. The URI names a database, not an application, and the analyzer will not pick one for you. You cannot mix a URI and filesystem paths in one invocation. In graph mode `--emit` defaults to `neo4j`, so the command above reads and writes the same database over one connection.
+`--app-name` is required here. The URI names a database, not an application, and the backend does not select one for you. You cannot mix a URI and filesystem paths in one invocation. In graph mode `--emit` defaults to `neo4j`, so the command above reads and writes the same database over one connection. The connection reads `--neo4j-user`, `--neo4j-password`, and `--neo4j-database`, or the `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE` environment variables. The user defaults to `neo4j`.
 
-If a source does not match its recorded hash, that becomes a diagnostic on the artifact and the analyzer skips its semantic model. The recorded spans address the old text, so a changed source makes every one of them wrong. Other artifacts are analyzed normally. There is no flag to accept a mismatch.
+If a source does not match its recorded hash, that becomes a diagnostic on the artifact and the backend skips its semantic model. The recorded spans address the stored text, so a changed source makes every one of them wrong. The backend analyzes the other artifacts normally. There is no flag to accept a mismatch.
 
 ## Exit status
 
 | Exit | Meaning |
 | --- | --- |
 | 0 | The analysis completed |
-| 1 | An analyzer-wide failure, or `--strict` with at least one error-severity diagnostic |
+| 1 | A run-wide failure, or `--strict` with at least one error-severity diagnostic |
 
-Isolated failures are diagnostics inside the model, not process failures. An unparsable file, or a chart that the analyzer cannot render, still exits 0. A file that the analyzer cannot read as text stays a raw inventory entry, with a digest and no source, and reports `IAC_SOURCE_NOT_TEXT` at `warning` severity. A repository with binaries in it therefore still passes `--strict`.
+Isolated failures are diagnostics inside the model, not process failures. An unparsable file, or a chart that the backend cannot render, still exits 0. A file that the backend cannot read as text stays a raw inventory entry, with a digest and no source. It reports `IAC_SOURCE_NOT_TEXT` at `warning` severity. A repository with binaries in it therefore still passes `--strict`.
 
-Whether a document is published on exit 1 depends on how far the run got:
+A run that exits 1 publishes a document only when the failure comes after the write:
 
-- An invalid configuration and a `--strict` failure are both decided after the analysis is written, so those runs still leave a document to read.
+- `caniac` reports an invalid configuration and a `--strict` failure after it writes the analysis, so those runs leave a document to read.
 - An unreadable input root, an unreachable graph, and a failed graph commit all end the run before that write, so they publish nothing.
 
 `--strict` changes only the exit status. It never changes the document.
 
-`--eager` reconciles away the stale facts that this analyzer owns for the selected application: `codeanalyzer-iac` nodes and aliases, `iac_*` properties, facet labels, and `IAC_*` relationships. It never removes an `Artifact`.
+`--eager` removes the stale facts that this backend owns for the selected application: `codeanalyzer-iac` nodes and aliases, `iac_*` properties, facet labels, and `IAC_*` relationships. It never removes an `Artifact`.
 
 ## Schema
 
@@ -128,6 +128,7 @@ The repository pins the accepted `codeanalyzer-schema` contract at commit [`b844
 ## See also
 
 <CardGrid>
+  <LinkCard title="IaC examples" href="/examples/iac/" description="Worked examples on the Quarkus Coffee Shop Helm chart." />
   <LinkCard title="Backends overview" href="/backends/" description="All CLDK analysis backends and their maturity tiers." />
   <LinkCard title="Analysis at scale" href="/at-scale/" description="The emit and poll split that this backend writes into." />
   <LinkCard title="Deploy on Kubernetes" href="/at-scale/kubernetes/" description="Scheduled emit jobs against a shared Neo4j." />

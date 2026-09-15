@@ -1,13 +1,13 @@
 ---
 title: Java examples
-description: "Real, runnable Java examples extracted from the CLDK test suite: symbol table, call graph, class relationships, CRUD operations, comments, and reachability queries."
+description: "Worked Java examples on Apache Commons CLI: symbol table, call graph, class relationships, comments, entry points, and reachability queries."
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples come from the CLDK SDK test suite. Each snippet runs against a real codebase, the recurring sample [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`). Each snippet shows one feature and the output that the SDK returns. To adapt an example, use your own project path.
+These examples call the public methods of the CLDK Python SDK. Each snippet runs against a real codebase, the recurring sample [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`). Each snippet shows one feature and the output that the SDK returns. To adapt an example, use your own project path.
 
-## Set up the analysis
+## Build the analysis
 
 Before you query a codebase, build a CLDK analysis object for your Java project. The `analysis_level` parameter controls how deeply the backend parses the code. `symbol_table`, the default, finds classes, methods, and fields. `call_graph` also builds caller and callee edges.
 
@@ -55,7 +55,7 @@ Get the metadata for one class by its fully qualified name.
 
 ```python
 jtype = analysis.get_class("org.apache.commons.cli.Options")
-print(jtype.name, "is_interface:", jtype.is_interface, "is_abstract:", jtype.is_abstract)
+print(jtype.qualified_name, "is_interface:", jtype.is_interface, "is_abstract:", "abstract" in jtype.modifiers)
 # org.apache.commons.cli.Options is_interface: False is_abstract: False
 ```
 
@@ -103,7 +103,7 @@ print(method.code)
 
 ### Get method parameters
 
-Get the list of parameters for a method, with their types and their location in the source.
+Get the list of parameters for a method, with their types and their location in the source. <Badge text="New in 2.0" variant="caution" /> In CLDK 1.5.0, `get_method_parameters` returns parameter names only, as strings.
 
 ```python
 params = analysis.get_method_parameters(
@@ -206,7 +206,7 @@ Query the inheritance hierarchy to understand class structure and polymorphism.
 
 ### Get subclasses
 
-Get every class that extends a target class, including transitive subclasses.
+Get every class that directly extends or implements a target type. The result does not include transitive subclasses.
 
 ```python
 subclasses = analysis.get_sub_classes("java.io.Serializable")
@@ -222,17 +222,17 @@ for name, jtype in subclasses.items():
 
 ### Get extended classes (superclasses)
 
-Find the class hierarchy that a target class extends.
+Get the direct superclass of a target class. If the class extends only `java.lang.Object`, the list is empty.
 
 ```python
 extended = analysis.get_extended_classes(
-    "org.apache.commons.cli.HelpFormatter"
+    "org.apache.commons.cli.AlreadySelectedException"
 )
 print(len(extended))
 # 1
 
 print(extended[0])
-# java.lang.Object
+# org.apache.commons.cli.ParseException
 ```
 
 ### Get implemented interfaces
@@ -241,16 +241,20 @@ Get every interface that a class declares it implements.
 
 ```python
 interfaces = analysis.get_implemented_interfaces(
-    "org.apache.commons.cli.Converter"
+    "org.apache.commons.cli.DefaultParser"
 )
 print(len(interfaces))
 # 1
 
 print(interfaces[0])
-# org.apache.commons.cli.TypeHandler
+# org.apache.commons.cli.CommandLineParser
 ```
 
 ## CRUD operations and data access
+
+<Aside type="caution" title="Not available in CLDK 2.0">
+codeanalyzer-java 3.0.1 and newer (schema v2) do not emit CRUD operations. On CLDK 2.0, `get_all_crud_operations` and the `get_all_*_operations` variants raise `CodeanalyzerExecutionException`. The code in this section works on CLDK 1.5.0 only.
+</Aside>
 
 Find the methods that read from or write to persistent storage: databases, files, or external services.
 
@@ -260,10 +264,9 @@ print(len(crud_operations))
 # List of CRUD summaries, each with a list of operations
 
 for crud_summary in crud_operations:
-    class_name = next(k for k in crud_summary.keys() if isinstance(crud_summary[k], type(crud_summary[next(iter(crud_summary.keys()))])) and hasattr(crud_summary[k], 'name'))
-    method_name = next(k for k in crud_summary.keys() if isinstance(crud_summary[k], type(crud_summary[next(iter(crud_summary.keys()))])) and hasattr(crud_summary[k], 'signature'))
-    jtype = crud_summary[class_name]
-    jcallable = crud_summary[method_name]
+    (class_name, jtype), (method_name, jcallable) = [
+        (k, v) for k, v in crud_summary.items() if k != "crud_operations"
+    ]
     for op in crud_summary["crud_operations"]:
         print(
             class_name,
@@ -363,8 +366,8 @@ is_reachable = nx.has_path(cg, source, target)
 print(is_reachable)
 # True
 
-# All nodes reachable from a source within k hops
-source = "org.apache.commons.cli.DefaultParser.parse(java.lang.String[])"
+# All nodes reachable from a source
+source = "org.apache.commons.cli.DefaultParser.parse(org.apache.commons.cli.Options, java.lang.String[])"
 reachable_nodes = nx.descendants(cg, source)
 print(len(reachable_nodes), "methods reachable from parse()")
 # 67 methods reachable from parse()
@@ -378,9 +381,9 @@ for cycle in cycles[:1]:
     #            'org.apache.commons.cli.Options.getOption(String)'])
 ```
 
-## Entry point methods
+## Entrypoint methods
 
-Find the public methods that are entry points into the application, for example servlet handlers, REST endpoints, and main methods.
+Find the public methods that are entrypoints into the application, for example servlet handlers, REST endpoints, and main methods.
 
 ```python
 entry_methods = analysis.get_entry_point_methods()
@@ -395,10 +398,10 @@ for class_name, methods in entry_methods.items():
     # ...
 ```
 
----
+## Where to go next
 
 <CardGrid>
   <LinkCard title="Python examples" description="The same patterns for Python packages: symbol table, call graph, class relationships, and imports." href="/examples/python/" />
-  <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, build a call graph, find callers, sanitize a focal method." href="/guides/common-tasks/" />
+  <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, get a method body, build a call graph, find callers, map the class hierarchy." href="/guides/common-tasks/" />
   <LinkCard title="Java API reference" description="Full method signatures and return types for JavaAnalysis and all Java models." href="/reference/python-api/java/" />
 </CardGrid>

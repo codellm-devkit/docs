@@ -1,0 +1,279 @@
+---
+title: JavaScript examples
+description: "Worked examples for plain JavaScript projects with CLDK: the TypeScript backend reads .js, .jsx, .mjs, and .cjs files with no tsconfig."
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
+
+CLDK has no separate JavaScript factory: call `CLDK.typescript(project_path=...)` on the JavaScript project. The TypeScript backend reads `.js`, `.jsx`, `.mjs`, and `.cjs` files as first-class input, with or without a `tsconfig.json`. These examples analyze a plain JavaScript project called `my_app`, the recurring sample on this page. It has a `package.json`, no `tsconfig.json`, and five source files: `src/index.js`, `src/lib/greeter.js`, `src/util.mjs`, `src/legacy.cjs`, and `src/App.jsx`.
+
+<Aside type="note" title="Project-based analysis">
+JavaScript analysis is project-based. `project_path` must point at the project root. The backend finds JavaScript files without a `tsconfig.json`, and it forces `allowJs` on when one exists.
+</Aside>
+
+<Aside type="caution" title="Every section needs CLDK 2.0">
+The stable PyPI release, CLDK 1.5.0, pins codeanalyzer-typescript 0.4.3, and that backend discovers only `.ts`, `.tsx`, `.mts`, and `.cts` sources. JavaScript discovery needs codeanalyzer-typescript 1.1.0 or later, and the `javascript` id namespace needs 1.2.0 or later. Install the pre-release with `pip install --pre cldk`. CLDK 2.0.0rc7 pins codeanalyzer-typescript 1.6.0, and every expected output on this page is real output from that pair. The sections marked <Badge text="2.0" variant="caution" /> also use methods that exist only in CLDK 2.0.
+</Aside>
+
+## Set up the analysis
+
+Build a CLDK analysis object for your JavaScript project with the TypeScript factory. By default it extracts the symbol table: modules, classes, functions, and imports. For call-graph queries, add `analysis_level=AnalysisLevel.call_graph`.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+# Symbol table only (default)
+analysis = CLDK.typescript(project_path="my_app")
+
+# Symbol table + call graph (required for callers/callees)
+analysis = CLDK.typescript(
+    project_path="my_app",
+    analysis_level=AnalysisLevel.call_graph,
+)
+```
+
+The call-graph examples depend on `src/index.js`, which calls into two other files and into `console.log`. `src/lib/greeter.js` exports the class `Greeter` with a constructor and a `greet` method.
+
+```js
+import { Greeter } from "./lib/greeter.js";
+import { slug } from "./util.mjs";
+export function main() {
+  const g = new Greeter("world");
+  console.log(g.greet(), slug("Hello World"));
+}
+main();
+```
+
+<Aside type="tip" title="Backend configuration">
+Backend configuration lives in a `CodeAnalyzerConfig` that you pass as `backend=`. `cache_dir` controls where the backend stores its analysis cache. The default is `<project>/.codeanalyzer/typescript/`. The backend looks for `tsconfig.json`, then any `tsconfig*.json`, then `jsconfig.json`. Without one, it compiles with `target: ES2022`, `module: ESNext`, `moduleResolution: Bundler`, `jsx: Preserve`, `allowJs: true`, and `strict: false`. If you need `paths` or `baseUrl` for module resolution, add a `jsconfig.json`.
+
+```python
+from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
+
+analysis = CLDK.typescript(
+    project_path="my_app",
+    analysis_level=AnalysisLevel.call_graph,
+    backend=CodeAnalyzerConfig(cache_dir="/tmp/my_app_cache"),
+)
+```
+</Aside>
+
+## Symbol table: modules, classes, functions
+
+### List all modules
+
+Each JavaScript file becomes a `TSModule` in the symbol table. The key is the file path with its extension. The module id uses the `javascript` namespace.
+
+```python
+# Get all modules as a dictionary: file_path -> TSModule
+symbol_table = analysis.get_symbol_table()
+for file_path, module in symbol_table.items():
+    print(file_path, "->", module.id)
+# src/App.jsx -> can://my_app/javascript/src/App.jsx
+# src/index.js -> can://my_app/javascript/src/index.js
+# src/legacy.cjs -> can://my_app/javascript/src/legacy.cjs
+# src/lib/greeter.js -> can://my_app/javascript/src/lib/greeter.js
+# src/util.mjs -> can://my_app/javascript/src/util.mjs
+
+# Or get a flat list
+modules = analysis.get_modules()
+print(len(modules), "modules analyzed")
+# 5 modules analyzed
+```
+
+### List all classes
+
+Get all classes by signature. A signature is the file path without its extension, then the class name. `get_typescript_file` maps a signature back to its file.
+
+```python
+classes = analysis.get_classes()
+for signature, tsclass in classes.items():
+    print(f"{signature}: {list(tsclass.methods.keys())}")
+# src/lib/greeter.Greeter: ['greet', 'constructor']
+
+print(analysis.get_typescript_file("src/lib/greeter.Greeter"))
+# src/lib/greeter.js
+```
+
+### Get a specific method
+
+Get the exact method object by class signature and method name. It includes the signature, the inferred return type, and the source body.
+
+```python
+method = analysis.get_method("src/lib/greeter.Greeter", "greet")
+if method:
+    print("Signature:", method.signature)
+    print("Return type:", method.return_type)
+    print("Source:", method.code)
+# Signature: src/lib/greeter.Greeter.greet
+# Return type: string
+# Source: greet() { return `hello ${this.name}`; }
+```
+
+### List all functions
+
+Get module-level functions by signature. The sample has one function in each of four files, and every one has `kind` `function`.
+
+```python
+functions = analysis.get_functions()
+for signature, fn in functions.items():
+    print(f"{signature}: {fn.kind}, parameters {[p.name for p in fn.parameters]}")
+# src/App.App: function, parameters ['{ name }']
+# src/index.main: function, parameters []
+# src/legacy.add: function, parameters ['a', 'b']
+# src/util.slug: function, parameters ['s']
+```
+
+### List all imports
+
+Get imports for every module. `resolved_module` names the symbol-table key that an import resolves to. Only `src/index.js` has imports in the sample.
+
+```python
+imports = analysis.get_imports()
+for file_path, import_list in imports.items():
+    for imp in import_list:
+        print(f"{file_path}: {imp.name} from {imp.module} -> {imp.resolved_module}")
+# src/index.js: Greeter from ./lib/greeter.js -> src/lib/greeter.js
+# src/index.js: slug from ./util.mjs -> src/util.mjs
+```
+
+## Call graph: callers and callees
+
+<Aside type="caution" title="Always set analysis_level">
+All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table, and the call graph has 0 nodes and 0 edges. The SDK reuses a cached `analysis.json` from any level. If a symbol-table run already filled the cache directory, add `eager=True` to regenerate it.
+</Aside>
+
+### Build a call graph
+
+The call graph is a `networkx.DiGraph`. Its nodes are the endpoints of call edges, and each node carries a `kind` attribute. A module node is the caller of its top-level code. An external node is a library or builtin target. `eager=True` forces a fresh backend run, because the setup step filled the default cache at the symbol-table level.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.typescript(
+    project_path="my_app",
+    analysis_level=AnalysisLevel.call_graph,
+    eager=True,
+)
+
+cg = analysis.get_call_graph()
+print(f"{cg.number_of_nodes()} nodes, {cg.number_of_edges()} edges")
+for node in sorted(cg.nodes):
+    print(f"{cg.nodes[node]['kind']}: {node}")
+# 6 nodes, 5 edges
+# external: (builtin).log
+# module: src/index.js
+# callable: src/index.main
+# callable: src/lib/greeter.Greeter.constructor
+# callable: src/lib/greeter.Greeter.greet
+# callable: src/util.slug
+```
+
+### Find who calls a method
+
+Use `get_callers` to find every caller of a method. The caller `src/index.main` is in a different file from the class.
+
+```python
+callers = analysis.get_callers(
+    target_class_name="src/lib/greeter.Greeter",
+    target_method_declaration="greet",
+)
+print("Target:", callers["target_method"])
+for detail in callers["caller_details"]:
+    print(detail["caller_signature"], detail["edge"]["provenance"])
+# Target: src/lib/greeter.Greeter.greet
+# src/index.main ('tsc',)
+```
+
+### Find what a function calls
+
+Use `get_callees` with a bare signature for a module-level function. The `console.log` call becomes the external target `(builtin).log`, and its edge has `import` provenance.
+
+```python
+callees = analysis.get_callees("src/index.main")
+for detail in sorted(callees["callee_details"], key=lambda d: d["callee_signature"]):
+    print(detail["callee_signature"], detail["edge"]["provenance"])
+# (builtin).log ('import',)
+# src/lib/greeter.Greeter.constructor ('tsc',)
+# src/lib/greeter.Greeter.greet ('tsc',)
+# src/util.slug ('tsc',)
+```
+
+### List external targets
+
+Get every external target that the call graph points at. The key is the call-graph node key, and the value carries the `can://` id.
+
+```python
+externals = analysis.get_external_symbols()
+for key, ext in externals.items():
+    print(key, "->", ext.id)
+# (builtin).log -> can://my_app/@external/(builtin)/log
+```
+
+## Locate a source position <Badge text="2.0" variant="caution" />
+
+`locate` resolves a file path and a 1-based line to the enclosing callable. Line 4 of `src/lib/greeter.js` is the `greet` method.
+
+```python
+loc = analysis.locate("src/lib/greeter.js", 4)
+print("Callable:", loc.callable.signature)
+print("Class:", loc.callable.class_signature)
+print("Module:", loc.module.path)
+print("Source:", loc.source)
+# Callable: src/lib/greeter.Greeter.greet
+# Class: src/lib/greeter.Greeter
+# Module: src/lib/greeter.js
+# Source: greet() { return `hello ${this.name}`; }
+```
+
+## What is different for JavaScript
+
+The backend runs the same pipeline on JavaScript as on TypeScript. These points are where the result differs.
+
+- **Type facets are weak.** The TypeScript checker infers types from untyped JavaScript, so many facets read `any`. For `src/util.slug`, the parameter `s` and the return type both read `any`. The backend keeps JSDoc blocks as comments with `is_docstring` set to `True`, but it has no JSDoc type support of its own.
+- **Destructured parameters surface as raw text.** The parameter of `App({ name })` in `src/App.jsx` has the name `'{ name }'`.
+- **The backend does not model dynamic patterns.** The backend README describes the analysis as sound-leaning and over-approximate. Its recorded unsoundness covers dynamic `eval` and `Function`, reflection and monkey patches, dynamic property names, and npm-internal global effects.
+- **The backend reads no embedded-script formats.** Discovery reads only the eight TypeScript and JavaScript extensions. It does not analyze the script inside `.vue`, `.svelte`, or other single-file components.
+- **`is_tsx` stays `False` on `.jsx`.** The backend finds `.jsx` files, but the flag marks TSX files only.
+- **The backend skips tests.** The SDK always passes `--skip-tests`, and there is no SDK argument to include tests. The backend excludes the `test`, `tests`, `spec`, `__tests__`, `__test__`, and `__mocks__` directories at any depth. It also excludes files named `*.test.js` or `*.spec.js`, with the same rule for the other seven extensions. The directory walk skips `node_modules`, `.git`, `.codeanalyzer`, `dist`, `build`, `out`, `coverage`, `.next`, `.turbo`, `.cache`, and `vendor`.
+- **The backend needs npm for library targets.** If the project has a `package.json` and no `node_modules`, the backend installs dependencies first. It runs `npm ci --ignore-scripts` when a `package-lock.json` exists, and `npm install --ignore-scripts` when no lockfile exists. A `pnpm-lock.yaml` or a `yarn.lock` selects pnpm or yarn instead. The SDK does not pass `--no-build`. If the install fails, for example because `npm` is not on `PATH`, the backend continues with partial types and records a note.
+- **Entrypoint rules need a present framework.** The shipped rules detect a framework when first-party source imports its package or when `package.json` declares it as a dependency. For `my_app`, `get_entrypoint_coverage()` <Badge text="2.0" variant="caution" /> reports `frameworks_detected: []`.
+
+## Mixed projects
+
+A project can hold TypeScript and JavaScript files together. This example analyzes `mixed_app`. Its `tsconfig.json` has `include: ["src/**/*.ts"]`. Its sources are `src/index.ts`, `src/legacy.js` outside that include, and `src/helper.ts` beside a compiled `src/helper.js`. Two discovery rules decide what the symbol table holds.
+
+- **Discovery ignores tsconfig `include`.** The backend analyzes `src/legacy.js` under the `javascript` namespace. The call from `src/index.run` to `src/legacy.legacyAdd` resolves across languages. The function `unreferenced` in `src/legacy.js`, which no TypeScript file imports, is also in the symbol table.
+- **The backend skips a compiled sibling.** A `.js` file with the same prefix as a real (non-declaration) `.ts`, `.tsx`, `.mts`, or `.cts` file counts as compiled output. The backend skips it, so `src/helper.js` is absent from the symbol table. The import `./helper` in `src/index.ts` resolves to `src/helper.ts`. A `.d.ts` file beside an analyzed `.js` file is not a module, but the checker still reads it.
+
+```python
+analysis = CLDK.typescript(
+    project_path="mixed_app",
+    analysis_level=AnalysisLevel.call_graph,
+)
+
+symbol_table = analysis.get_symbol_table()
+print(list(symbol_table))
+# ['src/helper.ts', 'src/index.ts', 'src/legacy.js']
+print(symbol_table["src/legacy.js"].id)
+# can://mixed_app/javascript/src/legacy.js
+print("src/helper.js" in symbol_table)
+# False
+
+print(list(analysis.get_functions()))
+# ['src/helper.helper', 'src/index.run', 'src/legacy.legacyAdd', 'src/legacy.unreferenced']
+
+callees = analysis.get_callees("src/index.run")
+print(sorted(d["callee_signature"] for d in callees["callee_details"]))
+# ['src/helper.helper', 'src/legacy.legacyAdd']
+```
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="TypeScript examples" description="The full accessor surface of the same backend, on a TypeScript project." href="/examples/typescript/" />
+  <LinkCard title="codeanalyzer-ts backend" description="How the backend discovers files, resolves calls, and materializes dependencies." href="/backends/codeanalyzer-ts/" />
+  <LinkCard title="TypeScript API reference" description="Full method signatures and docstrings for TypeScriptAnalysis." href="/reference/python-api/typescript/" />
+</CardGrid>

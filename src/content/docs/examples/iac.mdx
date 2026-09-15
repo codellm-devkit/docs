@@ -1,0 +1,336 @@
+---
+title: IaC examples
+description: "Worked examples for a Helm chart with the codeanalyzer-iac backend: file inventory, named templates, value references, rendered Kubernetes resources, and the Neo4j graph."
+---
+
+import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+These examples analyze the Quarkus Coffee Shop Helm chart, the recurring sample across the IaC documentation. The chart lives in the `quarkuscoffeeshop-helm` repository under `charts/quarkuscoffeeshop-charts`. The page groups the examples by task: set up the analysis, inventory the files, inspect the templates, inspect the renders, and publish the graph. Each example shows behavior that the backend test suite asserts, unless a comment says that a value is illustrative.
+
+<Aside type="note" title="No SDK facade">
+CLDK has no `CLDK.iac()` facade. Every example on this page is a `caniac` command, a `jq` filter over `analysis.json`, or a Cypher query. The [codeanalyzer-iac backend page](/backends/codeanalyzer-iac/) covers install and the full CLI reference. Install `caniac` and `jq` before you start.
+</Aside>
+
+## Set up the analysis
+
+Clone the sample. Then move to the pinned commit.
+
+```bash
+git clone https://github.com/quarkuscoffeeshop/quarkuscoffeeshop-helm.git
+cd quarkuscoffeeshop-helm
+git checkout aa3c842658e0fc7e44fa25132d8b817eab225cbe
+```
+
+Every command uses `--app-name quarkuscoffeeshop`. That name identifies the application, so every id starts with `can://iac/quarkuscoffeeshop` or `can://artifact/quarkuscoffeeshop/`. The Helm release name is `coffee`. The chart helpers put the release name into resource names, for example `coffee-quarkuscoffeeshop-charts`. The application name and the release name are two different things.
+
+Save this configuration as `.codeanalyzer-iac.yaml` in the repository root. It declares two render profiles for the chart. Both profiles use the release name `coffee` and the namespace `quarkuscoffeeshop-demo`. The second profile disables the service account.
+
+```yaml
+version: 1
+renders:
+  - name: base
+    chart: charts/quarkuscoffeeshop-charts/Chart.yaml
+    release_name: coffee
+    namespace: quarkuscoffeeshop-demo
+  - name: no-service-account
+    chart: charts/quarkuscoffeeshop-charts/Chart.yaml
+    release_name: coffee
+    namespace: quarkuscoffeeshop-demo
+    set:
+      "serviceAccount.create": ""
+```
+
+Each `set` entry is a string, as with `helm --set-string`, so `"false"` is a non-empty true value and only `""` is false.
+
+Write the analysis output to a directory outside the clone. The backend records every file under the workspace root. It skips the `.git`, `.hg`, and `.svn` directories. If the output directory is inside the clone, the next run records the output file as an artifact.
+
+### Analyze the source at level 1
+
+Level 1 reads the files and records source facts. It resolves nothing and renders nothing.
+
+```bash
+caniac . --app-name quarkuscoffeeshop --analysis-level 1 -o ../coffee-out
+jq -c '{schema_version, language, max_level, app: .application.id, artifacts: (.application.artifacts | length)}' ../coffee-out/analysis.json
+# {"schema_version":"2.0.0","language":"iac","max_level":1,"app":"can://iac/quarkuscoffeeshop","artifacts":15}
+# 15 artifacts = 14 tracked files + .codeanalyzer-iac.yaml
+```
+
+### Render at level 3
+
+Level 3 reads the configuration file and renders each profile with the embedded Helm SDK. Pass `--config` with the path of the configuration file, relative to the repository root. Every later example reads this level 3 document.
+
+```bash
+caniac . --app-name quarkuscoffeeshop --config .codeanalyzer-iac.yaml --analysis-level 3 -o ../coffee-out
+jq -c '.application.artifacts[".codeanalyzer-iac.yaml"].codeanalyzer_iac_config.render_profiles
+       | map_values({release_name, namespace, origin})' ../coffee-out/analysis.json
+# {"base":{"release_name":"coffee","namespace":"quarkuscoffeeshop-demo","origin":"config"},"no-service-account":{"release_name":"coffee","namespace":"quarkuscoffeeshop-demo","origin":"config"}}
+```
+
+## Analysis levels for this chart
+
+<Aside type="caution" title="This scale is not the SDK scale">
+`caniac` takes `--analysis-level 1`, `2`, or `3`, and rejects `4`. The language backends take levels 1 to 4. The two scales do not line up. The [backend page](/backends/codeanalyzer-iac/#analysis-levels) has the general table.
+</Aside>
+
+The levels are additive. Every fact from a lower level is present, unchanged, at each higher level. This table shows what each level adds for this chart.
+
+| Level | What this chart gets |
+| --- | --- |
+| 1 (default) | 15 artifacts, 8 with an `iac` facet and 7 raw. 6 named templates, all in `_helpers.tpl`. 9 `include` calls with no `target_id`. 16 resource templates. One `config_key` for each mapping key and sequence index in `values.yaml`, parent keys included. The chart `renders` map is `{}`. |
+| 2 | `iac_part_of_chart` edges from the 5 template files to the chart. A `target_id` on each `include` call and on each value reference. No dependency facts, because `Chart.yaml` declares no dependencies. Still no I/O. |
+| 3 | The `codeanalyzer_iac_config` facet on `.codeanalyzer-iac.yaml` with the `base` and `no-service-account` profiles. A render for each profile: 16 resources for `base` and 15 for `no-service-account`. The `kubernetes_resource_addresses` map. Still no cluster access. |
+
+The render examples and the Cypher examples need level 3. The other `jq` examples also work on a level 1 document.
+
+## Inventory: files, charts, roles
+
+<Aside type="tip" title="Cypher examples need the graph">
+Each Cypher query reads the graph that the [Publish to Neo4j](#publish-to-neo4j) section writes. If you want to run a Cypher example, publish the graph first.
+</Aside>
+
+### List the Helm files and their roles
+
+Every file gets an `Artifact`. A file that Helm owns also gets an `iac` facet with a `kind` and, for most kinds, a list of `roles`.
+
+```bash
+jq -r '.application.artifacts | to_entries[] | select(.value.iac)
+       | "\(.key)\t\(.value.iac.kind)\t\(.value.iac.roles // [] | join(","))"' ../coffee-out/analysis.json
+# charts/quarkuscoffeeshop-charts/.helmignore                           helm_ignore     ignore_rules
+# charts/quarkuscoffeeshop-charts/Chart.yaml                            helm_chart
+# charts/quarkuscoffeeshop-charts/templates/_helpers.tpl                helm_template   helper
+# charts/quarkuscoffeeshop-charts/templates/deployment.yaml             helm_template   resource
+# charts/quarkuscoffeeshop-charts/templates/service.yaml                helm_template   resource
+# charts/quarkuscoffeeshop-charts/templates/serviceaccount.yaml         helm_template   resource
+# charts/quarkuscoffeeshop-charts/templates/tests/test-connection.yaml  helm_template   hook,test
+# charts/quarkuscoffeeshop-charts/values.yaml                           helm_values     default
+# 8 rows. The .github files and README.md have no iac facet.
+# The roles resource and default are illustrative.
+```
+
+This Cypher query returns the same inventory.
+
+```cypher
+MATCH (a:IaCArtifact {iac_app_id: "can://iac/quarkuscoffeeshop"})
+RETURN a.path, a.iac_kind, a.helm_roles ORDER BY a.path
+// 8 rows, the same paths and kinds as above
+```
+
+### Read the chart identity
+
+The chart facet carries the fields of `Chart.yaml`.
+
+```bash
+jq -c '.application.artifacts["charts/quarkuscoffeeshop-charts/Chart.yaml"].iac
+       | {api_version, chart_type, name, version, app_version}' ../coffee-out/analysis.json
+# {"api_version":"v2","chart_type":"application","name":"quarkuscoffeeshop-charts","version":"3.5.0","app_version":"5.0.3"}
+```
+
+```cypher
+MATCH (c:HelmChart)
+RETURN c.helm_name, c.helm_version, c.helm_app_version, c.helm_chart_type
+// quarkuscoffeeshop-charts  3.5.0  5.0.3  application
+```
+
+## Templates: helpers, includes, values
+
+### Count the includes of each named template
+
+`_helpers.tpl` defines six named templates. The template files call them with `include`. Four of the nine calls are inside `_helpers.tpl` itself. At level 2 and higher, each call carries the `target_id` of its definition.
+
+```cypher
+MATCH (:HelmTemplate)-[:IAC_HAS_TEMPLATE_CALL]->(c:HelmTemplateCall {call_kind: "include"})
+      -[:IAC_CALLS_TEMPLATE]->(d:HelmNamedTemplate)
+RETURN d.name AS helper, count(c) AS includes ORDER BY helper
+// quarkuscoffeeshop-charts.chart               1
+// quarkuscoffeeshop-charts.fullname            3
+// quarkuscoffeeshop-charts.labels              2
+// quarkuscoffeeshop-charts.name                1
+// quarkuscoffeeshop-charts.selectorLabels      1
+// quarkuscoffeeshop-charts.serviceAccountName  1
+```
+
+The `jq` form counts the calls without the graph.
+
+```bash
+jq '[.application.artifacts[].iac.template_calls? // {} | .[] | select(.call_kind == "include")] | length' ../coffee-out/analysis.json
+# 9
+```
+
+### Find the values keys that no template reads
+
+The `IAC_REFERENCES_VALUE` edges are level 2 facts, and the graph always holds level 3. Every key in `values.yaml` is a `ConfigKey` with the `HelmValue` label, parent keys included. A key that no `IAC_REFERENCES_VALUE` edge points at is never read.
+
+```cypher
+MATCH (:HelmValues)-[:DEFINES_CONFIG]->(v:HelmValue)
+WHERE NOT (v)<-[:IAC_REFERENCES_VALUE]-(:HelmValueReference)
+RETURN v.path ORDER BY v.path
+// illustrative: 32 of the 62 keys, for example replicaCount, image.tag, imagePullSecrets, ingress.enabled
+```
+
+### Find where serviceAccount.create is read
+
+Each value reference records a `path_expression` without the `.Values.` prefix.
+
+```bash
+jq -r '.application.artifacts | to_entries[] | .key as $p
+       | .value.iac.value_references? // {} | .[]
+       | select(.path_expression == "serviceAccount.create") | $p' ../coffee-out/analysis.json
+# charts/quarkuscoffeeshop-charts/templates/_helpers.tpl
+# charts/quarkuscoffeeshop-charts/templates/serviceaccount.yaml
+```
+
+At level 2 and higher, each of these references also has a `target_id` that names the key `serviceAccount.create` in `values.yaml`.
+
+### Count the resource documents each template can emit
+
+Each YAML document in a template file becomes one `resource_templates` entry. This is a source fact, so `serviceaccount.yaml` counts 1 whatever a render profile sets.
+
+```bash
+jq -r '.application.artifacts | to_entries[] | select(.value.iac.kind == "helm_template")
+       | "\(.key)\t\(.value.iac.resource_templates | length)"' ../coffee-out/analysis.json
+# charts/quarkuscoffeeshop-charts/templates/_helpers.tpl                0
+# charts/quarkuscoffeeshop-charts/templates/deployment.yaml             7
+# charts/quarkuscoffeeshop-charts/templates/service.yaml                7
+# charts/quarkuscoffeeshop-charts/templates/serviceaccount.yaml         1
+# charts/quarkuscoffeeshop-charts/templates/tests/test-connection.yaml  1
+# 16 in total
+```
+
+## Renders: profiles and Kubernetes resources
+
+At level 3 the chart facet holds three renders. Two renders come from the configured profiles. The third comes from the `default` profile that the backend adds to every chart. The `jq` examples filter by `profile_id` and the Cypher examples filter by profile name, so the default render adds no rows.
+
+### List everything the base profile renders
+
+Each succeeded render owns its `KubernetesResource` nodes through `IAC_PRODUCES`.
+
+```cypher
+MATCH (:HelmRenderProfile {name: "base"})<-[:IAC_CONFIGURED_BY]-(r:HelmRender {status: "succeeded"})
+      -[:IAC_PRODUCES]->(res:KubernetesResource)
+RETURN res.resource_kind, res.name ORDER BY res.resource_kind, res.name
+// Deployment      quarkuscoffeeshop-barista
+// Deployment      quarkuscoffeeshop-counter
+// Deployment      quarkuscoffeeshop-customerloyalty
+// Deployment      quarkuscoffeeshop-customermocker
+// Deployment      quarkuscoffeeshop-inventory
+// Deployment      quarkuscoffeeshop-kitchen
+// Deployment      quarkuscoffeshop-web
+// Pod             coffee-quarkuscoffeeshop-charts-test-connection
+// Service         quarkuscoffeeshop-barista
+// Service         quarkuscoffeeshop-core
+// Service         quarkuscoffeeshop-customerloyalty
+// Service         quarkuscoffeeshop-customermocker
+// Service         quarkuscoffeeshop-inventory
+// Service         quarkuscoffeeshop-kitchen
+// Service         quarkuscoffeeshop-web
+// ServiceAccount  coffee-quarkuscoffeeshop-charts
+// 16 rows
+```
+
+The `jq` form counts the resources of the `base` render by kind.
+
+```bash
+jq -c '[.application.artifacts["charts/quarkuscoffeeshop-charts/Chart.yaml"].iac.renders[]
+        | select(.profile_id | endswith("/profile/base"))
+        | .resources[].resource_kind] | group_by(.) | map({(.[0]): length}) | add' ../coffee-out/analysis.json
+# {"Deployment":7,"Pod":1,"Service":7,"ServiceAccount":1}
+```
+
+### Compare no-service-account with base
+
+The `no-service-account` profile renders 15 resources, one fewer than `base`. The `ServiceAccount` is the resource that the empty `serviceAccount.create` removes.
+
+```cypher
+MATCH (:HelmRenderProfile {name: "base"})<-[:IAC_CONFIGURED_BY]-(:HelmRender)
+      -[:IAC_PRODUCES]->(b:KubernetesResource)
+WHERE NOT EXISTS {
+  MATCH (:HelmRenderProfile {name: "no-service-account"})<-[:IAC_CONFIGURED_BY]-(:HelmRender)
+        -[:IAC_PRODUCES]->(n:KubernetesResource)
+  WHERE n.resource_kind = b.resource_kind AND n.name = b.name
+}
+RETURN b.resource_kind, b.name
+// ServiceAccount  coffee-quarkuscoffeeshop-charts
+```
+
+### Find Deployments with no Service of the same name
+
+The Deployment at `templates/deployment.yaml:238` has the name `quarkuscoffeshop-web`. The Service at `templates/service.yaml:120` has the name `quarkuscoffeeshop-web`, with one more `e`. The backend records each name exactly as written, so a name comparison finds the difference.
+
+```cypher
+MATCH (:HelmRenderProfile {name: "base"})<-[:IAC_CONFIGURED_BY]-(r:HelmRender)
+      -[:IAC_PRODUCES]->(d:KubernetesResource {resource_kind: "Deployment"})
+WHERE NOT EXISTS {
+  MATCH (r)-[:IAC_PRODUCES]->(s:KubernetesResource {resource_kind: "Service"})
+  WHERE s.name = d.name
+}
+RETURN d.name ORDER BY d.name
+// quarkuscoffeeshop-counter
+// quarkuscoffeshop-web
+```
+
+The `jq` form subtracts the Service names from the Deployment names.
+
+```bash
+jq -r '.application.artifacts["charts/quarkuscoffeeshop-charts/Chart.yaml"].iac.renders[]
+       | select(.profile_id | endswith("/profile/base")) | .resources
+       | ([.[] | select(.resource_kind == "Deployment") | .name]
+          - [.[] | select(.resource_kind == "Service") | .name])
+       | sort[]' ../coffee-out/analysis.json
+# quarkuscoffeeshop-counter
+# quarkuscoffeshop-web
+```
+
+The first row is a different mismatch. The Deployment `quarkuscoffeeshop-counter` has no Service of that name, and the Service `quarkuscoffeeshop-core` has no Deployment of that name.
+
+### Find rendered resources with source provenance
+
+A resource gets an `IAC_DERIVED_FROM` edge only when its template file holds exactly one resource document. `deployment.yaml` and `service.yaml` hold seven documents each, so their resources have no such edge.
+
+```cypher
+MATCH (:HelmRenderProfile {name: "base"})<-[:IAC_CONFIGURED_BY]-(:HelmRender)
+      -[:IAC_PRODUCES]->(res:KubernetesResource)
+OPTIONAL MATCH (res)-[:IAC_DERIVED_FROM]->(:HelmResourceTemplate)<-[:IAC_HAS_RESOURCE_TEMPLATE]-(f:HelmTemplate)
+RETURN res.resource_kind, res.name, f.path ORDER BY res.resource_kind, res.name
+// illustrative: only the ServiceAccount row and the test Pod row carry f.path
+// illustrative: the 14 Deployment and Service rows carry null
+```
+
+### Find the Helm hooks
+
+A rendered resource keeps its `annotations`. The test Pod is the only resource with a `helm.sh/hook` annotation.
+
+```bash
+jq -r '.application.artifacts["charts/quarkuscoffeeshop-charts/Chart.yaml"].iac.renders[]
+       | select(.profile_id | endswith("/profile/base"))
+       | .resources[] | select(.annotations["helm.sh/hook"])
+       | "\(.resource_kind) \(.name) \(.annotations["helm.sh/hook"])"' ../coffee-out/analysis.json
+# Pod coffee-quarkuscoffeeshop-charts-test-connection test-success
+```
+
+## Publish to Neo4j
+
+### Write the graph, then analyze from the graph
+
+`--emit neo4j` raises the level to 3 and writes the graph over Bolt. It puts nothing on stdout. A positional Neo4j URI switches `caniac` to graph mode. In graph mode the backend reads each `Artifact.source` from the graph, makes sure that each `sha256` matches, and writes the same row set. The [at-scale guide](/at-scale/) describes the shared Neo4j workflow.
+
+```bash
+caniac . --app-name quarkuscoffeeshop --config .codeanalyzer-iac.yaml --emit neo4j \
+       --neo4j-uri neo4j://localhost:7687 --neo4j-user neo4j --neo4j-password test-password
+# level raised to 3, nothing on stdout
+
+caniac neo4j://localhost:7687 --app-name quarkuscoffeeshop \
+       --config can://artifact/quarkuscoffeeshop/.codeanalyzer-iac.yaml \
+       --neo4j-user neo4j --neo4j-password test-password
+# graph mode: the row set is identical to the filesystem run
+
+caniac . --app-name quarkuscoffeeshop --config .codeanalyzer-iac.yaml --emit cypher -o ../coffee-out
+# writes ../coffee-out/graph.cypher, a replayable script, without a database
+```
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="codeanalyzer-iac backend" description="Install, CLI flags, analysis levels, output modes, and graph mode for caniac." href="/backends/codeanalyzer-iac/" />
+  <LinkCard title="Analysis at scale" description="Push many projects into one shared Neo4j graph and query all of it." href="/at-scale/" />
+  <LinkCard title="Python examples" description="The same task-grouped format for Python projects with the SDK." href="/examples/python/" />
+</CardGrid>

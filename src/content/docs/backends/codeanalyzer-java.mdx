@@ -1,11 +1,11 @@
 ---
 title: codeanalyzer-java
-description: "Technical reference for the Java analysis backend: WALA-based call graph construction, symbol extraction via Javaparser, and the CLI interface that the Python SDK runs."
+description: "Technical reference for the Java backend: WALA builds the call graph, Javaparser extracts the symbols, and the Python SDK runs the CLI."
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-java** backend is the JVM-based static analysis engine for Java in the CLDK Python SDK. It uses WALA (T.J. Watson Libraries for Analysis) for semantic analysis and Javaparser for syntactic extraction. It writes one JSON schema, and the Python SDK deserializes that schema into typed models.
+The **codeanalyzer-java** backend is the JVM-based static analysis backend for Java in the CLDK Python SDK. It uses WALA (T.J. Watson Libraries for Analysis) for semantic analysis and Javaparser for syntactic extraction. It writes one JSON schema, and the Python SDK deserializes that schema into typed models.
 
 ## Overview
 
@@ -15,10 +15,12 @@ codeanalyzer-java is a **standalone JAR tool**. It takes a Java project, or a so
 - **Call graph** (optional, at analysis level 2): Edges between callers and callees, computed by the interprocedural analysis of WALA
 - **Type hierarchy**: Extends/implements relationships, nested types, parent-child relationships
 - **CRUD operations**: Database access patterns (INSERT, SELECT, UPDATE, DELETE) in enterprise code
-- **Comments and Javadoc**: Extracted and positioned for each entity
-- **Entry points**: Main methods and framework-identified entry points (REST endpoints, Struts actions)
+- **Comments and Javadoc**: The text and the position of each comment, attached to its entity
+- **Entrypoints**: Main methods and framework-identified entrypoints (REST endpoints, Struts actions)
 
-The Python SDK runs this backend, parses the JSON, and wraps it in `JavaAnalysis`. You therefore work with an `analysis` object, not with the backend. The backend is a JVM-free binary. It ships inside the packaged `codeanalyzer-java` PyPI dependency and runs with `python -m codeanalyzer_java`. There is no separate JAR download and no `analysis_backend_path` override.
+The Python SDK runs this backend, parses the JSON, and wraps it in `JavaAnalysis`. You therefore work with an `analysis` object, not with the backend. The backend is a JAR.
+
+<Badge text="2.0" variant="caution" /> The optional extra `cldk[java]` installs the `codeanalyzer-java` wheel. The wheel carries the JAR and a bundled JVM (jdk4py), and the SDK runs the JAR on that JVM. Analysis level 2 and above also need a JDK 11 or later on `JAVA_HOME`, because the backend builds the project with Maven or Gradle. There is no separate JAR download, and you do not set `analysis_backend_path`. In CLDK 1.5.0, the SDK downloads a Temurin JDK on first use instead.
 
 ## Architecture
 
@@ -42,10 +44,10 @@ graph LR
 
 **Key stages:**
 
-1. **Javaparser + Symbol Solver**: Parses `.java` source into an AST, resolves types against available libraries
-2. **Symbol Table Extraction**: Walks the AST to collect classes, methods, fields, comments, imports
-3. **WALA Analysis** (level 2+): Builds class hierarchy and interprocedural call graph from compiled binaries or sources
-4. **JSON Export**: Serializes all entities into the canonical shape (symbol table + call graph edges)
+1. **Javaparser + Symbol Solver**: Javaparser parses each `.java` file into an AST. The symbol solver resolves the types against the available libraries.
+2. **Symbol table extraction**: The backend walks the AST and collects the classes, methods, fields, comments, and imports.
+3. **WALA analysis** (level 2 and above): WALA builds the class hierarchy and the interprocedural call graph from the compiled classes.
+4. **JSON export**: Gson serializes all entities into the canonical shape (symbol table and call graph edges).
 
 ### Package structure
 
@@ -83,7 +85,7 @@ com.ibm.cldk
 
 ## Output schema
 
-The backend outputs a consolidated JSON with this structure:
+The backend writes one JSON document. With the default `--schema v2`, the document is an envelope with `schema_version`, `language`, `max_level`, `analyzer`, and `application`. The SDK reads only that shape. Gson writes every key in `lower_case_with_underscores`, for example `file_path` and `type_declarations`, never `filePath`. The legacy `--schema v1` shape is the one below:
 
 ```json
 {
@@ -198,7 +200,7 @@ A method or constructor:
 
 #### Call graph edges
 
-At analysis level 2, a `call_graph` array of edges:
+At analysis level 2, the output has a `call_graph` array. Each edge has this shape:
 
 ```typescript
 {
@@ -244,7 +246,7 @@ At analysis level 2, a `call_graph` array of edges:
 
 ## CLI interface
 
-Run the jar with `java -jar codeanalyzer-*.jar` and these options:
+Run the JAR with `java -jar codeanalyzer-*.jar`, or with the `canjv` launcher. `pip install codeanalyzer-java` installs `canjv`. The flags are:
 
 ### Usage
 
@@ -283,11 +285,17 @@ Convert a Java project into a system dependency graph.
 | `-i, --input` | Project root directory | `-i /path/to/commons-cli` |
 | `-s, --source-analysis` | Single Java source string (no project needed) | `-s "public class Test {}"` |
 | `-o, --output` | Output directory for `analysis.json` | `-o ./analysis_output` |
-| `-a, --analysis-level` | `1` (symbol table only) or `2` (+ call graph) | `-a 2` |
+| `-a, --analysis-level` | `1` symbol table, `2` adds the call graph, `3` adds CFG, CDG, and DDG per callable, `4` adds the interprocedural SDG | `-a 2` |
 | `-b, --build-cmd` | Custom build command (Maven/Gradle) | `-b "mvn clean install"` |
 | `--no-build` | Skip the build. Use pre-compiled binaries | `--no-build` |
 | `-v, --verbose` | Print debug logs | `-v` |
-| `-t, --target-files` | Incremental analysis on specific files | `-t src/Main.java src/Helper.java` |
+| `-t, --target-files` | Incremental analysis on specific files. Repeat the flag for each file. Needs `--schema v1`, and level 2 and above fall back to level 1 | `--schema v1 -t src/Main.java -t src/Helper.java` |
+| `--schema` | Output schema: `v2` (default, canonical) or `v1` (legacy) | `--schema v1` |
+| `--emit` | Output target: `json` (default), `neo4j` (`graph.cypher`, or a live Bolt push with `--neo4j-uri`), or `schema` | `--emit neo4j` |
+| `--app-name` | Application name for the graph `:JApplication` anchor (default: input directory name) | `--app-name payments` |
+| `--neo4j-uri` | Push the graph to a live Neo4j over Bolt. Also reads `NEO4J_URI` | `--neo4j-uri bolt://localhost:7687` |
+| `-c, --cache-dir` | Directory for the incremental analysis cache | `-c ./output/cache` |
+| `--eager` | Ignore the cache and rebuild everything | `--eager` |
 
 ### Examples
 
@@ -331,8 +339,8 @@ java -jar codeanalyzer-2.3.7.jar \
 
 The Python SDK (`JavaAnalysis`) runs the backend for you:
 
-1. **Backend discovery**: The JVM-free backend ships with the packaged `codeanalyzer-java` PyPI dependency and runs with `python -m codeanalyzer_java`. There is no `analysis_backend_path` override.
-2. **Invocation**: Calls the backend with `-i <project> -a <level> -o <cache_dir>` (or reads from stdout)
+1. **Backend discovery**: The SDK imports `codeanalyzer_java` from the `cldk[java]` extra and calls `command()`, which returns `[java, -jar, codeanalyzer.jar]` with the bundled JVM. If you did not install the extra, the SDK raises an error that names `pip install "cldk[java]"`.
+2. **Run**: The SDK runs the backend with `-i <project> -a <level> -o <cache_dir> -c <cache_dir>/cache -v --app-name <project name>`. Without a cache directory, the SDK reads the JSON from stdout.
 3. **JSON parsing**: Deserializes the output into Pydantic models such as `JApplication`, `JType`, and `JCallable`
 4. **Facade**: Wraps the models in `JavaAnalysis`, which gives you query methods such as `get_classes()`, `get_call_graph()`, and `get_callers()`
 
@@ -342,7 +350,7 @@ from cldk.analysis import AnalysisLevel
 
 # Behind the scenes:
 # 1. CLDK.java(...) selects the codeanalyzer-java backend (default CodeAnalyzerConfig)
-# 2. Runs the packaged backend: python -m codeanalyzer_java -i commons-cli -a 2 -o <cache_dir>
+# 2. Runs the jar on the bundled JVM: java -jar codeanalyzer.jar -i commons-cli -a 2 -o <cache_dir>
 # 3. Parses JSON -> JApplication (symbol_table + call_graph)
 # 4. Returns JavaAnalysis
 
@@ -352,9 +360,9 @@ analysis = CLDK.java(
 )
 ```
 
-The `CLDK(language="java").analysis(...)` form still works, but it is **deprecated**. Use the `CLDK.java(...)` factory shown above. The `from cldk import CLDK` import does not change.
+The `CLDK(language="java").analysis(...)` form is **deprecated**. Use the `CLDK.java(...)` factory shown above. The `from cldk import CLDK` import is the same for both forms.
 
-To control where analysis artifacts are cached, pass a backend config:
+To control where the SDK caches analysis artifacts, pass a backend configuration:
 
 ```python
 from cldk import CLDK
@@ -370,15 +378,11 @@ analysis = CLDK.java(
 
 ### Keyword arguments
 
-`CLDK.java(...)` accepts `project_path`, `analysis_level`, `target_files`, and `eager`. The **type** of the `backend=` config selects the backend. For Java the only backend is the in-memory codeanalyzer (`CodeAnalyzerConfig`), so omit `backend=` for the default. Pass `backend=CodeAnalyzerConfig(cache_dir=...)` only to change where artifacts are cached. Caching is **on by default**. The cache root defaults to `<project>/.codeanalyzer`, and artifacts go under a language-keyed subdirectory (`<cache_dir>/java/`).
+`CLDK.java(...)` accepts `project_path`, `analysis_level`, `target_files`, and `eager`. The **type** of the `backend=` configuration selects the backend. For Java, omit `backend=` for the default in-process codeanalyzer, or pass `backend=CodeAnalyzerConfig(cache_dir=...)` to change where artifacts are cached. Pass `backend=Neo4jConnectionConfig(...)` for the read-only Neo4j backend (see [Analysis at scale](/at-scale/)). Caching is **on by default**. The cache root defaults to `<project>/.codeanalyzer`, and artifacts go under a language-keyed subdirectory (`<cache_dir>/java/`).
 
-Java also accepts `source_code=...` for a single Java source string, but this argument is **deprecated**. Use `project_path` instead.
+In CLDK 1.5.0, `CLDK.java(...)` also accepts `source_code=...` for a single Java source string, and that argument is **deprecated**. <Badge text="2.0" variant="caution" /> CLDK 2.0 removes the argument, and `CLDK.java(source_code=...)` raises an error. Use `project_path`. To analyze one source string directly, run the CLI with `--schema v1 -s`.
 
-```python
-analysis = CLDK.java(source_code="public class Test {}")  # deprecated; prefer project_path
-```
-
-Import the config objects from:
+Import the configuration objects from:
 
 ```python
 from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
@@ -396,7 +400,7 @@ To build codeanalyzer-java from source:
    cd codeanalyzer-java
    ```
 
-2. **Install Java 11+**
+2. **Install a JDK 11 or later with [SDKMAN](https://sdkman.io/)**
    ```bash
    sdk install java 17.0.10-sem  # Or your preferred JDK
    ```
@@ -417,12 +421,12 @@ To build codeanalyzer-java from source:
 </Steps>
 
 <Aside type="note" title="Native compilation">
-GraalVM can also build a native binary (`./gradlew nativeCompile`). The JAR is the standard distribution, because the SDK expects a JVM.
+GraalVM can also build a native binary (`./gradlew nativeCompile`). The JAR is the standard distribution. The `codeanalyzer-java` wheel carries the JAR and a bundled JVM, and the SDK runs the JAR on that JVM.
 </Aside>
 
 ## Schema stability
 
-The JSON schema from codeanalyzer-java is **versioned**. Each output includes a `version` field, for example `"2.3.7"`. The Pydantic models of the Python SDK (`JApplication`, `JType`, and others) are locked to a compatible schema version. If the versions do not match, the SDK logs a warning or an error.
+The JSON schema from codeanalyzer-java is **versioned**. Each schema v2 output carries `schema_version`, `max_level`, and `analyzer.version`. The Pydantic models of the Python SDK (`JAnalysis`, `JApplication`, `JType`, and others) read schema v2 only. If a cached `analysis.json` has no `schema_version`, the SDK raises an error and asks you to remove the file or pass `eager=True`. If the backend did not fully compute the requested level, the SDK logs a warning.
 
 If you integrate codeanalyzer-java directly instead of through the Python SDK, make sure that the consumer can handle the schema for the version in use.
 
@@ -430,16 +434,16 @@ If you integrate codeanalyzer-java directly instead of through the Python SDK, m
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `java: command not found` | No JDK on PATH | Install Java 11+, add to PATH |
+| `java: command not found` | No JDK on `PATH` when you run the JAR directly | Install a JDK 11 or later. Add its `bin` directory to `PATH` |
 | `Cannot find symbol type X` | Missing library dependencies | Use `--no-build` for pre-compiled code. Make sure that dependencies are on the classpath |
 | `analysis.json is corrupt` | Incomplete write or killed process | Make sure that there is disk space. Run the analysis again |
-| `symbol table uses legacy import schema` | Running old JAR against new analysis.json | Regenerate with latest JAR (v2.3.7+) |
-| `WALA call graph is empty` | No entry point found for analysis | Make sure that the project has a `main(String[])` method, or that frameworks are detected |
+| `Existing analysis.json uses legacy import schema` | A JAR 2.3.7 or later read an `analysis.json` that an older JAR wrote | Remove the old `analysis.json`, then run the analysis again |
+| `RTA call graph unavailable` | No JDK with `javac` on `JAVA_HOME`, so the build failed, or the project has no entry point | Set `JAVA_HOME` to a JDK 11 or later. Make sure that the project has a `main(String[])` method or a framework entry point |
 
-## References
+## See also
 
-- **Source repository:** [IBM/codeanalyzer-java](https://github.com/IBM/codeanalyzer-java)
-- **WALA documentation:** [watson.ibm.com/wala](https://wala.dev/)
+- **Source repository:** [codellm-devkit/codeanalyzer-java](https://github.com/codellm-devkit/codeanalyzer-java)
+- **WALA documentation:** [wala.dev](https://wala.dev/)
 - **Javaparser:** [javaparser.org](https://javaparser.org/)
 - **Related:** [codeanalyzer-python](/backends/codeanalyzer-python/), [codeanalyzer-ts](/backends/codeanalyzer-ts/)
 - **How to:** [Add a language backend](/contributing/add-language-backend/)

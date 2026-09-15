@@ -8,7 +8,7 @@ import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 CLDK has two independent extension points: language backends and frontend SDKs.
 
 <Aside type="tip" title="Language backend scaffolding">
-The maintainers build a new language with the [`cldk-language-pack`](https://github.com/codellm-devkit/developer-skillset/tree/main/cldk-language-pack) skill. The skill generates a `codeanalyzer-<lang>` backend and the SDK bindings, up to a validated level-1 analysis branch. The guides below do the same work by hand.
+The maintainers build a new language with the [`cldk-language-pack`](https://github.com/codellm-devkit/developer-skillset/tree/main/cldk-language-pack) skill. The skill generates a `codeanalyzer-<lang>` backend and the SDK bindings, up to a validated symbol-table and call-graph branch. The guides below do the same work by hand.
 </Aside>
 
 ```mermaid
@@ -28,7 +28,7 @@ flowchart LR
 ```
 
 - **A backend** adds a new language. It parses the source, builds a symbol table and a call graph, and writes them to the canonical JSON schema. Backends are standalone tools (the [codeanalyzer-* family](/backends/)). You can write a backend in whichever language suits the analysis: Python analysis in Python, Java analysis in Java, and more.
-- **A frontend** is an SDK that reads that JSON and gives you an `analysis` API. One frontend exists today, the Python SDK. A Rust frontend is planned.
+- **A frontend** is an SDK that reads that JSON and gives you an `analysis` API. Two frontends exist today: the Python SDK, which is the reference implementation, and an alpha TypeScript SDK. A Rust frontend is planned. See [SDKs](/reference/sdks/).
 
 A new backend makes its language available to every existing frontend. A new frontend makes every existing backend available through it.
 

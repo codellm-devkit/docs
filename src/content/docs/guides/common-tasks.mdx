@@ -85,7 +85,7 @@ Get the exact source of one method by its qualified class name and signature. Yo
 </Tabs>
 
 <Aside type="note">
-If the method is not found, `get_method(...)` returns `None`. Test with `if method:` before you read `.code`. The returned object is a `JCallable` (Java) or a `PyCallable` (Python).
+If CLDK does not find the method, `get_method(...)` returns `None`. Test with `if method:` before you read `.code`. The returned object is a `JCallable` (Java) or a `PyCallable` (Python).
 </Aside>
 
 ## Build a call graph
@@ -127,7 +127,7 @@ The call graph is a `networkx.DiGraph`. Its edges point from **caller** to **cal
 
 ## Find who calls a method
 
-Impact analysis. `get_callers` returns the set of methods that call the target.
+This is impact analysis. `get_callers` returns a dictionary that describes the methods that call the target.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -154,12 +154,12 @@ Impact analysis. `get_callers` returns the set of methods that call the target.
 </Tabs>
 
 <Aside type="tip" title="Inspect the shape once">
-`get_callers` and `get_callees` return dictionaries. The exact keys depend on your CLDK and backend version. The first time you use them, print one result with `print(callers)`, or with `json.dumps(callers, default=str, indent=2)`. Then index the fields that your version returns.
+`get_callers` and `get_callees` return dictionaries with a `caller_details` or `callee_details` list. Each entry holds the method model and its calling lines. See [Java examples](/examples/java/#get-all-callers-of-a-method) for the shape.
 </Aside>
 
 ## Find what a method calls
 
-The dependency view. `get_callees` is the inverse of `get_callers`. It returns the methods that the target calls.
+This is the dependency view. `get_callees` is the inverse of `get_callers`. It returns the methods that the target calls.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -187,7 +187,7 @@ The dependency view. `get_callees` is the inverse of `get_callers`. It returns t
 
 ## Map the class hierarchy
 
-In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`, and `get_implemented_interfaces`.
+Walk class relationships with `get_sub_classes` and `get_extended_classes`. Java also has `get_implemented_interfaces`.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -212,12 +212,12 @@ In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`
 </Tabs>
 
 <Aside type="note">
-Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`) are part of the **Java** API. For Python, read the base classes from the `PyClass` model instead, as shown above.
+`get_sub_classes` and `get_extended_classes` are part of the Java, Python, and TypeScript APIs. `get_implemented_interfaces` is part of the Java and TypeScript APIs. For Python, `get_extended_classes` returns every base class, because Python has no separate interfaces. The `PyClass` model also records `base_classes`, as shown above.
 </Aside>
 
 ## Find data-access / CRUD operations
 
-Find where the code reads or writes persistent data. This helps with security triage and data-flow analysis. It is a **Java-only** feature.
+Find where the code reads or writes persistent data. This helps with security triage and dataflow analysis. It is a **Java-only** feature.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">

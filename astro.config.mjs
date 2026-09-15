@@ -169,6 +169,9 @@ export default defineConfig({
             { label: "Overview", slug: "examples", attrs: { "data-cldk-icon": "manual-16" } },
             { label: "Python examples", slug: "examples/python", attrs: { "data-cldk-icon": "python" } },
             { label: "Java examples", slug: "examples/java", attrs: { "data-cldk-icon": "java" } },
+            { label: "TypeScript examples", slug: "examples/typescript", attrs: { "data-cldk-icon": "typescript" } },
+            { label: "JavaScript examples", slug: "examples/javascript", attrs: { "data-cldk-icon": "javascript" } },
+            { label: "IaC examples", slug: "examples/iac", attrs: { "data-cldk-icon": "cloud-16" } },
           ],
         },
         {

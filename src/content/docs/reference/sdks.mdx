@@ -7,7 +7,7 @@ import { Aside, Badge, CardGrid, LinkCard } from "@astrojs/starlight/components"
 
 A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. The backends do the language analysis. Each SDK therefore gives you the same call graphs, symbol tables, and reachability data in its own host language.
 
-This is the **frontend** layer. For the analyzers behind it, see the [backends overview](/backends/).
+This is the **frontend** layer. For the backends behind it, see the [backends overview](/backends/).
 
 ## Maturity tiers
 
@@ -45,7 +45,7 @@ The SDK you write against. Each is an `analysis` API over the canonical JSON.
   />
 </CardGrid>
 
-<Aside type="tip" title="Adding a language pack">
+<Aside type="tip" title="Add a language pack">
 A CLDK skill generates a whole new language: a `codeanalyzer-<lang>` backend and the SDK bindings. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset).
 </Aside>
 

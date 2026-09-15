@@ -5,13 +5,13 @@ description: "Worked examples for Python projects with CLDK: symbol tables, call
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They are grouped by task: build an analysis, query the symbol table, walk the call graph, and inspect the model objects. Each example shows behavior that the SDK guarantees.
+These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They are grouped by task: build an analysis, query the symbol table, walk the call graph, and inspect the model objects. The sample output is illustrative.
 
 <Aside type="note" title="Project-based analysis">
 Python analysis is project-based. `project_path` must point at a directory of importable Python files.
 </Aside>
 
-## Set up the analysis
+## Build the analysis
 
 Build a CLDK analysis object for your Python project. By default it extracts the symbol table: classes, methods, and imports. For call-graph queries, add `analysis_level=AnalysisLevel.call_graph`.
 
@@ -29,8 +29,8 @@ analysis = CLDK.python(
 )
 ```
 
-<Aside type="tip" title="Parallel backends">
-Backend options live in a `PyCodeAnalyzerConfig` that you pass as `backend=`. Set `use_codeql=False` to skip CodeQL augmentation and analyze faster, with a Jedi-only call graph. It defaults to `True` for better inter-procedural accuracy. `cache_dir` controls where the backend stores its virtualenv and analysis cache. The default is `<project>/.codeanalyzer`.
+<Aside type="tip" title="Backend configuration">
+The backend configuration lives in a `PyCodeAnalyzerConfig` that you pass as `backend=`. Set `use_ray=True` to enable Ray-based parallel processing for large projects. It defaults to `False`. `cache_dir` controls where the backend stores its virtualenv and analysis cache. The default is `<project>/.codeanalyzer`.
 
 ```python
 from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
@@ -38,7 +38,7 @@ from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
 analysis = CLDK.python(
     project_path="my_pkg",
     analysis_level=AnalysisLevel.call_graph,
-    backend=PyCodeAnalyzerConfig(use_codeql=False, cache_dir="/tmp/my_pkg_cache"),
+    backend=PyCodeAnalyzerConfig(use_ray=True, cache_dir="/tmp/my_pkg_cache"),
 )
 ```
 </Aside>
@@ -53,7 +53,7 @@ Each Python file becomes a `PyModule` in the symbol table. Get them by file path
 # Get all modules as a dictionary: file_path -> PyModule
 symbol_table = analysis.get_symbol_table()
 for file_path, module in symbol_table.items():
-    print(file_path, "->", module.name)
+    print(file_path, "->", module.module_name)
 # my_pkg/options.py -> my_pkg.options
 # my_pkg/parser.py -> my_pkg.parser
 
@@ -70,7 +70,7 @@ Get all classes in the project by qualified name, for example `my_pkg.options.Op
 ```python
 classes = analysis.get_classes()
 for qualified_name, pyclass in classes.items():
-    print(f"{qualified_name}: {len(pyclass.methods)} methods")
+    print(f"{qualified_name}: {len(pyclass.callables)} methods")
 # my_pkg.options.Options: 7 methods
 # my_pkg.parser.DefaultParser: 5 methods
 # my_pkg.cli.CommandLine: 3 methods
@@ -83,7 +83,7 @@ Get a class by its qualified name. Then inspect its methods, attributes, and bas
 ```python
 pyclass = analysis.get_class("my_pkg.options.Options")
 if pyclass:
-    print("Methods:", list(pyclass.methods.keys()))
+    print("Methods:", list(pyclass.callables.keys()))
     print("Base classes:", pyclass.base_classes)
     print("Fields:", len(pyclass.attributes))
 # Methods: ['__init__', 'add_option', 'get_option', 'has_option', ...]
@@ -107,7 +107,7 @@ for method_name, callable_obj in methods.items():
 
 ### Get a specific method
 
-Get the exact method object by class name and method name. It includes the signature and the source body.
+Get the exact method object by class name and method name. It includes the signature and the parameters. `get_method_bodies` returns the source body.
 
 ```python
 method = analysis.get_method("my_pkg.options.Options", "add_option")
@@ -115,7 +115,7 @@ if method:
     print("Signature:", method.signature)
     print("Parameters:", [p.name for p in method.parameters])
     print("Source:")
-    print(method.code)
+    print(analysis.get_method_bodies([method.signature])[method.signature])
 # Signature: def add_option(self, option)
 # Parameters: ['self', 'option']
 # Source:
@@ -179,7 +179,7 @@ for file_path, import_list in imports.items():
 
 ## Call graph: callers, callees, reachability
 
-<Aside type="tip" title="Always set analysis_level">
+<Aside type="caution" title="Always set analysis_level">
 All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table.
 </Aside>
 
@@ -211,7 +211,7 @@ callers = analysis.get_callers(
     target_class_name="my_pkg.options.Options",
     target_method_declaration="add_option",
 )
-print("Callers:", list(callers.keys()) if callers else "none")
+print("Callers:", [c["caller_signature"] for c in callers["caller_details"]])
 # Callers: ['my_pkg.cli.build_options', 'my_pkg.options.Options.add_required']
 ```
 
@@ -224,7 +224,7 @@ callees = analysis.get_callees(
     source_class_name="my_pkg.parser.DefaultParser",
     source_method_declaration="parse",
 )
-print("Callees:", list(callees.keys()) if callees else "none")
+print("Callees:", [c["callee_signature"] for c in callees["callee_details"]])
 # Callees: ['my_pkg.options.Options.get_option', 'my_pkg.cli.CommandLine.add_option']
 ```
 
@@ -272,7 +272,7 @@ if src and sink:
 # Call chain: my_pkg.cli.main -> my_pkg.parser.parse -> my_pkg.database.execute
 ```
 
-## Working with the PyClass and PyCallable models
+## The PyClass and PyCallable models
 
 CLDK returns typed model objects, not plain strings. Inspect these objects for detail about classes and callables.
 
@@ -285,7 +285,7 @@ pyclass = analysis.get_class("my_pkg.options.Options")
 print("Name:", pyclass.name)
 print("Signature:", pyclass.signature)
 print("Base classes:", pyclass.base_classes)
-print("Methods:", list(pyclass.methods.keys()))
+print("Methods:", list(pyclass.callables.keys()))
 print("Attributes:", [attr.name for attr in pyclass.attributes.values()])
 # Name: Options
 # Signature: my_pkg.options.Options
@@ -296,7 +296,7 @@ print("Attributes:", [attr.name for attr in pyclass.attributes.values()])
 
 ### Inspect a PyCallable
 
-A `PyCallable` represents a method or function. It includes the signature, parameters, decorators, and source body.
+A `PyCallable` represents a method or function. It includes the signature, parameters, and decorators. `get_method_bodies` returns the source body.
 
 ```python
 method = analysis.get_method("my_pkg.options.Options", "add_option")
@@ -305,7 +305,7 @@ print("Signature:", method.signature)
 print("Parameters:", [p.name for p in method.parameters])
 print("Decorators:", method.decorators)
 print("Source body:")
-print(method.code)
+print(analysis.get_method_bodies([method.signature])[method.signature])
 # Name: add_option
 # Signature: def add_option(self, option)
 # Parameters: ['self', 'option']
@@ -354,7 +354,7 @@ for nc in nested:
 
 ### Get extended classes
 
-List the base classes that a class inherits from.
+`get_extended_classes` returns the same list as `pyclass.base_classes` in the previous example, without the class object.
 
 ```python
 bases = analysis.get_extended_classes("my_pkg.parser.DefaultParser")
@@ -364,7 +364,7 @@ print("Base classes:", bases)
 
 ## Validate syntax and parse snippets
 
-Use the Tree-sitter parser for syntax validation and AST extraction.
+Use the Tree-sitter parser to validate syntax and to extract the AST.
 
 ```python
 # Check if code is valid Python
@@ -379,13 +379,13 @@ print(f"Valid syntax: {is_valid}")
 # Parse code and get the raw AST
 ast = analysis.get_raw_ast("x = 1")
 print(f"AST type: {type(ast)}")
-# AST type: <class 'tree_sitter.binding.Tree'>
+# AST type: <class 'tree_sitter.Tree'>
 ```
 
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="Java examples" description="The same patterns for Java projects: CRUD operations, inheritance, interface implementation." href="/examples/java/" />
+  <LinkCard title="Java examples" description="The same patterns for Java projects: inheritance, interface implementation, comments, and reachability." href="/examples/java/" />
   <LinkCard title="Common tasks" description="The same calls as a quick task-indexed reference." href="/guides/common-tasks/" />
   <LinkCard title="Python API reference" description="Full method signatures and docstrings for PythonAnalysis." href="/reference/python-api/python/" />
 </CardGrid>
