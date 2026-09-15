@@ -5,9 +5,9 @@ description: Install CLDK, run it against a Java project, and produce a first an
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK loads a project and returns a typed `analysis` object containing its classes, methods, and, when requested, a call graph. It provides program structure that a code LLM or tool can query directly.
+CLDK loads a project and returns a typed `analysis` object. The object holds the classes and methods. If you ask for it, the object also holds the call graph. A code LLM or a tool can query this structure directly.
 
-This guide covers three steps: install CLDK, obtain a sample project, and run an analysis. The result is a typed model of [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) and a `networkx` call graph.
+This guide has three steps: install CLDK, get a sample project, and run an analysis. The result is a typed model of [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) and a `networkx` call graph.
 
 <Steps>
 
@@ -17,11 +17,11 @@ This guide covers three steps: install CLDK, obtain a sample project, and run an
    pip install cldk
    ```
 
-   The Java backend ships with the package. Analyzing Java projects requires only a JDK on your `PATH`.
+   The Java backend ships with the package. To analyze Java projects, you need only a JDK on your `PATH`.
 
 2. **Get a sample project.**
 
-   This guide analyzes Apache Commons CLI. Download a release, unzip it, and note its location.
+   This guide analyzes Apache Commons CLI. Download a release. Unzip the file. Note the location of the directory.
 
    ```shell
    wget https://github.com/apache/commons-cli/archive/refs/tags/rel/commons-cli-1.7.0.zip -O commons-cli.zip
@@ -30,12 +30,12 @@ This guide covers three steps: install CLDK, obtain a sample project, and run an
    ```
 
    <Aside type="note">
-   Any Java project on disk works here: point `JAVA_APP_PATH` at its root. Commons CLI is a small, well-structured codebase that is quick to analyze.
+   Any Java project on disk works here. `JAVA_APP_PATH` must point at the root of the project. Commons CLI is small and well structured, so it analyzes quickly.
    </Aside>
 
 3. **Run your first analysis.**
 
-   Build a CLDK object for Java, point it at the project, and print two results: the class count and the call graph. Call graphs, callers, and callees require `analysis_level=AnalysisLevel.call_graph`; the default level builds only the symbol table.
+   Build a CLDK object for Java. Point it at the project. Print the class count and the call graph. Call graphs, callers, and callees need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table.
 
    ```python title="first_analysis.py"
    import os
@@ -53,12 +53,12 @@ This guide covers three steps: install CLDK, obtain a sample project, and run an
    # DiGraph with 312 nodes and 488 edges
    ```
 
-   `analysis` is now a typed, queryable model of the project. `get_call_graph()` returns a `networkx.DiGraph`, so caller and callee queries can use standard graph operations.
+   `analysis` is now a typed model of the project that you can query. `get_call_graph()` returns a `networkx.DiGraph`. You can use standard graph operations for caller and callee queries.
 
 </Steps>
 
 <Aside type="tip" title="Analyzing Python projects">
-The same pattern applies to a Python package: change the language and point at the package root. Every CLDK analysis is project-based and takes a `project_path`.
+The same pattern applies to a Python package. You change the language and give the path to the package root. Every CLDK analysis needs a `project_path`.
 
 ```python
 from cldk import CLDK
@@ -84,14 +84,14 @@ flowchart LR
     C --> F[get_callers / get_method]
 ```
 
-A single call converts a directory of source files into a typed `analysis` object. From there, `get_method(cls, sig)` returns a method's source body, and `get_callers` / `get_callees` traverse the graph. The [concepts guide](/guides/concepts/) covers the object model, and the [cheat sheet](/resources/cheatsheet/) lists the available methods.
+One call converts a directory of source files into a typed `analysis` object. Then `get_method(cls, sig)` returns the source body of a method. `get_callers` and `get_callees` walk the graph. The [concepts guide](/guides/concepts/) covers the object model. The [cheat sheet](/resources/cheatsheet/) lists the available methods.
 
 ## Next steps
 
-The same calls can run behind an agent tool. **cocoa** is a Claude Code plugin that runs CLDK for callers, reachability, and change-impact questions.
+The same calls can run behind an agent tool. **COCOA** is a Claude Code plugin. It runs CLDK to answer questions about callers, reachability, and change impact.
 
 <CardGrid>
-  <LinkCard title="cocoa plugin" description="Build a Claude Code plugin that runs CLDK for callers, reachability, and change impact." href="/cocoa/" />
+  <LinkCard title="COCOA plugin" description="Build a Claude Code plugin that runs CLDK for callers, reachability, and change impact." href="/cocoa/" />
   <LinkCard title="What is CLDK?" description="The object model: CLDK object -> analysis object -> typed models." href="/what-is-cldk/" />
   <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, build a call graph, find callers, sanitize a focal method." href="/guides/common-tasks/" />
 </CardGrid>

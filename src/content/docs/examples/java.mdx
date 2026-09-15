@@ -5,11 +5,11 @@ description: "Real, runnable Java examples extracted from the CLDK test suite: s
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples are derived from the CLDK SDK test suite. Each snippet runs against a real codebase (the recurring sample is [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/), `project_path="commons-cli"`), exercises a single capability, and shows the output the SDK returns. To adapt an example, substitute your own project path.
+These examples come from the CLDK SDK test suite. Each snippet runs against a real codebase, the recurring sample [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`). Each snippet shows one feature and the output that the SDK returns. To adapt an example, use your own project path.
 
 ## Set up the analysis
 
-Before querying a codebase, initialize a CLDK analysis object targeting your Java project. The `analysis_level` parameter controls how deeply the backend parses the code: `symbol_table` (the default) finds classes, methods, and fields; `call_graph` additionally builds caller/callee edges.
+Before you query a codebase, build a CLDK analysis object for your Java project. The `analysis_level` parameter controls how deeply the backend parses the code. `symbol_table`, the default, finds classes, methods, and fields. `call_graph` also builds caller and callee edges.
 
 ```python
 from cldk import CLDK
@@ -30,11 +30,11 @@ analysis_cg = CLDK.java(
 
 ## Symbol table: classes, methods, and fields
 
-Once the analysis object is built, query the symbol table to enumerate classes, methods, and fields by name.
+After you build the analysis object, query the symbol table to list classes, methods, and fields by name.
 
 ### Get all classes
 
-List every class in the project's symbol table.
+List every class in the symbol table of the project.
 
 ```python
 classes = analysis.get_classes()
@@ -51,7 +51,7 @@ for name, jtype in classes.items():
 
 ### Get a single class
 
-Retrieve the metadata for one class by its fully qualified name.
+Get the metadata for one class by its fully qualified name.
 
 ```python
 jtype = analysis.get_class("org.apache.commons.cli.Options")
@@ -61,7 +61,7 @@ print(jtype.name, "is_interface:", jtype.is_interface, "is_abstract:", jtype.is_
 
 ### Get all methods in a class
 
-Enumerate every method declared on a class.
+List every method declared on a class.
 
 ```python
 methods = analysis.get_methods_in_class("org.apache.commons.cli.Options")
@@ -78,7 +78,7 @@ for signature, method in methods.items():
 
 ### Get a single method and its source
 
-Retrieve a method's full declaration and source code body by class name and method signature.
+Get the full declaration and source body of a method by class name and method signature.
 
 ```python
 method = analysis.get_method(
@@ -103,7 +103,7 @@ print(method.code)
 
 ### Get method parameters
 
-Retrieve the list of parameters for a method, including their types and location in the source.
+Get the list of parameters for a method, with their types and their location in the source.
 
 ```python
 params = analysis.get_method_parameters(
@@ -120,7 +120,7 @@ for param in params:
 
 ### Get fields in a class
 
-Retrieve all field declarations on a class.
+Get every field declaration on a class.
 
 ```python
 fields = analysis.get_fields("org.apache.commons.cli.Option")
@@ -137,11 +137,11 @@ for field in fields:
 
 ## Call graph: caller and callee relationships
 
-To query caller and callee relationships, initialize the analysis at `call_graph` level. This builds the `networkx.DiGraph` used in the following sections.
+To query caller and callee relationships, build the analysis at `call_graph` level. This level builds the `networkx.DiGraph` that the following sections use.
 
 ### Get the call graph
 
-Retrieve the full call graph as a `networkx.DiGraph`. Edges point from caller → callee; weights and metadata are stored in edge attributes.
+Get the full call graph as a `networkx.DiGraph`. Edges point from caller to callee. Weights and metadata live in the edge attributes.
 
 ```python
 from cldk.analysis import AnalysisLevel
@@ -164,7 +164,7 @@ for source, target, data in cg.edges(data=True):
 
 ### Get all callers of a method
 
-Find every method that invokes a target method. This supports impact analysis: determining which callers are affected by a change to the target.
+Find every method that calls a target method. This query supports impact analysis: it shows which callers a change to the target affects.
 
 ```python
 callers = analysis.get_callers(
@@ -183,7 +183,7 @@ for detail in callers["caller_details"]:
 
 ### Get all callees of a method
 
-Find every method that a target method invokes. This supports dependency analysis: identifying the methods a given method depends on.
+Find every method that a target method calls. This query supports dependency analysis: it shows the methods that a given method depends on.
 
 ```python
 callees = analysis.get_callees(
@@ -206,7 +206,7 @@ Query the inheritance hierarchy to understand class structure and polymorphism.
 
 ### Get subclasses
 
-Retrieve all classes that extend a target class (including transitive subclasses).
+Get every class that extends a target class, including transitive subclasses.
 
 ```python
 subclasses = analysis.get_sub_classes("java.io.Serializable")
@@ -237,7 +237,7 @@ print(extended[0])
 
 ### Get implemented interfaces
 
-Retrieve all interfaces that a class declares it implements.
+Get every interface that a class declares it implements.
 
 ```python
 interfaces = analysis.get_implemented_interfaces(
@@ -252,7 +252,7 @@ print(interfaces[0])
 
 ## CRUD operations and data access
 
-Identify methods that read from or write to persistent storage: databases, files, or external services.
+Find the methods that read from or write to persistent storage: databases, files, or external services.
 
 ```python
 crud_operations = analysis.get_all_crud_operations()
@@ -301,11 +301,11 @@ delete_ops = analysis.get_all_delete_operations()
 
 ## Comments and documentation
 
-Extract all comments (line, block, and Javadoc) from the codebase to surface documentation and understand intent.
+Extract every comment (line, block, and Javadoc) from the codebase to find the documentation and the intent.
 
 ### Get all comments
 
-Retrieve all comments in the project, organized by file.
+Get every comment in the project, organized by file.
 
 ```python
 comments = analysis.get_all_comments()
@@ -323,7 +323,7 @@ for file_path, comment_list in comments.items():
 
 ### Get all docstrings
 
-Retrieve Javadoc-style documentation (Javadoc comments on classes and methods).
+Get the Javadoc documentation on classes and methods.
 
 ```python
 docstrings = analysis.get_all_docstrings()
@@ -380,7 +380,7 @@ for cycle in cycles[:1]:
 
 ## Entry point methods
 
-Identify the public-facing methods (e.g., servlet handlers, REST endpoints, main methods) that serve as entry points into the application.
+Find the public methods that are entry points into the application, for example servlet handlers, REST endpoints, and main methods.
 
 ```python
 entry_methods = analysis.get_entry_point_methods()

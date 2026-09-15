@@ -5,19 +5,19 @@ description: Symbol tables, call graphs, and the analysis levels that produce th
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK analyzes a project and exposes structured, queryable program facts through a single `analysis` object. Structural questions (such as which methods call a given method) are answered directly from the call graph rather than by reading individual source files.
+CLDK analyzes a project and gives you structured program facts through one `analysis` object. The call graph answers questions about structure, such as which methods call a given method. You do not read the source files yourself.
 
-This page describes the two kinds of facts CLDK produces (**symbol tables** and **call graphs**) and the **analysis levels** that determine how much work CLDK performs to build them. Every example uses the sample project [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`), the same checkout used in [Quickstart](/quickstart/) and [cocoa](/cocoa/).
+This page describes the two kinds of facts that CLDK produces: **symbol tables** and **call graphs**. It also describes the **analysis levels** that control how much work CLDK does. Every example uses [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`), the same checkout as [Quickstart](/quickstart/) and [COCOA](/cocoa/).
 
 <Aside type="note" title="Construct once, query many times">
-Construct a single `analysis` object and reuse it for every query on this page. It is the handle to all of CLDK's facts about the project.
+One `analysis` object serves every query on this page. The object is the handle to all the facts that CLDK holds about the project.
 </Aside>
 
 ## Symbol tables
 
-A **symbol table** is the structured inventory of a project: every file, class, method, field, and signature, resolved and ready to query. It is produced by default and requires no call-graph analysis.
+A **symbol table** is the structured inventory of a project: every file, class, method, field, and signature. CLDK builds it by default. It needs no call-graph analysis.
 
-Use it to enumerate or look up code structure: for example, to list a project's classes, retrieve a method's source body, or inspect fields and signatures.
+Use it to list or look up code structure: the classes in a project, the source body of a method, or the fields and signatures of a class.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -62,14 +62,14 @@ Use it to enumerate or look up code structure: for example, to list a project's 
 </Tabs>
 
 <Aside type="tip">
-`get_method(...).code` returns a method's exact source body rather than a paraphrase, which makes it well suited for supplying real source to a prompt. See [Common tasks](/guides/common-tasks/) for ready-to-use snippets.
+`get_method(...).code` returns the exact source body of a method, not a paraphrase. This makes it a good way to put real source into a prompt. See [Common tasks](/guides/common-tasks/) for snippets.
 </Aside>
 
-C is more limited: it exposes the symbol table through `get_c_application()` and `get_functions()` (function name -> `CFunction`), but has **no** call graph: see the note under [Analysis levels](#analysis-levels).
+C is more limited. It gives you the symbol table through `get_c_application()` and `get_functions()` (function name -> `CFunction`), but it has **no** call graph. See the note under [Analysis levels](#analysis-levels).
 
 ## Call graphs
 
-A **call graph** records the caller/callee relationships in a project: each node is a method, and each directed edge points from a **caller** to a **callee** it invokes. It represents how the code is connected as a graph that can be traversed.
+A **call graph** records the caller and callee relationships in a project. Each node is a method. Each directed edge points from a **caller** to a **callee** that it calls. The graph shows how the code connects, and you can walk it.
 
 ```mermaid
 flowchart LR
@@ -78,7 +78,7 @@ flowchart LR
     B --> D["CommandLine.addOption"]
 ```
 
-CLDK exposes the graph as a `networkx.DiGraph` (edges point from caller to callee), along with direct neighbor queries. Call graphs support impact analysis, dependency tracing, and other questions about how methods are connected.
+CLDK gives you the graph as a `networkx.DiGraph` (edges point from caller to callee). It also gives you direct neighbor queries. Call graphs support impact analysis, dependency tracing, and other questions about how methods connect.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -129,7 +129,7 @@ CLDK exposes the graph as a `networkx.DiGraph` (edges point from caller to calle
 The **analysis level** controls how much work CLDK does when it builds the `analysis` object. There are two:
 
 - `AnalysisLevel.symbol_table`: the **default**. Resolves structure (classes, methods, fields, signatures). Fast, and enough for symbol-table queries.
-- `AnalysisLevel.call_graph`: additionally computes call edges. **Required** for `get_call_graph`, `get_callers`, and `get_callees`.
+- `AnalysisLevel.call_graph`: also computes call edges. **Required** for `get_call_graph`, `get_callers`, and `get_callees`.
 
 ```python
 from cldk import CLDK
@@ -146,15 +146,15 @@ cg = CLDK.java(
 ```
 
 <Aside type="caution" title="Common pitfall">
-If `get_call_graph`, `get_callers`, or `get_callees` return empty results, the `analysis` object was most likely built at the default `symbol_table` level. Rebuild it with `analysis_level=AnalysisLevel.call_graph`; the default does **not** populate call edges.
+If `get_call_graph`, `get_callers`, or `get_callees` return empty results, you built the `analysis` object at the default `symbol_table` level. Build it again with `analysis_level=AnalysisLevel.call_graph`. The default level does **not** populate call edges.
 </Aside>
 
-Java supports a single-file mode via `CLDK.java(source_code="...")` for quick syntactic work, though it is deprecated; prefer `project_path`. Python requires `project_path`. Both expose the same symbol-table and call-graph methods through `analysis`.
+Java has a single-file mode, `CLDK.java(source_code="...")`, for quick syntactic work. This mode is deprecated, so use `project_path` instead. Python always needs `project_path`. Both give you the same symbol-table and call-graph methods through `analysis`.
 
 ## Where to go next
 
 <CardGrid>
   <LinkCard title="Common tasks" description="Copy-paste snippets for each of these queries on a real project." href="/guides/common-tasks/" />
-  <LinkCard title="cocoa" description="Build a Code Context Agent plugin over symbol tables and call graphs." href="/cocoa/" />
+  <LinkCard title="COCOA" description="Build a Code Context Agent plugin over symbol tables and call graphs." href="/cocoa/" />
   <LinkCard title="Java API reference" description="Every method on the most complete analysis API." href="/reference/python-api/java/" />
 </CardGrid>

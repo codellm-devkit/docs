@@ -1,16 +1,15 @@
 ---
-title: Installing cldk
-description: Install and initialize the cldk Python package to start analyzing your codebases.
+title: Installing CLDK
+description: Install the CLDK Python package and the language backends that it needs.
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
-[`CLDK`](https://github.com/IBM/codellm-devkit) is a Python SDK [hosted on PyPI](https://pypi.org/project/cldk/) and can be installed using your preferred Python package manager.
+[`CLDK`](https://github.com/IBM/codellm-devkit) is a Python SDK on [PyPI](https://pypi.org/project/cldk/). You can install it with any Python package manager.
 
 ## Installation
 
-The Python SDK can be installed directly from
-[PyPI](https://pypi.org/project/cldk/) using any Python package manager such as [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), or [uv](https://docs.astral.sh/uv/):
+Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), or [uv](https://docs.astral.sh/uv/):
 
 <Tabs>
   <TabItem label="pip">
@@ -30,40 +29,40 @@ The Python SDK can be installed directly from
   </TabItem>
 </Tabs>
 
-## Programming Language Specific Dependencies
+## Language-specific dependencies
 
-`CLDK` supports program analysis for multiple languages and requires additional dependencies to support specific languages. The following tabs list the additional dependencies required for each language:
+`CLDK` analyzes several languages. Each language needs its own dependencies:
 
 <Tabs>
   <TabItem label="Python Analysis">
-    For Python analysis as well as to use the CLDK Python SDK, you will need to install the Python programming language with version 3.11 or later. We recommend using a package manager like [pyenv](https://github.com/pyenv/pyenv) to install and manage Python dependencies.
+    The CLDK Python SDK and Python analysis both need Python 3.11 or later. [pyenv](https://github.com/pyenv/pyenv) installs and manages several Python versions on one machine.
   </TabItem>
   <TabItem label="Java Analysis">
-    For Java analysis, CLDK relies on a companion project called [`codeanalyzer`](https://github.com/ibm/codenet-minerva-code-analyzer). `codeanalyzer` is a Java project and you will therefore need to install the Java Development Kit (JDK) with java version 11 or later.
+    For Java analysis, CLDK uses a companion project, [`codeanalyzer`](https://github.com/ibm/codenet-minerva-code-analyzer). `codeanalyzer` is a Java project, so you need the Java Development Kit (JDK), version 11 or later.
 
-    You can use a package manager like [SDKMAN](https://sdkman.io/) to install the JDK. First, install SDKMAN by running the following command:
+    [SDKMAN](https://sdkman.io/) installs and manages JDK versions.
 
-    - To install `SDKMAN`, open your terminal and enter the following command and follow the instructions to complete the installation:
+    - Install SDKMAN. Then follow the instructions on screen:
 
       ```bash
       curl -s "https://get.sdkman.io" | bash
       ```
 
-    - Open a new terminal or source the SDKMAN! scripts:
+    - Open a new terminal, or load the SDKMAN scripts:
 
       ```bash
       source "$HOME/.sdkman/bin/sdkman-init.sh"
       ```
 
-    Next, install java 11 or later using SDKMAN:
+    Next, install Java 11 or later with SDKMAN:
 
-    - You can list all available java versions with:
+    - List the available Java versions:
 
       ```bash
       sdk list java | grep sem
       ```
 
-      You should see something like this:
+      The output looks like this:
       ```bash
       Semeru      |     | 21.0.5       | sem     |            | 21.0.5-sem
                   |     | 17.0.13      | sem     |            | 17.0.13-sem
@@ -71,7 +70,7 @@ The Python SDK can be installed directly from
                   |     | 8.0.432      | sem     |            | 8.0.432-sem
       ```
 
-    - Install Java 11 or above (we'll go with `11.0.25-sem`):
+    - Install Java 11 or later. This example uses `11.0.25-sem`:
 
       ```bash
       sdk install java 11.0.25-sem
@@ -85,13 +84,13 @@ The Python SDK can be installed directly from
       # sdk default java 11.0.25-sem
       ```
 
-    - Verify the installation:
+    - Make sure that the installation works:
 
       ```bash
       java -version
       ```
 
-      This should output the version of the installed Java.
+      The command shows the installed Java version.
 
       ```bash
       openjdk 11.0.25 2024-10-15
@@ -102,7 +101,7 @@ The Python SDK can be installed directly from
       JCL      - edded3f65c based on jdk-11.0.25+9)
       ```
 
-    Finally, to enable building Java projects automatically, you will need to install the `maven` build tool. You can install `maven` using a package manager like `SDKMAN`:
+    Finally, CLDK builds Java projects automatically with Maven. Install Maven with SDKMAN:
 
     - Install Maven:
 
@@ -110,26 +109,26 @@ The Python SDK can be installed directly from
       sdk install maven
       ```
 
-    - Make sure `mvn` command is available in the `PATH`. If `mvn` is not in your path, add the following to your `~/.zshrc`, `~/.bashrc` or `~/.bash_profile` file:
+    - The `mvn` command must be on your `PATH`. If it is not, add this line to your `~/.zshrc`, `~/.bashrc`, or `~/.bash_profile` file:
 
       ```bash
       export PATH="$HOME/.sdkman/candidates/maven/current/bin:$PATH"
       ```
-      Then, source the file to apply the changes:
+      Then load the file again:
 
       ```bash
       source ~/.zshrc # or ~/.bashrc or ~/.bash_profile
       ```
 
-    - Verify the installation:
+    - Make sure that the installation works:
 
       ```bash
       mvn -version
       ```
-      This should output the version of the installed Maven.
+      The command shows the installed Maven version.
   </TabItem>
   <TabItem label="TypeScript Analysis">
-    For TypeScript and JavaScript analysis, CLDK relies on a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt, self-contained binary and does **not** require Bun or Node to run. Install the `codeanalyzer-typescript` package, which adds a `cants` command to your `PATH`.
+    For TypeScript and JavaScript analysis, CLDK uses a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). It ships as a prebuilt binary and does **not** need Bun or Node. Install the `codeanalyzer-typescript` package. The package adds a `cants` command to your `PATH`.
 
     Install it from PyPI:
 
@@ -143,62 +142,62 @@ The Python SDK can be installed directly from
     brew install codellm-devkit/homebrew-tap/codeanalyzer-typescript
     ```
 
-    Verify the installation:
+    Make sure that the installation works:
 
     ```bash
     cants --help
     ```
 
-    The package is named `codeanalyzer-typescript`, but the installed command is **`cants`**. To resolve library call targets, the analyzer requires a project's *dependencies*; keep `npm` on your `PATH` and the analyzer materializes `node_modules` automatically (skip with `--no-build`). See the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/) for full CLI options.
+    The package is named `codeanalyzer-typescript`, but the command is **`cants`**. To resolve library call targets, the backend needs the dependencies of the project. Keep `npm` on your `PATH`, and the backend creates `node_modules` for you. To skip this step, use `--no-build`. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
   </TabItem>
   <TabItem label="Rust Installation">
-    Use rustup to install Rust and manage toolchains. It keeps Rust versions isolated and lets you switch between them when needed.
+    Use rustup to install Rust and manage toolchains. rustup keeps Rust versions separate, and you can change between them.
 
-    - **Install Rustup**
-    Run the following command in your terminal:
+    - **Install rustup.**
+    Run this command in your terminal:
     ```shell
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
     ```
-    Follow the on-screen instructions to complete the installation.
+    Then follow the instructions on screen.
 
-    - **Configure Your Environment**
-    Add Rust to your PATH by appending this line to your shell init script:
+    - **Configure your environment.**
+    Add this line to your shell init script:
     ```shell
     source $HOME/.cargo/env
     ```
 
-    - **Verify Installation**
-    Confirm that Rust is installed correctly by checking the version:
+    - **Make sure that the installation works.**
+    Show the version:
     ```shell
     rustc --version
     ```
-    Expected output (version may vary):
+    The output looks like this. The version number can be different:
     ```shell
     rustc 1.70.0 (90c541806 2023-05-31)
     ```
   </TabItem>
 </Tabs>
 
-## Additional Development Tools
+## Additional development tools
 
-Some operating systems may require additional development tools:
+Some operating systems need additional development tools:
 
 <Tabs>
   <TabItem label="macOS">
-    - Make sure you have the Xcode Command Line Tools installed. You can install them using the following command:
+    - Install the Xcode Command Line Tools:
 
       ```shell
       xcode-select --install
       ```
 
-    - Additionally, you may need to install the following packages using Homebrew:
+    - Some builds also need these Homebrew packages:
 
       ```shell
       brew install openssl readline sqlite3 xz zlib tcl-tk libffi
       ```
   </TabItem>
   <TabItem label="Ubuntu/Debian">
-    - Install the required development tools using the following command:
+    - Install the build tools:
 
       ```shell
       sudo apt-get install build-essential python3-dev libssl-dev zlib1g-dev \
@@ -207,7 +206,7 @@ Some operating systems may require additional development tools:
       ```
   </TabItem>
   <TabItem label="Red Hat (Fedora/CentOS/RHEL)">
-    - Install the required development tools using the following command:
+    - Install the build tools:
 
       ```shell
       sudo dnf group install c-development development-tools gcc make \
@@ -217,9 +216,9 @@ Some operating systems may require additional development tools:
   </TabItem>
 </Tabs>
 
-## Supported Python Versions
+## Supported Python versions
 
-`CLDK` is compatible with Python versions 3.11 and later. The following table lists the supported Python versions and the corresponding `CLDK` versions:
+`CLDK` needs Python 3.11 or later:
 
 | Python Version | Compatible `cldk` Versions |
 | -------------- | -------------------------- |

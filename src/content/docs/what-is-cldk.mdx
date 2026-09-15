@@ -5,7 +5,9 @@ description: CLDK turns a project into typed symbols and call graphs behind a si
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-CLDK (CodeLLM-DevKit) is a Python library that loads a codebase and exposes typed models of its classes, methods, fields, and call graph. All queries are issued through a single `analysis` object, which answers structural questions (such as which methods call a given method, or which methods it invokes) without manual file parsing or ad hoc composition of external tools.
+CLDK (CodeLLM-DevKit) is a Python library that loads a codebase. It gives you typed models of the classes, methods, fields, and call graph.
+
+You send every query through one `analysis` object. The object answers questions about structure: which methods call a given method, or which methods that method calls. You do not parse files yourself. You do not join external tools together.
 
 ## The programming model
 
@@ -13,11 +15,11 @@ Every CLDK program follows the same three steps: select a language, analyze a pr
 
 <Steps>
 
-1. **Call the per-language factory** for the target language, for example `CLDK.java(...)`. This selects the analysis backend.
+1. **Call the factory for your language**, for example `CLDK.java(...)`. This factory selects the backend.
 
-2. **Build the `analysis` object** by pointing it at a project: `CLDK.java(project_path="commons-cli")`. The backend runs at this step and produces the program model.
+2. **Build the `analysis` object.** Give it a project path: `CLDK.java(project_path="commons-cli")`. The backend runs at this step and builds the program model.
 
-3. **Query the typed models** with `get_classes()`, `get_method(...)`, `get_call_graph()`, and related methods. The returned objects can be read, traversed, serialized, or passed to other tools.
+3. **Query the typed models** with `get_classes()`, `get_method(...)`, `get_call_graph()`, and related methods. You can read these objects, walk them, serialize them, or send them to other tools.
 
 </Steps>
 
@@ -57,7 +59,7 @@ print(analysis.get_call_graph())          # -> networkx.DiGraph
 </Tabs>
 
 <Aside type="note" title="Analysis levels">
-  `analysis_level` defaults to `AnalysisLevel.symbol_table`, which resolves classes, methods, and fields. Call graphs, callers, and callees require `AnalysisLevel.call_graph`; pass it explicitly when call relationships are needed.
+  `analysis_level` defaults to `AnalysisLevel.symbol_table`, which resolves classes, methods, and fields. Call graphs, callers, and callees need `AnalysisLevel.call_graph`. If you want call relationships, you must set this level.
 </Aside>
 
 A language-specific backend sits behind the same API:
@@ -71,11 +73,13 @@ flowchart LR
     C --> F["Class structure / CRUD"]
 ```
 
-The backend is selected by language: Java uses CodeAnalyzer over WALA, and Python uses its own static-analysis engine. The query code is largely identical across languages; only the backend differs.
+The language selects the backend. Java uses CodeAnalyzer over WALA. Python uses its own static-analysis backend. Your query code stays the same for each language. Only the backend changes.
 
 ## Language coverage
 
-Every supported language is queried through the same `analysis` API, backed by a language-specific engine. Java and Python are supported today, with Java offering the deepest analysis, including class-hierarchy and CRUD extraction. TypeScript is available in beta: its symbol table and call graph are solid and queryable through `CLDK.typescript(...)`, while framework entrypoint detection is still in progress. Go and Rust are under active development.
+You query every language through the same `analysis` API. A different backend answers for each one. Java and Python work today. Java goes deepest, because it adds class-hierarchy analysis and CRUD extraction.
+
+TypeScript is in beta. Its symbol table and call graph work through `CLDK.typescript(...)`. Entrypoint detection for frameworks is not complete. Go and Rust are in development.
 
 | Language   | Status         | Symbol table | Call graph / callers / callees |
 | ---------- | -------------- | ------------ | ------------------------------ |

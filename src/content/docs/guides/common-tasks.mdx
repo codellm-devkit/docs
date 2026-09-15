@@ -5,15 +5,15 @@ description: Copy-paste CLDK snippets for common analysis questions, with Python
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-This page is a task index. Each section states a codebase question, then shows the corresponding CLDK call and the shape of its result: the call appears first, and the output follows as a trailing comment. Java examples use [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`); Python examples use a generic `my_pkg`.
+This page is a task index. Each section states a question about a codebase. It then shows the CLDK call and the shape of the result. The call comes first, and the output follows as a trailing comment. Java examples use [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`). Python examples use a generic `my_pkg`.
 
 <Aside type="tip" title="Build once, query many times">
-Construct the `analysis` object once and reuse it. The default analysis level is `symbol_table`; any query that touches the call graph (callers, callees) requires `analysis_level=AnalysisLevel.call_graph`. See [Concepts](/guides/concepts/) for what each level populates.
+One `analysis` object serves many queries. The default analysis level is `symbol_table`. Any query that touches the call graph (callers, callees) needs `analysis_level=AnalysisLevel.call_graph`. See [Concepts](/guides/concepts/) for what each level populates.
 </Aside>
 
 ## List all methods in a class
 
-Enumerate every method declared on a class.
+List every method declared on a class.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -51,9 +51,9 @@ Enumerate every method declared on a class.
   </TabItem>
 </Tabs>
 
-## Get a method's source body
+## Get the source body of a method
 
-Retrieve the exact source of a single method by its qualified class name and signature, without reading files or tracking line ranges.
+Get the exact source of one method by its qualified class name and signature. You do not read files or track line ranges.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -85,12 +85,12 @@ Retrieve the exact source of a single method by its qualified class name and sig
 </Tabs>
 
 <Aside type="note">
-`get_method(...)` returns `None` if the method is not found, so guard with `if method:` before reading `.code`. The returned object is a `JCallable` (Java) or `PyCallable` (Python).
+If the method is not found, `get_method(...)` returns `None`. Test with `if method:` before you read `.code`. The returned object is a `JCallable` (Java) or a `PyCallable` (Python).
 </Aside>
 
 ## Build a call graph
 
-The call graph is a `networkx.DiGraph` whose edges point from **caller** to **callee**. It underpins the callers and callees queries and therefore requires the `call_graph` analysis level.
+The call graph is a `networkx.DiGraph`. Its edges point from **caller** to **callee**. The callers and callees queries both use it, so they need the `call_graph` analysis level.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -127,7 +127,7 @@ The call graph is a `networkx.DiGraph` whose edges point from **caller** to **ca
 
 ## Find who calls a method
 
-Impact analysis. `get_callers` returns the set of methods that invoke the target.
+Impact analysis. `get_callers` returns the set of methods that call the target.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -154,12 +154,12 @@ Impact analysis. `get_callers` returns the set of methods that invoke the target
 </Tabs>
 
 <Aside type="tip" title="Inspect the shape once">
-`get_callers`/`get_callees` return dictionaries whose exact keys depend on your CLDK and backend version. Print one result with `print(callers)` (or `import json; print(json.dumps(callers, default=str, indent=2))`) the first time you wire this up, then index the fields your version returns.
+`get_callers` and `get_callees` return dictionaries. The exact keys depend on your CLDK and backend version. The first time you use them, print one result with `print(callers)`, or with `json.dumps(callers, default=str, indent=2)`. Then index the fields that your version returns.
 </Aside>
 
 ## Find what a method calls
 
-The dependency view. `get_callees` is the inverse of `get_callers`, returning the methods that the target invokes.
+The dependency view. `get_callees` is the inverse of `get_callers`. It returns the methods that the target calls.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -212,12 +212,12 @@ In Java, walk class relationships with `get_sub_classes`, `get_extended_classes`
 </Tabs>
 
 <Aside type="note">
-Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`) are part of the **Java** API. For Python, read base classes off the `PyClass` model instead, as shown above.
+Class-relationship helpers (`get_sub_classes`, `get_extended_classes`, `get_implemented_interfaces`) are part of the **Java** API. For Python, read the base classes from the `PyClass` model instead, as shown above.
 </Aside>
 
 ## Find data-access / CRUD operations
 
-Locate where the code reads or writes persistent data. This is useful for security triage and data-flow analysis, and is a **Java-only** capability.
+Find where the code reads or writes persistent data. This helps with security triage and data-flow analysis. It is a **Java-only** feature.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -241,7 +241,7 @@ Locate where the code reads or writes persistent data. This is useful for securi
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these calls." href="/cocoa/" />
+  <LinkCard title="COCOA" description="Build a Code Context Agent plugin on these calls." href="/cocoa/" />
   <LinkCard title="Core concepts" description="Analysis levels and call graphs explained." href="/guides/concepts/" />
   <LinkCard title="Java API reference" description="Every method on the Java analysis API." href="/reference/python-api/java/" />
   <LinkCard title="Python API reference" description="The Python analysis API in full." href="/reference/python-api/python/" />

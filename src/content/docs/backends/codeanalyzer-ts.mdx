@@ -9,7 +9,7 @@ The **codeanalyzer-ts** backend analyzes TypeScript and TSX codebases and emits 
 
 ## Architecture
 
-codeanalyzer-ts uses **ts-morph** (the TypeScript compiler API) to parse and resolve a TypeScript project in a single pass. The same `TypeChecker` instance that builds the symbol table resolves call targets, so call-graph derivation reuses existing resolution and is precise.
+codeanalyzer-ts uses **ts-morph** (the TypeScript compiler API) to parse and resolve a TypeScript project in a single pass. The same `TypeChecker` instance that builds the symbol table resolves call targets, so the call-graph derivation reuses that resolution and is precise.
 
 ```mermaid
 flowchart LR
@@ -23,23 +23,23 @@ flowchart LR
 ```
 
 ### Materialization
-Before parsing, the analyzer ensures `node_modules` is present (via `npm install`) so the TypeChecker can resolve types. Skip this step with `--no-build` when `node_modules` is already prepared.
+Before it parses, the analyzer makes sure that `node_modules` is present, with `npm install`, so the TypeChecker can resolve types. If `node_modules` is already prepared, skip this step with `--no-build`.
 
 ### Symbol table (Level 1 default)
 Walks the ts-morph AST and indexes all declarations (classes, methods, interfaces, enums, type aliases, namespaces, functions) into a flat `symbol_table` keyed by project-relative file paths.
 
 ### Call graph
-ts-morph's TypeChecker resolves each call site to its declared-type target (exact for static dispatch), plus RTA-style subtype expansion: polymorphic calls on interface/abstract receivers also emit edges to every instantiated concrete override. Provenance: `tsc`.
+The ts-morph TypeChecker resolves each call site to its declared-type target, which is exact for static dispatch. It then adds RTA-style subtype expansion: polymorphic calls on interface or abstract receivers also emit edges to every instantiated concrete override. Provenance: `tsc`.
 
 <Aside type="tip" title="Experimental: dataflow enrichment">
-An experimental, opt-in pass uses [**Jelly**](https://github.com/cs-au-dk/jelly) (a flow-based call-graph analyzer for JavaScript/TypeScript) to resolve the higher-order, callback, and dynamic-dispatch edges the type checker misses. Select it with `--call-graph-provider jelly` (or `both` to diff against the `tsc` resolver); `tsc` remains the default. Jelly ships inside the `cants` binary, so no extra install is needed.
+An experimental, opt-in pass uses [**Jelly**](https://github.com/cs-au-dk/jelly), a flow-based call-graph analyzer for JavaScript and TypeScript. It resolves the higher-order, callback, and dynamic-dispatch edges that the type checker misses. Select it with `--call-graph-provider jelly`, or `both` to compare against the `tsc` resolver. `tsc` stays the default. Jelly ships inside the `cants` binary, so you install nothing extra.
 </Aside>
 
 The call graph maintains the no-dangling-edges invariant: every edge endpoint is a real `Callable.signature`.
 
 ## Installing
 
-The `cants` CLI is available from **PyPI** and **Homebrew**. Both distribute a prebuilt, self-contained binary for the target platform; neither Bun nor Node is required to run it.
+The `cants` CLI is available from **PyPI** and **Homebrew**. Both distribute a prebuilt, self-contained binary for the target platform. You need neither Bun nor Node to run it.
 
 <Tabs>
   <TabItem label="pip">
@@ -56,15 +56,15 @@ The `cants` CLI is available from **PyPI** and **Homebrew**. Both distribute a p
   </TabItem>
 </Tabs>
 
-The CLDK Python SDK depends on the PyPI package `codeanalyzer-typescript` to locate this backend; the package exposes `bin_path()`, which returns the path to the bundled binary. There is no `analysis_backend_path` argument. To override the binary out of band (for example, a locally built `cants`), set the `$CODEANALYZER_TS_BIN` environment variable to its path; this is the sole override.
+The CLDK Python SDK depends on the PyPI package `codeanalyzer-typescript` to find this backend. The package exposes `bin_path()`, which returns the path to the bundled binary. There is no `analysis_backend_path` argument. To change the binary out of band, for example to a locally built `cants`, set the `$CODEANALYZER_TS_BIN` environment variable to its path. This is the only override.
 
 <Aside type="note">
-The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on `PATH` is **`cants`**, the analyzer's binary name. Run `cants`, not `codeanalyzer-typescript`.
+The distributable is named **`codeanalyzer-typescript`** (the PyPI package and the Homebrew formula), but the command it installs on `PATH` is **`cants`**, the binary name of the analyzer. Run `cants`, not `codeanalyzer-typescript`.
 </Aside>
 
 ### Building from source
 
-To develop the analyzer, build it with **bun** ≥ 1.3 (Node ≥ 20 also works to run from source). **npm** must be on PATH to materialize dependencies:
+To develop the analyzer, build it with **bun** 1.3 or later. Node 20 or later also runs it from source. **npm** must be on `PATH` to install dependencies:
 
 ```bash
 cd codeanalyzer-ts
@@ -88,18 +88,18 @@ cants -i <path> [options]
 | Option | Description |
 |--------|-------------|
 | `-i, --input <path>` | Project root to analyze **(required)** |
-| `-o, --output <dir>` | Write `analysis.json` to this directory; omit to emit compact JSON to stdout (used by the SDK) |
+| `-o, --output <dir>` | Write `analysis.json` to this directory. Omit it to emit compact JSON to stdout (used by the SDK) |
 | `-f, --format <fmt>` | Output format: `json` or `msgpack` (default: `json`) |
-| `-a, --analysis-level <n>` | `1` = symbol table + tsc resolver call graph + RTA (default); `2` = call graph |
+| `-a, --analysis-level <n>` | `1` = symbol table, tsc resolver call graph, and RTA (default). `2` = call graph |
 | `-t, --target-files <paths...>` | Restrict analysis to specific files (for incremental builds) |
 | `--skip-tests` / `--include-tests` | Skip or include test files (default: skip) |
-| `--eager` / `--lazy` | Force clean rebuild vs. reuse cache (default: reuse) |
-| `--no-build` | Skip `npm install`; assume `node_modules` is prepared |
+| `--eager` / `--lazy` | Force a clean rebuild, or reuse the cache (default: reuse) |
+| `--no-build` | Skip `npm install`. Assume that `node_modules` is prepared |
 | `--no-phantoms` | Disable phantom (external) nodes for library imports |
 | `-c, --cache-dir <dir>` | Cache directory (default: `<input>/.codeanalyzer`) |
-| `-v` | Increase verbosity; repeatable (e.g. `-vv`) |
+| `-v` | Increase verbosity. Repeatable, for example `-vv` |
 
-All diagnostics are written to stderr; stdout is reserved for JSON (unless `-o` is specified).
+The analyzer writes all diagnostics to stderr. Stdout carries only JSON, unless you give `-o`.
 
 ## Output schema
 
@@ -123,7 +123,7 @@ The backend emits `analysis.json` containing a `TSApplication` with three top-le
 
 ### Symbol table
 
-The `symbol_table` is a dictionary mapping project-relative file paths to `TSModule` objects. Each module contains:
+The `symbol_table` is a dictionary. It maps project-relative file paths to `TSModule` objects. Each module contains:
 
 - **`imports`** and **`exports`**: statement-level detail (module specifier, binding name, type-only markers)
 - **`classes`**, **`interfaces`**, **`enums`**, **`type_aliases`**: top-level named types, each with its own structure
@@ -284,20 +284,20 @@ TypeScript includes several language-specific constructs that codeanalyzer-ts mo
 
 | Feature | Support | Details |
 |---------|---------|---------|
-| **Interfaces** | Full | Separate `interfaces{}` collection; queryable separately from classes |
+| **Interfaces** | Full | Separate `interfaces{}` collection. You query it separately from classes |
 | **Type aliases** | Full | `TSTypeAlias` with aliased type text and type parameters |
-| **Enums** | Full | Discriminated collection; members with computed/literal values |
-| **Namespaces** | Full | Recursive containers; same structure as modules |
+| **Enums** | Full | Discriminated collection. Members with computed or literal values |
+| **Namespaces** | Full | Recursive containers. Same structure as modules |
 | **Type parameters** | Full | `<T, U extends Base = Default>` structured on classes, callables, aliases |
 | **Decorators** | Structured | `name`, `qualified_name`, `positional_arguments[]`, `keyword_arguments{}` (for framework entrypoint detection) |
 | **Modifiers** | Typed fields | `accessibility`, `is_static`, `is_async`, `is_readonly`, `is_abstract`, `is_optional`, `is_ambient` |
 | **Overload signatures** | Full | `overload_signatures[]` on the implementation callable |
 | **JSX** | Tracked | `is_tsx` flag on modules |
-| **Declaration files** | Tracked | `is_declaration_file` flag; useful for filtering |
+| **Declaration files** | Tracked | `is_declaration_file` flag, useful for filters |
 
 ## Python SDK integration
 
-TypeScript projects are analyzable through the same `CLDK` analysis API as Python and Java, via the `CLDK.typescript(...)` factory:
+The `CLDK.typescript(...)` factory analyzes TypeScript projects through the same `CLDK` analysis API as Python and Java:
 
 ```python
 from cldk import CLDK
@@ -313,11 +313,11 @@ print(analysis.get_classes())      # Dict[str, TSClass]
 graph = analysis.get_call_graph()  # networkx.DiGraph
 ```
 
-The old `CLDK(language="typescript").analysis(...)` form still works but is **deprecated**; prefer `CLDK.typescript(...)`. The `from cldk import CLDK` import is unchanged.
+The `CLDK(language="typescript").analysis(...)` form still works, but it is **deprecated**. Use `CLDK.typescript(...)`. The `from cldk import CLDK` import does not change.
 
 ### Choosing a backend
 
-`CLDK.typescript(...)` keeps the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The backend is selected by the **type** of the `backend=` config:
+`CLDK.typescript(...)` accepts the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The **type** of the `backend=` config selects the backend:
 
 - **In-memory codeanalyzer** (default): omit `backend=`, or pass `backend=CodeAnalyzerConfig(cache_dir=...)` to override where artifacts are cached.
 - **Read-only Neo4j**: pass `backend=Neo4jConnectionConfig(...)` to query a graph populated out of band.
@@ -348,10 +348,10 @@ analysis = CLDK.typescript(
 )
 ```
 
-`Neo4jConnectionConfig` is importable from `cldk.analysis.commons.backend_config` (and also from `cldk.analysis.typescript.neo4j`).
+Import `Neo4jConnectionConfig` from `cldk.analysis.commons.backend_config`, or from `cldk.analysis.typescript.neo4j`.
 
 <Aside type="tip" title="Where the graph comes from">
-The read-only backend queries a graph that codeanalyzer-ts itself populates with `cants --emit neo4j`. Running analysis as scheduled jobs and serving agents from the shared graph is the [analysis-at-scale](/at-scale/) workflow.
+The read-only backend queries a graph that codeanalyzer-ts populates with `cants --emit neo4j`. Run the analysis as a scheduled job, then serve agents from the shared graph. This is the [analysis-at-scale](/at-scale/) workflow.
 </Aside>
 
 ## Schema invariants
@@ -363,11 +363,11 @@ All signatures follow one canonical `signatureOf()` rule: **project-relative fil
 - Constructor: `src/models/User.User.constructor`
 - Namespace member: `src/api.v1.ApiRouter.get`
 
-This ensures every call-graph edge points to a real symbol-table entry.
+This rule makes sure that every call-graph edge points to a real symbol-table entry.
 
 ## Caching and incremental analysis
 
-The analyzer maintains a cache under a single language-keyed `cache_dir` (default: `<project>/.codeanalyzer`), with TypeScript artifacts under `<cache_dir>/typescript/`, stamped with the analyzer version. Caching is **on by default**. From the SDK, set the cache root via `backend=CodeAnalyzerConfig(cache_dir=...)`; on the CLI, use `-c <dir>`. The cache is invalidated on:
+The analyzer keeps a cache under one language-keyed `cache_dir` (default: `<project>/.codeanalyzer`). TypeScript artifacts live under `<cache_dir>/typescript/`, stamped with the analyzer version. Caching is **on by default**. From the SDK, set the cache root with `backend=CodeAnalyzerConfig(cache_dir=...)`. On the CLI, use `-c <dir>`. These events invalidate the cache:
 - Analyzer version change
 - Any source file modification (content hash mismatch)
 - `--eager` flag (forces clean rebuild)
@@ -376,22 +376,22 @@ Use `--lazy` (default) to reuse the cache, or `--target-files <list>` to update 
 
 ## Performance notes
 
-- **Symbol table build**: O(n) in source lines; ts-morph's parse is linear
-- **Call graph build**: O(c) in call sites; the checker resolution is constant-time per site
-- **Dataflow enrichment (experimental, Jelly)**: opt-in via `--call-graph-provider jelly` (or `both` to diff against `tsc`); adds a separate whole-program Jelly pass, so cost depends on Jelly's analysis time
+- **Symbol table build**: O(n) in source lines. The ts-morph parse is linear
+- **Call graph build**: O(c) in call sites. The checker resolution is constant-time for each site
+- **Dataflow enrichment (experimental, Jelly)**: opt-in with `--call-graph-provider jelly`, or `both` to compare against `tsc`. It adds a separate whole-program Jelly pass, so the cost depends on the Jelly analysis time
 
-For large projects (>100k LOC), analysis typically takes seconds to tens of seconds.
+For large projects (more than 100k lines), analysis takes seconds to tens of seconds.
 
 ## Current maturity
 
-codeanalyzer-ts is **beta**: the symbol table and call graph are stable and queryable through the Python SDK, while entrypoint detection is not yet implemented.
+codeanalyzer-ts is **beta**. The symbol table and call graph are stable, and you can query them through the Python SDK. Entrypoint detection is not built yet.
 
-- **Symbol table**: Stable; all TypeScript node kinds supported
-- **Call graph**: Stable; tsc resolution + RTA expansion proven correct
-- **Python SDK integration**: Available via `CLDK.typescript(...)` (in-process and read-only Neo4j backends)
-- **Neo4j graph output**: Available; `--emit neo4j` / `--emit schema` (see [Analysis at scale](/at-scale/))
-- **Entrypoint detection**: Not implemented; `get_entry_point_methods()` and `get_service_entry_point_methods()` raise `NotImplementedError`, and the backend emits an empty `entrypoints` array
-- **Dataflow enrichment (Jelly)**: Experimental; `--call-graph-provider jelly` exists but `tsc` remains the default
+- **Symbol table**: Stable. All TypeScript node kinds are supported
+- **Call graph**: Stable. The tsc resolution and the RTA expansion are proven correct
+- **Python SDK integration**: Available with `CLDK.typescript(...)`, for the in-process and read-only Neo4j backends
+- **Neo4j graph output**: Available with `--emit neo4j` and `--emit schema` (see [Analysis at scale](/at-scale/))
+- **Entrypoint detection**: Not built. `get_entry_point_methods()` and `get_service_entry_point_methods()` raise `NotImplementedError`, and the backend emits an empty `entrypoints` array
+- **Dataflow enrichment (Jelly)**: Experimental. `--call-graph-provider jelly` exists, but `tsc` stays the default
 
 ## See also
 
@@ -399,5 +399,5 @@ codeanalyzer-ts is **beta**: the symbol table and call graph are stable and quer
   <LinkCard title="What is CLDK?" href="/what-is-cldk/" description="A single analysis API across supported languages." />
   <LinkCard title="Quickstart" href="/quickstart/" description="Run CLDK on a first project." />
   <LinkCard title="Backends overview" href="/backends/" description="All CLDK analysis backends." />
-  <LinkCard title="Contributing: Add a language" href="/contributing/add-language-backend/" description="Scaffold a new backend like codeanalyzer-ts." />
+  <LinkCard title="Contributing: Add a language" href="/contributing/add-language-backend/" description="Scaffold a new backend such as codeanalyzer-ts." />
 </CardGrid>

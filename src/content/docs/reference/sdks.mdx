@@ -1,11 +1,11 @@
 ---
 title: SDKs
-description: "CLDK frontends (the language SDKs you write against), with a maturity tier for each. Every SDK consumes the same canonical analysis JSON the codeanalyzer backends emit."
+description: "CLDK frontends (the language SDKs you write against), with a maturity tier for each. Every SDK reads the same canonical analysis JSON that the codeanalyzer backends write."
 ---
 
 import { Aside, Badge, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. Because the backends perform the language analysis, each SDK exposes the same call graphs, symbol tables, and reachability data in its host language.
+A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. The backends do the language analysis. Each SDK therefore gives you the same call graphs, symbol tables, and reachability data in its own host language.
 
 This is the **frontend** layer. For the analyzers behind it, see the [backends overview](/backends/).
 
@@ -40,21 +40,21 @@ The SDK you write against. Each is an `analysis` API over the canonical JSON.
   />
   <LinkCard
     title="Add a frontend"
-    description="Help wanted. A new frontend can consume every existing backend; see the roadmap and starting points for a native SDK."
+    description="Help wanted. A new frontend can read every existing backend. See the roadmap and starting points for a native SDK."
     href="/contributing/rust-frontend/"
   />
 </CardGrid>
 
 <Aside type="tip" title="Adding a language pack">
-A CLDK skill scaffolds a whole new language (a `codeanalyzer-<lang>` backend plus the SDK bindings) end to end. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset).
+A CLDK skill generates a whole new language: a `codeanalyzer-<lang>` backend and the SDK bindings. See [codellm-devkit/developer-skillset](https://github.com/codellm-devkit/developer-skillset).
 </Aside>
 
 ## Same contract, every language
 
-Each SDK exposes the same `analysis` vocabulary because they all read the single schema the backends serialize:
+Each SDK uses the same `analysis` vocabulary, because they all read one schema that the backends write:
 
-- A per-language factory, e.g. `CLDK.java(project_path=...)`, constructs the analysis object.
+- A per-language factory, for example `CLDK.java(project_path=...)`, builds the analysis object.
 - The core methods (`get_symbol_table`, `get_call_graph`, `get_callers`, `get_callees`, and related calls) return the same typed models.
-- Adding a backend makes the new language available to every SDK that consumes the shared schema.
+- A new backend makes its language available to every SDK that reads the shared schema.
 
-The [Python SDK](/reference/python-api/) is stable and the recommended starting point. The [TypeScript SDK](https://github.com/codellm-devkit/typescript-sdk) is experimental and evolving. The Java, Rust, and Go frontends are not yet built; see [Add a Rust frontend](/contributing/rust-frontend/) for the form a native SDK takes.
+The [Python SDK](/reference/python-api/) is stable. Start there. The [TypeScript SDK](https://github.com/codellm-devkit/typescript-sdk) is experimental. The Java, Rust, and Go frontends do not exist yet. To see the form that a native SDK takes, read [Add a Rust frontend](/contributing/rust-frontend/).

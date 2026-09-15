@@ -5,7 +5,7 @@ description: "A single-page reference for the core CLDK objects and methods: con
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-A single-page reference for the common CLDK calls. Construct one `analysis` object with a per-language factory, then query it. For background and walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
+A single-page reference for the common CLDK calls. Build one `analysis` object with a per-language factory. Then query it. For background and walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
 
 ## Install
 
@@ -13,7 +13,7 @@ A single-page reference for the common CLDK calls. Construct one `analysis` obje
 pip install cldk
 ```
 
-Reachability queries use `networkx`. It is a CLDK dependency; install it explicitly if you query graphs directly:
+Reachability queries use `networkx`. CLDK depends on it. If you query graphs directly, install it explicitly:
 
 ```bash frame="none"
 pip install cldk networkx
@@ -21,7 +21,7 @@ pip install cldk networkx
 
 ## Construct
 
-Use the per-language factory for the language you want: `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)`, or `CLDK.c(project_path)`. The analysis level determines how much is computed.
+Use the per-language factory for the language you want: `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)`, or `CLDK.c(project_path)`. The analysis level controls how much CLDK computes.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -64,7 +64,7 @@ print(len(analysis.get_classes()), "classes")
 </Tabs>
 
 <Aside type="note" title="Old entry point is deprecated">
-The legacy form `CLDK(language="java").analysis(project_path=...)` still works but is **deprecated**; it forwards to the factories above. Prefer `CLDK.java(...)` / `CLDK.python(...)` / `CLDK.typescript(...)` / `CLDK.c(...)`. `from cldk import CLDK` is unchanged.
+The legacy form `CLDK(language="java").analysis(project_path=...)` still works, but it is **deprecated**. It forwards to the factories above. Use `CLDK.java(...)`, `CLDK.python(...)`, `CLDK.typescript(...)`, or `CLDK.c(...)` instead. `from cldk import CLDK` does not change.
 </Aside>
 
 | Argument | Value | Notes |
@@ -78,7 +78,7 @@ The legacy form `CLDK(language="java").analysis(project_path=...)` still works b
 
 ## Select a backend
 
-The backend is chosen by the **type** of the `backend=` config object, imported from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default in-process codeanalyzer backend. `cache_dir`, `use_codeql`, and `use_ray` now live **inside** these configs.
+The **type** of the `backend=` config object selects the backend. Import these types from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default in-process codeanalyzer backend. `cache_dir`, `use_codeql`, and `use_ray` live **inside** these configs.
 
 ```python
 from cldk import CLDK
@@ -110,10 +110,12 @@ analysis = CLDK.typescript(
 | --- | --- | --- |
 | (omit) / `CodeAnalyzerConfig` | In-process codeanalyzer | Default for Java/TypeScript. `cache_dir` only. |
 | `PyCodeAnalyzerConfig` | In-process codeanalyzer (Python) | Default for Python. Adds `use_codeql` / `use_ray`. |
-| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional; the graph is loaded out of band — see [Analysis at scale](/at-scale/). |
+| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional. The graph is loaded out of band. See [Analysis at scale](/at-scale/). |
 
-<Aside type="note" title="Caching & removed arguments">
-Caching is **on by default** for Java/TS. Artifacts live under a unified, language-keyed `cache_dir` (default `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`). The old `analysis_backend_path` argument is **removed** (the binary ships with the packaged `codeanalyzer-*`; for the TypeScript backend, override the binary via the `$CODEANALYZER_TS_BIN` environment variable), and `analysis_json_path` is **removed** (folded into `cache_dir`).
+<Aside type="note" title="Caching and removed arguments">
+Caching is **on by default** for Java and TypeScript. Artifacts live under one language-keyed `cache_dir`. The default is `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`.
+
+The `analysis_backend_path` argument is **removed**. The binary ships inside the packaged `codeanalyzer-*`. For the TypeScript backend, set the binary with the `$CODEANALYZER_TS_BIN` environment variable. The `analysis_json_path` argument is **removed** too, and `cache_dir` replaces it.
 </Aside>
 
 ## Symbol table
@@ -125,7 +127,7 @@ The layer available at every analysis level: every class, method, and field, typ
 | `get_symbol_table()` | `Dict[str, JCompilationUnit \| PyModule]` | The entire project, indexed by file. |
 | `get_classes()` | `Dict[str, JType \| PyClass]` | Every class or type, keyed by qualified name. |
 | `get_methods()` | `Dict` | Every method (Java). |
-| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | A single method; `.code` holds its source body. |
+| `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| None` | One method. `.code` holds its source body. |
 
 ```python
 m = analysis.get_method(
@@ -134,9 +136,9 @@ m = analysis.get_method(
 print(m.code)  # -> source body of OptionBuilder.create(java.lang.String)
 ```
 
-Java additionally provides class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`, along with `get_all_crud_operations()` and `get_all_comments()`.
+Java also gives you class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`. It also gives you `get_all_crud_operations()` and `get_all_comments()`.
 
-## Call graph & reachability
+## Call graph and reachability
 
 <Aside type="caution" title="Build at the right level">
 These methods need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not populate call edges.
@@ -170,7 +172,7 @@ print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
 
 ## Models
 
-The typed objects returned by each language's analysis API.
+The typed objects that each language analysis API returns.
 
 | Language | Models |
 | --- | --- |
@@ -180,14 +182,14 @@ The typed objects returned by each language's analysis API.
 ## Gotchas
 
 <Aside type="caution" title="Common mistakes">
-- **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` won't have call edges.
-- **Analysis is project-based.** Always pass `project_path=...` to the factory (e.g. `CLDK.java(project_path=...)`); point it at the project root. (The exception is the Neo4j backend, where the graph is populated out of band and `project_path` is optional.)
+- **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not have call edges.
+- **Analysis is project-based.** Always pass `project_path=...` to the factory, for example `CLDK.java(project_path=...)`. Point it at the project root. The Neo4j backend is the exception: the graph is populated out of band, so `project_path` is optional.
 </Aside>
 
 ## Next steps
 
 <CardGrid>
   <LinkCard title="Common tasks" description="Copy-paste snippets for each call above." href="/guides/common-tasks/" />
-  <LinkCard title="cocoa" description="Build a Code Context Agent plugin on these methods." href="/cocoa/" />
+  <LinkCard title="COCOA" description="Build a Code Context Agent plugin on these methods." href="/cocoa/" />
   <LinkCard title="Python API reference" description="Every method on the Python SDK analysis APIs." href="/reference/python-api/" />
 </CardGrid>

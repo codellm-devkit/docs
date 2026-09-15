@@ -25,18 +25,18 @@
   </a>
 </p>
 
-Codellm-Devkit (CLDK) is a multilingual program analysis framework for CodeLLM workflows. It turns source code into structured program facts such as symbols, method bodies, call graphs, and data-model objects that an LLM pipeline can query.
+CodeLLM-DevKit (CLDK) is a multilingual program-analysis framework for CodeLLM workflows. It turns source code into structured program facts: symbols, method bodies, call graphs, and data-model objects. An LLM pipeline can query these facts.
 
-CLDK is an open-source Python library over language-specific analysis backends. The user calls one API; the backend handles parsing, symbol resolution, and graph construction for the selected language.
+CLDK is an open-source Python library over language-specific analysis backends. You call one API. The backend parses the source, resolves the symbols, and builds the graph for that language.
 
-**The purpose of Codellm-Devkit is to help build analysis pipelines that combine program-analysis results with CodeLLMs.**
-It gives those pipelines a consistent shape across languages and analysis tools.
+**CLDK helps you build analysis pipelines that combine program-analysis results with CodeLLMs.**
+Those pipelines keep the same shape across languages and analysis tools.
 
 CLDK integrates with tools such as WALA, Tree-sitter, LLVM, and CodeQL. It normalizes their outputs into typed models that downstream code can consume.
 
 CLDK is an ongoing IBM Research project.
 
-Codellm-Devkit is:
+CLDK is:
 
 - **Unified**: one API over language-specific analysis backends.
 - **Extensible**: new backends can add languages or analysis tools.
@@ -50,7 +50,7 @@ For any questions, feedback, or suggestions, please contact the authors:
 | ---- | ----- |
 | Rahul Krishna | [i.m.ralk@gmail.com](mailto:imralk+oss@gmail.com) |
 | Rangeet Pan | [rangeet.pan@ibm.com](mailto:rangeet.pan@gmail.com) |
-| Saurabh Sihna | [sinhas@us.ibm.com](mailto:sinhas@us.ibm.com) |
+| Saurabh Sinha | [sinhas@us.ibm.com](mailto:sinhas@us.ibm.com) |
 ## Table of Contents
 
 - [Contact](#contact)
@@ -66,7 +66,7 @@ For any questions, feedback, or suggestions, please contact the authors:
 
 ## Architectural and Design Overview
 
-Below is a high-level view of CLDK's architecture:
+This diagram shows the architecture of CLDK:
 
 
 ```mermaid
@@ -94,45 +94,45 @@ User <--> A[CLDK]
 X[‡ Yet to be implemented]
 ```
 
-The user invokes the CLDK API. CLDK delegates the request to the language-specific module.
+You call the CLDK API. CLDK sends the request to the module for that language.
 
 Each language has two main components: data models and backends.
 
 1. **Data Models:** Pydantic models for language constructs such as files, classes, methods, fields, and call edges. They support attribute access and serialization.
 
-2. **Analysis Backends:** Components that call program-analysis tools such as Treesitter, Javaparser, WALA, LLVM, and CodeQL. The user calls high-level methods such as `get_method_body`, `get_method_signature`, or `get_call_graph`; the backend runs the required analysis and returns the result.
+2. **Analysis Backends:** Components that call program-analysis tools such as Tree-sitter, Javaparser, WALA, LLVM, and CodeQL. You call high-level methods such as `get_method_body`, `get_method_signature`, or `get_call_graph`. The backend runs the analysis and returns the result.
 
-    Some languages may have multiple backends. For example, Java uses WALA, Javaparser, Treesitter, and CodeQL-backed analysis.
+    A language can have several backends. For example, Java uses WALA, Javaparser, Tree-sitter, and CodeQL-backed analysis.
 
-Retrieval and prompting components are still in progress. Retrieval will pull relevant code snippets for RAG use cases. Prompting will generate CodeLLM prompts with frameworks such as `PDL`, `Guidance`, or `LMQL`.
+The retrieval and prompting components are not complete. Retrieval will collect relevant code snippets for RAG use cases. Prompting will generate CodeLLM prompts with frameworks such as `PDL`, `Guidance`, or `LMQL`.
 
 ## Quick Start: Example Walkthrough
 
-In this section, we will walk through a simple example to demonstrate how to use CLDK. We will:
+This section shows how to use CLDK. The example has two parts:
 
-* Set up a local ollama server to interact with CodeLLMs
-* Build a simple code summarization pipeline for a Java and a Python application.
+* Install a local Ollama server for CodeLLMs
+* Build a code summarization pipeline for a Java application
 
 ### Prerequisites
 
-Before we begin, make sure you have the following prerequisites installed:
+You need:
 
   * Python 3.11 or later
   * Ollama v0.3.4 or later
 
 ### Step 1:  Set up an Ollama server
 
-If don't already have ollama, please download and install it from here: [Ollama](https://ollama.com/download). 
+If you do not have Ollama, download and install it from [ollama.com](https://ollama.com/download).
 
-Once you have ollama, start the server and make sure it is running.
+Then start the server.
 
-If you're on MacOS, Linux, or WSL, you can check to make sure the server is running by running the following command:
+On macOS, Linux, or WSL, make sure that the server runs:
 
 ```bash
 sudo systemctl status ollama
 ```
 
-You should see an output similar to the following:
+The output looks like this:
 
 ```bash
 ➜ sudo systemctl status ollama
@@ -147,7 +147,7 @@ You should see an output similar to the following:
              └─23069 /usr/local/bin/ollama serve
 ```
 
-If not, you may have to start the server manually. You can do this by running the following command:
+If the server does not run, start it manually:
 
 ```bash
 sudo systemctl start ollama
@@ -155,19 +155,19 @@ sudo systemctl start ollama
 
 #### Pull the latest version of Granite 8b instruct model from ollama
 
-To pull the latest version of the Granite 8b instruct model from ollama, run the following command:
+Pull the latest Granite 8b instruct model:
 
 ```bash
 ollama pull granite-code:8b-instruct
 ```
 
-Check to make sure the model was successfully pulled by running the following command:
+Make sure that the model works:
 
 ```bash
 ollama run granite-code:8b-instruct 'Write a function to print hello world in python'
 ```
 
-The output should be similar to the following:
+The output looks like this:
 
 ```
 ➜ ollama run granite-code:8b-instruct 'Write a function to print hello world in python'
@@ -178,13 +178,13 @@ def say_hello():
 
 ### Step 2:  Install CLDK
 
-You may install the latest version of CLDK from [PyPi](https://pypi.org/project/cldk/):
+Install CLDK from [PyPI](https://pypi.org/project/cldk/):
 
-```python
+```bash
 pip install cldk
 ```
 
-Once CLDK is installed, you can import it into your Python code:
+Then import it into your Python code:
 
 ```python
 from cldk import CLDK
@@ -192,20 +192,20 @@ from cldk import CLDK
 
 ### Step 3:  Build a code summarization pipeline
 
-Now that we have set up the ollama server and installed CLDK, we can build a simple code summarization pipeline for a Java application.
+Now build a code summarization pipeline for a Java application.
 
-1. Let's download a sample Java (apache-commons-cli):
+1. Download a sample Java application (apache-commons-cli):
 
-    * Download and unzip the sample Java application:
+    * Download and unzip the archive:
         ```bash
         wget https://github.com/apache/commons-cli/archive/refs/tags/rel/commons-cli-1.7.0.zip -O commons-cli-1.7.0.zip && unzip commons-cli-1.7.0.zip
         ```
-    * Record the path to the sample Java application:
+    * Record the path to the application:
         ```bash
         export JAVA_APP_PATH=/path/to/commons-cli-1.7.0 
       ```
 
-Below is a simple code summarization pipeline for a Java application using CLDK. It does the following things:
+This pipeline summarizes every method in a Java application. The steps are:
 
 * Creates a new instance of the CLDK class (see comment `# (1)`)
 * Creates an analysis object over the Java application (see comment `# (2)`)
@@ -213,7 +213,7 @@ Below is a simple code summarization pipeline for a Java application using CLDK.
 * Iterates over all the classes in the file (see comment `# (4)`)
 * Iterates over all the methods in the class (see comment `# (5)`)
 * Gets the code body of the method (see comment `# (6)`)
-* Initializes the treesitter utils for the class file content (see comment `# (7)`)
+* Initializes the Tree-sitter utils for the class file content (see comment `# (7)`)
 * Sanitizes the class for analysis (see comment `# (8)`)
 * Formats the instruction for the given focal method and class (see comment `# (9)`)
 * Prompts the local model on Ollama (see comment `# (10)`)
@@ -293,10 +293,10 @@ if __name__ == "__main__":
 
 ---
 
-## Building the documentation site
+## Build the documentation site
 
-This documentation site is built with [Astro](https://astro.build/) +
-[Starlight](https://starlight.astro.build/) (migrated from MkDocs).
+This documentation site uses [Astro](https://astro.build/) and
+[Starlight](https://starlight.astro.build/).
 
 ```sh
 npm install
@@ -304,14 +304,13 @@ npm run dev        # dev server at http://localhost:4321
 npm run build      # production build into dist/
 ```
 
-### Regenerating the Python API reference
+### Regenerate the Python API reference
 
-The `src/content/docs/reference/python-api/{core,java,python,c-cpp}.md` pages are
-auto-generated from the release-tagged
-[`codellm-devkit/python-sdk`](https://github.com/codellm-devkit/python-sdk)
-with [griffe](https://mkdocstrings.github.io/griffe/) (the engine behind
-mkdocstrings). Run it from an environment where `cldk` is installed, so the
-re-exported schema models resolve to their real definitions:
+[griffe](https://mkdocstrings.github.io/griffe/) generates the
+`src/content/docs/reference/python-api/{core,java,python,c-cpp}.md` pages from the
+release-tagged [`codellm-devkit/python-sdk`](https://github.com/codellm-devkit/python-sdk).
+Run it in an environment that has `cldk` installed. The re-exported schema models
+then resolve to their real definitions:
 
 ```sh
 python -m venv .venv-docs && . .venv-docs/bin/activate
@@ -319,7 +318,7 @@ pip install cldk griffe            # or: pip install -e ../python-sdk
 python scripts/gen_api_docs.py     # pass --search-path ../python-sdk for a local checkout
 ```
 
-Deployment is automated by `.github/workflows/deploy.yml` on every push to
-`main`: it clones the python-sdk at its latest release tag, regenerates the API
-reference, builds the site, and publishes `dist/` to `gh-pages`
-(custom domain `codellm-devkit.info` via `public/CNAME`).
+`.github/workflows/deploy.yml` deploys the site on every push to the `astro`
+branch. The workflow clones the python-sdk at its latest release tag, regenerates
+the API reference, builds the site, and publishes `dist/` to `gh-pages`. The
+custom domain `codellm-devkit.info` comes from `public/CNAME`.

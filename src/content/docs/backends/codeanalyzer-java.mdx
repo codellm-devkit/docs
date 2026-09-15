@@ -1,30 +1,30 @@
 ---
 title: codeanalyzer-java
-description: "Technical reference for the Java analysis backend: WALA-based call graph construction, symbol extraction via Javaparser, and the CLI interface the Python SDK shells out to."
+description: "Technical reference for the Java analysis backend: WALA-based call graph construction, symbol extraction via Javaparser, and the CLI interface that the Python SDK runs."
 ---
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-java** backend is the JVM-based static analysis engine that provides Java analysis for the CLDK Python SDK. It combines WALA (T.J. Watson Libraries for Analysis) for semantic analysis with Javaparser for syntactic extraction, producing a unified JSON schema that the Python SDK deserializes into typed models.
+The **codeanalyzer-java** backend is the JVM-based static analysis engine for Java in the CLDK Python SDK. It uses WALA (T.J. Watson Libraries for Analysis) for semantic analysis and Javaparser for syntactic extraction. It writes one JSON schema, and the Python SDK deserializes that schema into typed models.
 
 ## Overview
 
-codeanalyzer-java is a **standalone JAR tool** that takes a Java project (or a source string) and emits a JSON graph containing:
+codeanalyzer-java is a **standalone JAR tool**. It takes a Java project, or a source string, and writes a JSON graph that contains:
 
 - **Symbol table**: All types (classes, interfaces, enums, records), their fields, methods/constructors, and imports
-- **Call graph** (optional, at analysis level 2): Edges between callers and callees, computed via WALA's interprocedural analysis
+- **Call graph** (optional, at analysis level 2): Edges between callers and callees, computed by the interprocedural analysis of WALA
 - **Type hierarchy**: Extends/implements relationships, nested types, parent-child relationships
 - **CRUD operations**: Database access patterns (INSERT, SELECT, UPDATE, DELETE) in enterprise code
-- **Comments & Javadoc**: Extracted and positioned for each entity
+- **Comments and Javadoc**: Extracted and positioned for each entity
 - **Entry points**: Main methods and framework-identified entry points (REST endpoints, Struts actions)
 
-The Python SDK invokes this backend, parses the JSON, and wraps it in `JavaAnalysis`, so callers interact with an `analysis` object rather than the backend directly. The backend is a JVM-free binary that ships with the packaged `codeanalyzer-java` PyPI dependency and is run via `python -m codeanalyzer_java`; there is no separate JAR download or `analysis_backend_path` override.
+The Python SDK runs this backend, parses the JSON, and wraps it in `JavaAnalysis`. You therefore work with an `analysis` object, not with the backend. The backend is a JVM-free binary. It ships inside the packaged `codeanalyzer-java` PyPI dependency and runs with `python -m codeanalyzer_java`. There is no separate JAR download and no `analysis_backend_path` override.
 
 ## Architecture
 
 ### Analysis pipeline
 
-The backend proceeds through the following stages:
+The backend has these stages:
 
 ```mermaid
 graph LR
@@ -244,7 +244,7 @@ At analysis level 2, a `call_graph` array of edges:
 
 ## CLI interface
 
-The jar is invoked via `java -jar codeanalyzer-*.jar` with these options:
+Run the jar with `java -jar codeanalyzer-*.jar` and these options:
 
 ### Usage
 
@@ -285,7 +285,7 @@ Convert a Java project into a system dependency graph.
 | `-o, --output` | Output directory for `analysis.json` | `-o ./analysis_output` |
 | `-a, --analysis-level` | `1` (symbol table only) or `2` (+ call graph) | `-a 2` |
 | `-b, --build-cmd` | Custom build command (Maven/Gradle) | `-b "mvn clean install"` |
-| `--no-build` | Skip building; use pre-compiled binaries | `--no-build` |
+| `--no-build` | Skip the build. Use pre-compiled binaries | `--no-build` |
 | `-v, --verbose` | Print debug logs | `-v` |
 | `-t, --target-files` | Incremental analysis on specific files | `-t src/Main.java src/Helper.java` |
 
@@ -329,12 +329,12 @@ java -jar codeanalyzer-2.3.7.jar \
 
 ## How the Python SDK uses it
 
-The Python SDK (`JavaAnalysis`) automates backend invocation:
+The Python SDK (`JavaAnalysis`) runs the backend for you:
 
-1. **Backend discovery**: The JVM-free backend ships with the packaged `codeanalyzer-java` PyPI dependency and is run via `python -m codeanalyzer_java`. There is no `analysis_backend_path` override anymore.
+1. **Backend discovery**: The JVM-free backend ships with the packaged `codeanalyzer-java` PyPI dependency and runs with `python -m codeanalyzer_java`. There is no `analysis_backend_path` override.
 2. **Invocation**: Calls the backend with `-i <project> -a <level> -o <cache_dir>` (or reads from stdout)
-3. **JSON parsing**: Deserializes the output into Pydantic models (`JApplication`, `JType`, `JCallable`, etc.)
-4. **Facade**: Wraps the models in `JavaAnalysis`, exposing query methods like `get_classes()`, `get_call_graph()`, `get_callers()`
+3. **JSON parsing**: Deserializes the output into Pydantic models such as `JApplication`, `JType`, and `JCallable`
+4. **Facade**: Wraps the models in `JavaAnalysis`, which gives you query methods such as `get_classes()`, `get_call_graph()`, and `get_callers()`
 
 ```python
 from cldk import CLDK
@@ -352,7 +352,7 @@ analysis = CLDK.java(
 )
 ```
 
-The old `CLDK(language="java").analysis(...)` form still works but is **deprecated**; prefer the `CLDK.java(...)` factory shown above. The `from cldk import CLDK` import is unchanged.
+The `CLDK(language="java").analysis(...)` form still works, but it is **deprecated**. Use the `CLDK.java(...)` factory shown above. The `from cldk import CLDK` import does not change.
 
 To control where analysis artifacts are cached, pass a backend config:
 
@@ -370,9 +370,9 @@ analysis = CLDK.java(
 
 ### Keyword arguments
 
-`CLDK.java(...)` accepts `project_path`, `analysis_level`, `target_files`, and `eager`. The backend is selected by the **type** of the `backend=` config; for Java the only backend is the in-memory codeanalyzer (`CodeAnalyzerConfig`), so omit `backend=` for the default. Pass `backend=CodeAnalyzerConfig(cache_dir=...)` only to override where artifacts are cached. Caching is **on by default**; the cache root defaults to `<project>/.codeanalyzer` and artifacts are written under a language-keyed subdirectory (`<cache_dir>/java/`).
+`CLDK.java(...)` accepts `project_path`, `analysis_level`, `target_files`, and `eager`. The **type** of the `backend=` config selects the backend. For Java the only backend is the in-memory codeanalyzer (`CodeAnalyzerConfig`), so omit `backend=` for the default. Pass `backend=CodeAnalyzerConfig(cache_dir=...)` only to change where artifacts are cached. Caching is **on by default**. The cache root defaults to `<project>/.codeanalyzer`, and artifacts go under a language-keyed subdirectory (`<cache_dir>/java/`).
 
-Java also accepts `source_code=...` for analyzing a single Java source string, but this is **deprecated**; prefer `project_path`.
+Java also accepts `source_code=...` for a single Java source string, but this argument is **deprecated**. Use `project_path` instead.
 
 ```python
 analysis = CLDK.java(source_code="public class Test {}")  # deprecated; prefer project_path
@@ -417,24 +417,24 @@ To build codeanalyzer-java from source:
 </Steps>
 
 <Aside type="note" title="Native compilation">
-A native binary can also be built with GraalVM (`./gradlew nativeCompile`). The JAR is the standard distribution method, as the SDK expects a JVM.
+GraalVM can also build a native binary (`./gradlew nativeCompile`). The JAR is the standard distribution, because the SDK expects a JVM.
 </Aside>
 
 ## Schema stability
 
-The JSON schema emitted by codeanalyzer-java is **versioned**. Each output includes a `version` field (for example, `"2.3.7"`). The Python SDK's Pydantic models (`JApplication`, `JType`, and others) are locked to a compatible schema version. On incompatibility, the SDK logs a warning or error.
+The JSON schema from codeanalyzer-java is **versioned**. Each output includes a `version` field, for example `"2.3.7"`. The Pydantic models of the Python SDK (`JApplication`, `JType`, and others) are locked to a compatible schema version. If the versions do not match, the SDK logs a warning or an error.
 
-When integrating codeanalyzer-java directly rather than through the Python SDK, ensure the consumer can handle the schema for the version in use.
+If you integrate codeanalyzer-java directly instead of through the Python SDK, make sure that the consumer can handle the schema for the version in use.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `java: command not found` | No JDK on PATH | Install Java 11+, add to PATH |
-| `Cannot find symbol type X` | Missing library dependencies | Use `--no-build` if pre-compiled; ensure dependencies are on classpath |
-| `analysis.json is corrupt` | Incomplete write or killed process | Check disk space; re-run analysis |
+| `Cannot find symbol type X` | Missing library dependencies | Use `--no-build` for pre-compiled code. Make sure that dependencies are on the classpath |
+| `analysis.json is corrupt` | Incomplete write or killed process | Make sure that there is disk space. Run the analysis again |
 | `symbol table uses legacy import schema` | Running old JAR against new analysis.json | Regenerate with latest JAR (v2.3.7+) |
-| `WALA call graph is empty` | No entry point found for analysis | Verify project has a `main(String[])` method or frameworks detected |
+| `WALA call graph is empty` | No entry point found for analysis | Make sure that the project has a `main(String[])` method, or that frameworks are detected |
 
 ## References
 
@@ -446,4 +446,4 @@ When integrating codeanalyzer-java directly rather than through the Python SDK, 
 
 ---
 
-To report a limitation, open an [issue](https://github.com/IBM/codeanalyzer-java/issues) with details. See [Contributing](/contributing/) for guidance on extending the backend.
+To report a limitation, open an [issue](https://github.com/IBM/codeanalyzer-java/issues) with details. See [Contributing](/contributing/) for how to extend the backend.
