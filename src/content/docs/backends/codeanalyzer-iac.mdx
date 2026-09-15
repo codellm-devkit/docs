@@ -1,0 +1,135 @@
+---
+title: codeanalyzer-iac
+description: "The infrastructure-as-code backend. It turns Helm charts into the canonical schema v2 IaC model, as analysis.json or a Neo4j property graph."
+---
+
+import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs/starlight/components";
+
+<p><Badge text="Beta" variant="caution" /></p>
+
+The **codeanalyzer-iac** backend analyzes infrastructure-as-code. Its command is **`caniac`**. It reads a repository, or a Neo4j graph that already holds one, and publishes one typed model of the infrastructure sources.
+
+`caniac` is built on the [Helm](https://helm.sh/) SDK, pinned to version 4.2.4. It never calls the `helm` CLI. Helm is the first dialect. Every other file stays an ordinary `Artifact`, and the analyzer never drops it.
+
+<Aside type="caution" title="There is no CLDK.iac(...) factory yet">
+The other backends have a matching SDK facade. This one does not. Use `caniac` as a command, or read the graph that it writes. Java, Python, and TypeScript analyses are unaffected.
+</Aside>
+
+## Install
+
+<Tabs>
+  <TabItem label="Shell">
+    Prebuilt binary for macOS and Linux:
+
+    ```bash
+    curl --proto '=https' --tlsv1.2 -LsSf https://github.com/codellm-devkit/codeanalyzer-iac/releases/latest/download/caniac-installer.sh | sh
+    ```
+  </TabItem>
+  <TabItem label="Homebrew">
+    ```bash
+    brew install codellm-devkit/tap/codeanalyzer-iac
+    ```
+  </TabItem>
+  <TabItem label="pip">
+    ```bash
+    pip install codeanalyzer-iac
+    ```
+  </TabItem>
+</Tabs>
+
+## Analyze a repository
+
+```bash
+caniac --app-name payments .
+caniac --app-name payments charts/ deploy/values-prod.yaml
+caniac --app-name payments --workspace-root . charts/api
+```
+
+Paths can be files or directories, and they can overlap. They are selection filters, not identity roots. Identity comes from `--workspace-root`, which defaults to the current directory. `charts/api/values.yaml` is therefore the same artifact whether you selected the repository, `charts/`, or that one file.
+
+Every input file and every `--config` file must resolve below the workspace root. The analyzer does not follow symlinks out of it, and the walker skips `.git`.
+
+With no path, the input is `.`. With no `--app-name`, the application takes the base name of the workspace root. In graph mode a name is mandatory.
+
+## Analysis levels
+
+<Aside type="caution" title="This scale is not the SDK scale">
+`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and level 4 here is rejected rather than accepted. Read this table, not the [dataflow levels](/guides/dataflow/#the-four-analysis-levels).
+</Aside>
+
+| Level | Adds | Never does |
+| --- | --- | --- |
+| L1 | Artifact classification, Helm facets, chart metadata, values keys, template definitions, template calls, value references, resource templates, source diagnostics | Resolution or rendering |
+| L2 | Chart membership, dependency resolution, named-template targets, value-reference targets, unresolved records | Rendering or any I/O |
+| L3 | Render profiles, value layers, renders, rendered Kubernetes resources and addresses | Cluster access, install, upgrade, dependency fetching |
+
+`-a/--analysis-level` takes 1, 2, or 3, and defaults to 1. The levels are additive. Every fact that a lower level published is present, unchanged, at every higher level.
+
+The graph always receives the deepest implemented level, which is L3 today. `--emit cypher` and `--emit neo4j` therefore raise the level to 3 unless you passed `--analysis-level` yourself. An explicit level below 3 with those targets is rejected rather than raised without a word.
+
+```bash
+caniac testdata/helm/l1-v2 --app-name payments --analysis-level 1 > analysis.json
+
+caniac --workspace-root testdata/helm/profiles --app-name payments \
+       --config .codeanalyzer-iac.yaml --analysis-level 3 > analysis.json
+```
+
+## Output modes
+
+| `--emit` | Writes | To stdout | To `-o DIR` |
+| --- | --- | --- | --- |
+| `json` (filesystem default) | The analysis document | Compact JSON, one trailing newline | `analysis.json` |
+| `cypher` | The replayable projection script | The script | `graph.cypher` |
+| `neo4j` (graph-mode default) | A reconciled generation over Bolt | Nothing | Nothing |
+| `schema` | The embedded graph catalog | `schema.neo4j.json` | `schema.neo4j.json` |
+
+In filesystem mode, `--emit cypher` never consults the target graph. The script is projected from the analysis alone, so it has no hash-conflict guard against facts that are already in the graph. `--emit neo4j` does have that guard.
+
+`--emit schema` takes no input path. `-f/--format` accepts only `json`. `msgpack` is named so that the analyzer can reject it with a clear message instead of a bad parse. `-j/--jobs` bounds parallel parsing and rendering, and it defaults to the CPU count. The output is byte-identical whatever you set it to.
+
+Stdout carries analysis data and nothing else. Errors go to stderr, one line each. A successful run leaves stderr empty. The analyzer discards the value-coalescing warnings that Helm itself emits, rather than letting them onto either stream.
+
+## Graph mode
+
+A single positional Neo4j or Bolt URI switches the analyzer into graph mode.
+
+```bash
+caniac neo4j://localhost:7687 --app-name payments
+```
+
+In graph mode the analyzer reads the complete `Artifact.source` for every `can://artifact/<app-name>/...` node, makes sure that each one matches the stored `sha256`, and writes its enrichment back onto those same nodes.
+
+`--app-name` is required here. The URI names a database, not an application, and the analyzer will not pick one for you. You cannot mix a URI and filesystem paths in one invocation. In graph mode `--emit` defaults to `neo4j`, so the command above reads and writes the same database over one connection.
+
+If a source does not match its recorded hash, that becomes a diagnostic on the artifact and the analyzer skips its semantic model. The recorded spans address the old text, so a changed source makes every one of them wrong. Other artifacts are analyzed normally. There is no flag to accept a mismatch.
+
+## Exit status
+
+| Exit | Meaning |
+| --- | --- |
+| 0 | The analysis completed |
+| 1 | An analyzer-wide failure, or `--strict` with at least one error-severity diagnostic |
+
+Isolated failures are diagnostics inside the model, not process failures. An unparsable file, or a chart that the analyzer cannot render, still exits 0. A file that the analyzer cannot read as text stays a raw inventory entry, with a digest and no source, and reports `IAC_SOURCE_NOT_TEXT` at `warning` severity. A repository with binaries in it therefore still passes `--strict`.
+
+Whether a document is published on exit 1 depends on how far the run got:
+
+- An invalid configuration and a `--strict` failure are both decided after the analysis is written, so those runs still leave a document to read.
+- An unreadable input root, an unreachable graph, and a failed graph commit all end the run before that write, so they publish nothing.
+
+`--strict` changes only the exit status. It never changes the document.
+
+`--eager` reconciles away the stale facts that this analyzer owns for the selected application: `codeanalyzer-iac` nodes and aliases, `iac_*` properties, facet labels, and `IAC_*` relationships. It never removes an `Artifact`.
+
+## Schema
+
+The repository pins the accepted `codeanalyzer-schema` contract at commit [`b84428f`](https://github.com/codellm-devkit/codeanalyzer-schema/commit/b84428f1accebe2b259d32c15387f04a00167f2c). `make schema-check` and the pin-parity test keep every copy of that commit in step.
+
+## See also
+
+<CardGrid>
+  <LinkCard title="Backends overview" href="/backends/" description="All CLDK analysis backends and their maturity tiers." />
+  <LinkCard title="Analysis at scale" href="/at-scale/" description="The emit and poll split that this backend writes into." />
+  <LinkCard title="Deploy on Kubernetes" href="/at-scale/kubernetes/" description="Scheduled emit jobs against a shared Neo4j." />
+  <LinkCard title="Source repository" href="https://github.com/codellm-devkit/codeanalyzer-iac" description="codellm-devkit/codeanalyzer-iac on GitHub." />
+</CardGrid>

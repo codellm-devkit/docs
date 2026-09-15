@@ -60,6 +60,8 @@ print(analysis.get_call_graph())          # -> networkx.DiGraph
 
 <Aside type="note" title="Analysis levels">
   `analysis_level` defaults to `AnalysisLevel.symbol_table`, which resolves classes, methods, and fields. Call graphs, callers, and callees need `AnalysisLevel.call_graph`. If you want call relationships, you must set this level.
+
+  CLDK 2.0 adds two deeper levels, `program_dependency_graph` and `system_dependency_graph`, which build dataflow. See [Dataflow graphs](/guides/dataflow/).
 </Aside>
 
 A language-specific backend sits behind the same API:

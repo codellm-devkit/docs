@@ -1,0 +1,182 @@
+---
+title: Dataflow graphs
+description: "Levels 3 and 4 build dataflow: control-flow, control-dependence, and data-dependence graphs, with slicing, reachability, and flow paths over them."
+---
+
+import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
+
+<p><Badge text="New in 2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
+
+Levels 1 and 2 answer questions about structure. Levels 3 and 4 answer questions about values: where a value comes from, where it goes, and which route it takes.
+
+<Aside type="caution" title="These methods need CLDK 2.0">
+Levels 3 and 4, and every method on this page, arrive in CLDK 2.0. Version 2.0 is a release candidate today, so `pip install cldk` gives you 1.5.0 instead. To get the pre-release, run:
+
+```bash frame="none"
+pip install --pre cldk
+```
+</Aside>
+
+## The four analysis levels
+
+The analysis level controls how much work CLDK does when it builds the `analysis` object. Each level is a superset of the level below it.
+
+| Level | `AnalysisLevel` member | Analyzer `-a` | What it adds |
+| --- | --- | --- | --- |
+| 1 | `symbol_table` | 1 | Classes, methods, fields, and signatures |
+| 2 | `call_graph` | 2 | Caller and callee edges |
+| 3 | `program_dependency_graph` | 3 | Intraprocedural dataflow inside each callable |
+| 4 | `system_dependency_graph` | 4 | Interprocedural dataflow across call boundaries |
+
+Levels 1 and 2 are the two levels that CLDK 1.x has. Levels 3 and 4 are new.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="my_pkg",
+    analysis_level=AnalysisLevel.system_dependency_graph,   # level 4
+)
+```
+
+<Aside type="note" title="Level 3 or level 4">
+Level 3 builds dataflow inside each callable. A value that crosses a call boundary needs level 4. If a flow query returns less than you expect, build the analysis again at `system_dependency_graph`.
+</Aside>
+
+## Three graphs for each callable
+
+Level 3 builds three graphs for every callable. Each accessor returns an `EdgePage`.
+
+| Method | Graph | Edge type |
+| --- | --- | --- |
+| `get_cfg(callable, ...)` | Control flow | `CfgEdge` |
+| `get_cdg(callable, ...)` | Control dependence | `CdgEdge` |
+| `get_ddg(callable, ...)` | Data dependence | `DdgEdge` |
+
+An `EdgePage` carries `edges`, `total`, and `next_cursor`. The page size defaults to the SDK page size. To read the next page, pass `next_cursor` back as `cursor`.
+
+```python
+page = analysis.get_ddg("parse", in_class="my_pkg.parser.Parser")
+print(page.total, "edges in total")
+
+for edge in page.edges:
+    print(edge)
+
+while page.next_cursor:
+    page = analysis.get_ddg(
+        "parse", in_class="my_pkg.parser.Parser", cursor=page.next_cursor
+    )
+```
+
+## Address a value before you query it
+
+Flow queries take a value name and the callable that holds it. Three methods turn what you know into what the graph uses.
+
+| Method | Returns | Use it to |
+| --- | --- | --- |
+| `resolve_callable(name, *, in_class=None, in_module=None)` | `SliceNode` | Find one callable by name |
+| `resolve_value(name, *, within)` | `SliceNode` | Find one value inside a callable |
+| `locate(path, line)` | `LocateResult` | Go from a file and a line to the node there |
+
+`locate` is the bridge from a scanner alert or a stack trace into the graph. `locate_many(positions)` does the same for a batch. A `LocateResult` carries `callable`, `type`, `module`, `source`, `span`, `node_id`, and `diagnostics`.
+
+```python
+hit = analysis.locate("my_pkg/parser.py", 118)
+print(hit.callable.signature)
+print(hit.span.start, hit.span.end)
+```
+
+`get_source(node_id)` returns the source text for a node. `describe(nodes)` turns raw node ids back into `SliceNode` objects, each with `file`, `line`, `callable`, `kind`, `name`, and `ref`.
+
+## Slice a program
+
+A slice is the set of nodes that a value reaches, or that reach a value.
+
+| Method | Direction | Answers |
+| --- | --- | --- |
+| `slice_forward(src, *, within, ...)` | Forward | Where does this value go? |
+| `slice_backward(src, *, within, ...)` | Backward | What determined this value? |
+| `backward_cone(sinks, *, ...)` | Backward, many sinks | What feeds any of these sinks? |
+
+Each returns a `Slice` with `nodes`, `roots`, `resolved`, `total`, and `diagnostics`. `total` reports how far the value reaches, even when `max_nodes` cut the returned list.
+
+```python
+sl = analysis.slice_forward("invoice_id", within="PaymentPortal.invoice_transaction")
+print(sl.total, "nodes reached")
+for node in sl.nodes:
+    print(f"{node.file}:{node.line}  {node.kind}  {node.name}")
+```
+
+Both slicing methods take `depth` and `max_nodes` bounds. `backward_cone` takes a sequence of sinks and answers for all of them in one traversal.
+
+## Reachability and paths
+
+| Method | Returns | Answers |
+| --- | --- | --- |
+| `reaches(src, dst, *, depth=None)` | `bool` | Does this value reach that one? |
+| `flows_to_call(src, callee, *, within, ...)` | `bool` | Does it reach a call to this callee? |
+| `flows_to_argument(src, callee, arg, *, within, ...)` | `bool` | Does it reach that argument? |
+| `paths_between(src, dst, *, src_within, dst_within, ...)` | `FlowPaths` | Which routes does it take? |
+| `call_paths_between(src, dst, *, ...)` | `FlowPaths` | Which call routes connect them? |
+
+The boolean methods are the cheap question. `paths_between` is the expensive one, because it returns the witnesses.
+
+```python
+flows = analysis.paths_between(
+    "invoice_id", "query",
+    src_within="PaymentPortal.invoice_transaction",
+    dst_within="AccountMove._execute",
+)
+
+for path in flows.paths:
+    print(" -> ".join(hop.to.name for hop in path.hops))
+```
+
+A `FlowPaths` carries `paths` and `complete`. `complete` is `False` when `max_paths` cut the list. Each `FlowPath` carries `hops`, and each `PathHop` carries `frm`, `to`, `via`, `var`, and `prov`.
+
+<Aside type="caution" title="An empty path list is not a refutation">
+`paths_between` returns `[]` both when no flow exists and when the flow left the resolved graph. The list alone cannot tell you which happened. For a claim that a value does **not** reach a sink, use [`taint()`](/guides/taint/), which reports that case in its own `exhausted` field.
+</Aside>
+
+## How certain a path is
+
+Each hop records its provenance in `prov`. The three values rank by certainty:
+
+```
+ssa  >  reaching-defs  >  points-to
+```
+
+`ssa` is the strongest and `points-to` is the most approximate. An unlabelled hop is strongest of all.
+
+The weakest hop caps how strongly you can state the whole flow. `FlowPath.weakest` returns that hop:
+
+```python
+path = flows.paths[0]
+print(path.weakest.via, path.weakest.prov)
+```
+
+`weakest` is a property rather than a stored field, so it can never disagree with `hops`. When two hops tie, the earliest one wins, which keeps the answer reproducible.
+
+## Language support
+
+Java, Python, and TypeScript expose the same dataflow surface through their analysis facades.
+
+| Capability | Java | Python | TypeScript |
+| --- | --- | --- | --- |
+| `get_cfg` / `get_cdg` / `get_ddg` | Yes | Yes | Yes |
+| `slice_forward` / `slice_backward` / `backward_cone` | Yes | Yes | Yes |
+| `reaches` / `flows_to_call` / `flows_to_argument` | Yes | Yes | Yes |
+| `paths_between` / `call_paths_between` | Yes | Yes | Yes |
+| `taint` | Yes | Yes | Yes |
+| `locate` / `locate_many` | Yes | Yes | Yes |
+
+Java also exposes `get_system_dependency_graph()` on its backend, which returns the level-4 edges as a list of `JGraphEdges`.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Taint analysis" description="Source-to-sink queries with sanitizer cuts, and what a refutation does and does not claim." href="/guides/taint/" />
+  <LinkCard title="Core concepts" description="Symbol tables, call graphs, and the analysis levels that build them." href="/guides/concepts/" />
+  <LinkCard title="Cheat sheet" description="Every dataflow and taint method in one table." href="/resources/cheatsheet/" />
+</CardGrid>

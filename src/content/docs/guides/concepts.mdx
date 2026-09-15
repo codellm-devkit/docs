@@ -3,7 +3,7 @@ title: Core concepts
 description: Symbol tables, call graphs, and the analysis levels that produce them.
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
 CLDK analyzes a project and gives you structured program facts through one `analysis` object. The call graph answers questions about structure, such as which methods call a given method. You do not read the source files yourself.
 
@@ -126,10 +126,14 @@ CLDK gives you the graph as a `networkx.DiGraph` (edges point from caller to cal
 
 ## Analysis levels
 
-The **analysis level** controls how much work CLDK does when it builds the `analysis` object. There are two:
+The **analysis level** controls how much work CLDK does when it builds the `analysis` object. There are four. Each level is a superset of the level below it.
 
 - `AnalysisLevel.symbol_table`: the **default**. Resolves structure (classes, methods, fields, signatures). Fast, and enough for symbol-table queries.
 - `AnalysisLevel.call_graph`: also computes call edges. **Required** for `get_call_graph`, `get_callers`, and `get_callees`.
+- `AnalysisLevel.program_dependency_graph`: also builds dataflow inside each callable. <Badge text="2.0" variant="caution" />
+- `AnalysisLevel.system_dependency_graph`: also builds dataflow across call boundaries. <Badge text="2.0" variant="caution" />
+
+Levels 1 and 2 are the two levels that CLDK 1.x has. Levels 3 and 4 arrive in CLDK 2.0, which is a release candidate today. See [Dataflow graphs](/guides/dataflow/) for what they build and [Taint analysis](/guides/taint/) for the queries over them.
 
 ```python
 from cldk import CLDK
@@ -155,6 +159,7 @@ Java has a single-file mode, `CLDK.java(source_code="...")`, for quick syntactic
 
 <CardGrid>
   <LinkCard title="Common tasks" description="Copy-paste snippets for each of these queries on a real project." href="/guides/common-tasks/" />
+  <LinkCard title="Dataflow graphs" description="Levels 3 and 4: control flow, data dependence, slicing, and flow paths." href="/guides/dataflow/" />
   <LinkCard title="COCOA" description="Build a Code Context Agent plugin over symbol tables and call graphs." href="/cocoa/" />
   <LinkCard title="Java API reference" description="Every method on the most complete analysis API." href="/reference/python-api/java/" />
 </CardGrid>

@@ -5,7 +5,7 @@ description: "CLDK is a Python frontend over standalone per-language backends, t
 
 import { Badge, CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-**Standalone language backends** parse the source, resolve the symbols, and build the call graph. There is one backend for each language. Together they are the `codeanalyzer-*` tools. Each backend writes typed JSON. The SDK reads that JSON and builds models that you can query.
+**Standalone language backends** parse the source, resolve the symbols, and build the call graph. There is one backend for each language, and one more for infrastructure-as-code. Together they are the `codeanalyzer-*` tools. Each backend writes typed JSON. The SDK reads that JSON and builds models that you can query.
 
 ```mermaid
 flowchart LR
@@ -43,6 +43,7 @@ The `codeanalyzer-*` tools parse a language. Then they write the canonical symbo
 | **Python** | [codeanalyzer-python](/backends/codeanalyzer-python/) | <Badge text="Mature" variant="success" /> |
 | **TypeScript** | [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Beta" variant="caution" /> |
 | **JavaScript** | via [codeanalyzer-ts](/backends/codeanalyzer-ts/) | <Badge text="Medium" variant="tip" /> |
+| **IaC (Helm)** | [codeanalyzer-iac](/backends/codeanalyzer-iac/) | <Badge text="Beta" variant="caution" /> |
 | **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **C** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
@@ -55,5 +56,6 @@ The `codeanalyzer-*` tools parse a language. Then they write the canonical symbo
   <LinkCard title="codeanalyzer-python" description="Jedi-based semantic analysis with optional CodeQL call-graph augmentation. Writes the canonical Py* schema." href="/backends/codeanalyzer-python/" />
   <LinkCard title="codeanalyzer-java" description="WALA and Javaparser. Produces symbol tables, call graphs, type hierarchy, and CRUD analysis." href="/backends/codeanalyzer-java/" />
   <LinkCard title="codeanalyzer-ts" description="Beta. The TypeScript and TSX backend. It writes the canonical symbol-table and call-graph schema. Entrypoint detection is not complete." href="/backends/codeanalyzer-ts/" />
+  <LinkCard title="codeanalyzer-iac" description="Beta. The infrastructure-as-code backend. It turns Helm charts into the canonical schema v2 IaC model, as JSON or a Neo4j graph." href="/backends/codeanalyzer-iac/" />
   <LinkCard title="Add a backend" description="Help wanted. Go, Rust, C, C++, and C# do not exist yet. A backend that writes the canonical JSON makes that language available to every SDK." href="/contributing/add-language-backend/" />
 </CardGrid>

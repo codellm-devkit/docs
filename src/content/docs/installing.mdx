@@ -3,7 +3,7 @@ title: Installing CLDK
 description: Install the CLDK Python package and the language backends that it needs.
 ---
 
-import { Tabs, TabItem } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
 
 [`CLDK`](https://github.com/IBM/codellm-devkit) is a Python SDK on [PyPI](https://pypi.org/project/cldk/). You can install it with any Python package manager.
 
@@ -28,6 +28,10 @@ Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), 
     ```
   </TabItem>
 </Tabs>
+
+<Aside type="note" title="CLDK 2.0 is a release candidate">
+Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable release. `pip install cldk` gives you 1.5.0. To get the pre-release, run `pip install --pre cldk`. See [Dataflow graphs](/guides/dataflow/).
+</Aside>
 
 ## Language-specific dependencies
 
@@ -149,6 +153,29 @@ Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), 
     ```
 
     The package is named `codeanalyzer-typescript`, but the command is **`cants`**. To resolve library call targets, the backend needs the dependencies of the project. Keep `npm` on your `PATH`, and the backend creates `node_modules` for you. To skip this step, use `--no-build`. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
+  </TabItem>
+  <TabItem label="IaC Analysis">
+    For infrastructure-as-code analysis, CLDK uses a companion backend, [`codeanalyzer-iac`](/backends/codeanalyzer-iac/). Its command is `caniac`. It ships as a prebuilt binary and needs no Helm CLI.
+
+    Install it from PyPI:
+
+    ```bash
+    pip install codeanalyzer-iac
+    ```
+
+    Or with Homebrew:
+
+    ```bash
+    brew install codellm-devkit/tap/codeanalyzer-iac
+    ```
+
+    Make sure that the installation works:
+
+    ```bash
+    caniac --help
+    ```
+
+    There is no `CLDK.iac(...)` factory yet. Run `caniac` as a command, or read the Neo4j graph that it writes. For the analysis levels and output modes, see the [codeanalyzer-iac backend reference](/backends/codeanalyzer-iac/).
   </TabItem>
   <TabItem label="Rust Installation">
     Use rustup to install Rust and manage toolchains. rustup keeps Rust versions separate, and you can change between them.

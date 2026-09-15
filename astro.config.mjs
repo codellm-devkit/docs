@@ -154,6 +154,8 @@ export default defineConfig({
           items: [
             { label: "Core concepts", slug: "guides/concepts", attrs: { "data-cldk-icon": "learning-16" } },
             { label: "Common tasks", slug: "guides/common-tasks", attrs: { "data-cldk-icon": "workflow-16" } },
+            { label: "Dataflow graphs", slug: "guides/dataflow", attrs: { "data-cldk-icon": "diagram-tree-16" } },
+            { label: "Taint analysis", slug: "guides/taint", attrs: { "data-cldk-icon": "detection-16" } },
             {
               label: "Code Context Agent",
               slug: "cocoa",
@@ -204,6 +206,7 @@ export default defineConfig({
             { label: "codeanalyzer-python", slug: "backends/codeanalyzer-python", attrs: { "data-cldk-icon": "python" } },
             { label: "codeanalyzer-java", slug: "backends/codeanalyzer-java", attrs: { "data-cldk-icon": "java" } },
             { label: "codeanalyzer-ts", slug: "backends/codeanalyzer-ts", attrs: { "data-cldk-icon": "typescript" } },
+            { label: "codeanalyzer-iac", slug: "backends/codeanalyzer-iac", attrs: { "data-cldk-icon": "cloud-16" } },
           ],
         },
         {

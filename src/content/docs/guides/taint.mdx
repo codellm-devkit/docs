@@ -1,0 +1,164 @@
+---
+title: Taint analysis
+description: "Ask which sources reach which sinks in one traversal, cut the flow with sanitizers, and read what the result claims about the ones that do not."
+---
+
+import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs/starlight/components";
+
+<p><Badge text="New in 2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
+
+`taint()` asks m sources against n sinks in one traversal. For each pair it reports one of three outcomes: a flow was found, no flow was found, or the search cannot finish.
+
+<Aside type="caution" title="This method needs CLDK 2.0">
+`taint()` arrives in CLDK 2.0. Version 2.0 is a release candidate today, so `pip install cldk` gives you 1.5.0 instead. To get the pre-release, run:
+
+```bash frame="none"
+pip install --pre cldk
+```
+
+Taint queries read the dataflow graph, so build the analysis at level 3 or level 4. See [Dataflow graphs](/guides/dataflow/).
+</Aside>
+
+## The call
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="odoo",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+
+result = analysis.taint(
+    sources=[("invoice_id", "PaymentPortal.invoice_transaction")],
+    sinks=[("query", "AccountMove._execute")],
+    sanitizers=["PaymentPortal._sanitize_id"],
+)
+
+for path in result.paths:                  # the witnesses
+    print(" -> ".join(hop.to.name for hop in path.hops))
+
+for src, sink in result.exhausted:         # searched, nothing found
+    print(src, "does not reach", sink)
+
+for d in result.unresolved:                # neither: read this first
+    print(d.code, d.message)
+```
+
+| Argument | Type | Meaning |
+| --- | --- | --- |
+| `sources` | `Sequence[Tuple[str, str]]` | Where taint enters, each `(name, within)` |
+| `sinks` | `Sequence[Tuple[str, str]]` | Where it must not reach, addressed the same way |
+| `sanitizers` | `Sequence[Tuple[str, str] \| str]` | The cuts. See below |
+| `depth` | `int \| None` | Most hops a path can take. `None` by default |
+| `max_paths` | `int` | Most witnesses **for each pair**, not for the call |
+
+`max_paths` counts per pair on purpose. If the cap were flat, one prolific pair with forty sources and one sink starves the other thirty-nine.
+
+## You supply the sources and sinks
+
+CLDK ships no framework catalogue and derives no default set. A per-language vocabulary of taint sources is policy, and policy rots. This method is the mechanism, and the vocabulary is yours.
+
+## Two kinds of sanitizer
+
+A sanitizer is two different things wearing one word. The shape you pass tells them apart.
+
+| Shape | Cuts | Use for |
+| --- | --- | --- |
+| `"PaymentPortal._sanitize_id"` | A **callable** on the path | A transforming sanitizer |
+| `("checked_id", "PaymentPortal.invoice_transaction")` | A **variable** inside that callable | A validating guard |
+
+A bare string names the wrapper **in this application** that calls something like `html.escape`. CLDK resolves it with `resolve_callable`.
+
+A `(name, within)` pair is the only shape that severs a validating guard, because a guard never sits on the data path at all. It checks a value and raises, so a cut on the callable does not cut the flow.
+
+Both cuts are applied inside the search. What comes back is the shortest **unsanitized** route, not a filtered list of sanitized ones.
+
+## What the result says
+
+`taint()` returns a `TaintResult`, which extends `FlowPaths`.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `paths` | `list[FlowPath]` | The witnesses, shortest first |
+| `complete` | `bool` | Whether the **whole batch** answered cleanly |
+| `exhausted` | `list[tuple[str, str]]` | Pairs searched to exhaustion with nothing found |
+| `unresolved` | `list[Diagnostic]` | The ledger of what stopped a pair short |
+| `roots` | `list[SliceNode]` | What each selector matched |
+| `resolved` | `str` | The human-readable form of `roots` |
+
+### `exhausted` is the reason to call this
+
+`paths_between` returns `[]` both when no flow exists and when the flow left the resolved graph. `exhausted` is the refutation that an empty list cannot give you.
+
+A pair is listed in `exhausted` only when all three of these hold:
+
+<Steps>
+1. The call passed `depth=None`.
+2. The search found no path for that pair.
+3. No diagnostic in `unresolved` implicates that pair.
+</Steps>
+
+An explicit `depth` empties `exhausted` by rule, not by tendency. A bound turns a real long flow into an empty result, and a wrong refutation closes a live alert.
+
+<Aside type="caution" title="What a refutation claims, and what it does not">
+`exhausted` is a claim about **the emitted graph plus the ledger**. It is never a claim about the program. The field is named for the search, not for the conclusion.
+
+The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call structure **under**-approximates wherever dispatch is unresolved, so a real flow can exist with no path in the graph. Absence of a path bounds the program only where the frontier was fully resolved, and `unresolved` is what enumerates where it was not.
+
+The step from "exhausted" to "this alert is a false positive" is yours to take, deliberately.
+</Aside>
+
+### `complete` is the batch flag, not the pair flag
+
+`complete` is `True` only when nothing was truncated **and** `unresolved` is empty. One skipped or blocked pair makes it `False`, however cleanly the other pairs answered.
+
+While `complete` is `False`, no absence claim stands on **any** pair in the result. The ledger voids the whole batch, not just the pair it names.
+
+A `False` here does not mean "raise `max_paths` and ask again". Where `paths` was not truncated, a bigger cap returns the same flag. Read `unresolved` to find out why.
+
+### The ledger
+
+Two diagnostic codes reach `unresolved`:
+
+| Code | Meaning |
+| --- | --- |
+| `unresolved_dispatch` | The walk met a frontier that it cannot follow |
+| `degenerate_pair` | A requested pair whose source and sink resolved to the same position |
+
+A degenerate pair is skipped rather than searched. Both codes name the affected pair in the `message` prose.
+
+<Aside type="note" title="Read the message, do not parse it">
+`Diagnostic` has no structured field for a pair today, so `message` is a human-readable explanation. It is not something to compute with. If you need the pair association programmatically, ask for an additive `subject` field on `Diagnostic` rather than parsing the prose.
+</Aside>
+
+## Errors
+
+| Exception | Cause |
+| --- | --- |
+| `AmbiguousName` | A name, or the `within` of a sanitizer, matched more than one thing |
+| `SelectorNotInGraph` | A name matched nothing, or a sanitizer shape disagrees with what it resolves to |
+
+Both are raised rather than swallowed, because a selector that silently matches nothing produces an empty result that reads like a refutation.
+
+## How certain a witness is
+
+Each hop carries `prov`, and the weakest hop caps the whole path. The order runs `ssa` > `reaching-defs` > `points-to`. See [How certain a path is](/guides/dataflow/#how-certain-a-path-is).
+
+```python
+for path in result.paths:
+    print(path.weakest.via, path.weakest.prov)
+```
+
+## Language support
+
+`taint()` is available on the Java, Python, and TypeScript analysis facades, with the same signature on each.
+
+## Where to go next
+
+<CardGrid>
+  <LinkCard title="Dataflow graphs" description="The levels, graphs, slices, and paths that taint queries are built on." href="/guides/dataflow/" />
+  <LinkCard title="Analysis at scale" description="Emit once into Neo4j, then run taint queries from many read-only agents." href="/at-scale/" />
+  <LinkCard title="Cheat sheet" description="Every dataflow and taint method in one table." href="/resources/cheatsheet/" />
+</CardGrid>

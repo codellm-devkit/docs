@@ -3,7 +3,7 @@ title: Cheat sheet
 description: "A single-page reference for the core CLDK objects and methods: construction, symbol table, call graph, and reachability."
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+import { Tabs, TabItem, Steps, Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
 A single-page reference for the common CLDK calls. Build one `analysis` object with a per-language factory. Then query it. For background and walkthroughs, see [What is CLDK?](/what-is-cldk/), [Core concepts](/guides/concepts/), and the [Quickstart](/quickstart/).
 
@@ -71,7 +71,7 @@ The legacy form `CLDK(language="java").analysis(project_path=...)` still works, 
 | --- | --- | --- |
 | factory | `CLDK.java` / `CLDK.python` / `CLDK.typescript` / `CLDK.c` | Selects the language facade. |
 | `project_path` | path to checkout | The project to analyze. |
-| `analysis_level` | `AnalysisLevel.symbol_table` (default) / `AnalysisLevel.call_graph` | Call graph, callers, callees, and reachability **need** `call_graph`. |
+| `analysis_level` | `symbol_table` (default) / `call_graph` / `program_dependency_graph` / `system_dependency_graph` | Call graph, callers, and callees **need** `call_graph`. Dataflow and taint need level 3 or 4. |
 | `target_files` | list of paths (optional) | Restrict analysis to these files. |
 | `eager` | `bool` (default `False`) | Force regeneration of cached analysis. |
 | `backend` | config object (optional) | Selects the backend by **type** (see below). Omit for the default codeanalyzer backend. |
@@ -169,6 +169,41 @@ print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
 # nx.shortest_path(cg, src, sink)                 # one path
 # list(nx.all_simple_paths(cg, src, sink))        # every path
 ```
+
+## Dataflow and taint <Badge text="2.0" variant="caution" />
+
+CLDK 2.0 adds levels 3 and 4, and the methods over them. Version 2.0 is a release candidate, so install it with `pip install --pre cldk`. Java, Python, and TypeScript all expose this surface.
+
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `get_cfg(callable, ...)` | `EdgePage[CfgEdge]` | Control-flow edges. Page with `next_cursor`. |
+| `get_cdg(callable, ...)` | `EdgePage[CdgEdge]` | Control-dependence edges. |
+| `get_ddg(callable, ...)` | `EdgePage[DdgEdge]` | Data-dependence edges. |
+| `resolve_callable(name, ...)` | `SliceNode` | Address a callable by name. |
+| `resolve_value(name, *, within)` | `SliceNode` | Address a value inside a callable. |
+| `locate(path, line)` | `LocateResult` | Go from a file and a line into the graph. |
+| `get_source(node_id)` | `str` | The source text for a node. |
+| `slice_forward(src, *, within, ...)` | `Slice` | Where does this value go? |
+| `slice_backward(src, *, within, ...)` | `Slice` | What determined this value? |
+| `backward_cone(sinks, ...)` | `Slice` | What feeds any of these sinks? |
+| `reaches(src, dst, ...)` | `bool` | Does it reach it at all? |
+| `flows_to_call(src, callee, *, within, ...)` | `bool` | Does it reach a call to this callee? |
+| `flows_to_argument(src, callee, arg, *, within, ...)` | `bool` | Does it reach that argument? |
+| `paths_between(src, dst, ...)` | `FlowPaths` | The routes it takes. |
+| `taint(sources, sinks, sanitizers, ...)` | `TaintResult` | m sources against n sinks in one traversal. |
+
+```python
+r = analysis.taint(
+    sources=[("invoice_id", "PaymentPortal.invoice_transaction")],
+    sinks=[("query", "AccountMove._execute")],
+    sanitizers=["PaymentPortal._sanitize_id"],   # str cuts a callable
+)                                                # (name, within) cuts a variable
+r.paths        # witnesses
+r.exhausted    # searched, nothing found  (empty whenever depth is set)
+r.unresolved   # the ledger: read this before trusting exhausted
+```
+
+Provenance ranks `ssa` > `reaching-defs` > `points-to`. `FlowPath.weakest` is the hop that caps the claim. See [Dataflow graphs](/guides/dataflow/) and [Taint analysis](/guides/taint/).
 
 ## Models
 
