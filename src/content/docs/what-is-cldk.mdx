@@ -72,14 +72,14 @@ flowchart LR
     B --> C["Typed program model"]
     C --> D["Symbol table"]
     C --> E["Call graph"]
-    C --> F["Class structure / CRUD"]
+    C --> F["Class structure"]
 ```
 
 The language selects the backend. Java uses [codeanalyzer-java](/backends/codeanalyzer-java/) over WALA. Python uses [codeanalyzer-python](/backends/codeanalyzer-python/) over Jedi. TypeScript uses [codeanalyzer-ts](/backends/codeanalyzer-ts/) over the TypeScript compiler. Your query code stays the same for each language. Only the backend changes.
 
 ## Language coverage
 
-You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java and Python. Java goes deepest, because it adds class-hierarchy analysis and CRUD extraction.
+You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java, Python, and TypeScript. Java goes deepest, because it adds class-hierarchy analysis.
 
 TypeScript is in beta. Its symbol table and call graph work through `CLDK.typescript(...)`. The backend does not detect all framework entrypoints yet. Go and Rust backends are not started. Contributors are welcome.
 
@@ -99,6 +99,5 @@ Infrastructure-as-code (Helm) has a beta backend, [codeanalyzer-iac](/backends/c
   <LinkCard title="Quickstart" description="Install CLDK and run your first analysis in three steps." href="/quickstart/" />
   <LinkCard title="Installation" description="The JDK, Maven, and backend packages that each language needs." href="/installing/" />
   <LinkCard title="Core concepts" description="Symbol tables, call graphs, and analysis levels." href="/guides/concepts/" />
-  <LinkCard title="Common tasks" description="Task-oriented snippets: get methods, build a call graph, find callers." href="/guides/common-tasks/" />
   <LinkCard title="API reference" description="Per-language analysis APIs and the typed data models." href="/reference/python-api/" />
 </CardGrid>

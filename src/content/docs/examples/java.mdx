@@ -250,58 +250,6 @@ print(interfaces[0])
 # org.apache.commons.cli.CommandLineParser
 ```
 
-## CRUD operations and data access
-
-<Aside type="caution" title="Not available in CLDK 2.0">
-codeanalyzer-java 3.0.1 and newer (schema v2) do not emit CRUD operations. On CLDK 2.0, `get_all_crud_operations` and the `get_all_*_operations` variants raise `CodeanalyzerExecutionException`. The code in this section works on CLDK 1.5.0 only.
-</Aside>
-
-Find the methods that read from or write to persistent storage: databases, files, or external services.
-
-```python
-crud_operations = analysis.get_all_crud_operations()
-print(len(crud_operations))
-# List of CRUD summaries, each with a list of operations
-
-for crud_summary in crud_operations:
-    (class_name, jtype), (method_name, jcallable) = [
-        (k, v) for k, v in crud_summary.items() if k != "crud_operations"
-    ]
-    for op in crud_summary["crud_operations"]:
-        print(
-            class_name,
-            method_name,
-            op.operation_type.value,
-            "line", op.line_number
-        )
-        # com.example.UserDao findById(int) READ line 42
-        # com.example.UserDao save(User) CREATE line 58
-        # ...
-```
-
-### Filter CRUD operations by type
-
-Query specific operation types: read, create, update, or delete.
-
-```python
-# All READ operations
-read_ops = analysis.get_all_read_operations()
-for summary in read_ops:
-    for op in summary["crud_operations"]:
-        print(op.operation_type.value, op.line_number)
-        # READ 42
-        # READ 57
-
-# All CREATE operations
-create_ops = analysis.get_all_create_operations()
-
-# All UPDATE operations
-update_ops = analysis.get_all_update_operations()
-
-# All DELETE operations
-delete_ops = analysis.get_all_delete_operations()
-```
-
 ## Comments and documentation
 
 Extract every comment (line, block, and Javadoc) from the codebase to find the documentation and the intent.
@@ -402,6 +350,5 @@ for class_name, methods in entry_methods.items():
 
 <CardGrid>
   <LinkCard title="Python examples" description="The same patterns for Python packages: symbol table, call graph, class relationships, and imports." href="/examples/python/" />
-  <LinkCard title="Common tasks" description="Task-oriented snippets: list methods, get a method body, build a call graph, find callers, map the class hierarchy." href="/guides/common-tasks/" />
   <LinkCard title="Java API reference" description="Full method signatures and return types for JavaAnalysis and all Java models." href="/reference/python-api/java/" />
 </CardGrid>

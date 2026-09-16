@@ -5,7 +5,7 @@ description: "CLDK frontends (the language SDKs you write against), with a matur
 
 import { Aside, Badge, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. The backends do the language analysis. Each SDK therefore gives you the same call graphs, symbol tables, and reachability data in its own host language.
+A CLDK **SDK** (a *frontend*) is an `analysis` API over the canonical JSON that the [codeanalyzer backends](/backends/) produce. The backends do the language analysis. Each SDK therefore gives you the same call graphs, symbol tables, and reachability data in its own host language. One SDK exists today, in Python.
 
 This is the **frontend** layer. For the backends behind it, see the [backends overview](/backends/).
 
@@ -20,7 +20,6 @@ The SDK you write against. Each is an `analysis` API over the canonical JSON.
 | SDK | Repository | Maturity |
 | --- | --- | --- |
 | **Python** | [codellm-devkit/python-sdk](https://github.com/codellm-devkit/python-sdk) | <Badge text="Mature" variant="success" /> |
-| **TypeScript** | [codellm-devkit/typescript-sdk](https://github.com/codellm-devkit/typescript-sdk) | <Badge text="Alpha" variant="caution" /> |
 | **Java** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Rust** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
 | **Go** | Not started | <Badge text="Help wanted" variant="danger" /> <Badge text="Stub" variant="default" /> |
@@ -32,11 +31,6 @@ The SDK you write against. Each is an `analysis` API over the canonical JSON.
     title="Python SDK"
     description="The reference implementation. Install cldk from PyPI and query Java, Python, and TypeScript projects through one analysis API."
     href="/reference/python-api/"
-  />
-  <LinkCard
-    title="TypeScript SDK"
-    description="Experimental (alpha). A TypeScript/Node frontend over the same canonical analysis JSON. Track progress on GitHub."
-    href="https://github.com/codellm-devkit/typescript-sdk"
   />
   <LinkCard
     title="Add a frontend"
@@ -57,4 +51,4 @@ Each SDK uses the same `analysis` vocabulary, because they all read one schema t
 - The core methods (`get_symbol_table`, `get_call_graph`, `get_callers`, `get_callees`, and related calls) return the same typed models.
 - A new backend makes its language available to every SDK that reads the shared schema.
 
-The [Python SDK](/reference/python-api/) is stable. Start there. The [TypeScript SDK](https://github.com/codellm-devkit/typescript-sdk) is experimental. The Java, Rust, and Go frontends do not exist yet. To see the form that a native SDK takes, read [Add a Rust frontend](/contributing/rust-frontend/).
+The [Python SDK](/reference/python-api/) is stable. Start there. The Java, Rust, and Go frontends do not exist yet. To see the form that a native SDK takes, read [Add a Rust frontend](/contributing/rust-frontend/).

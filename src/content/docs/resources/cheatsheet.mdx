@@ -136,7 +136,7 @@ m = analysis.get_method(
 print(m.code)  # -> source body of OptionBuilder.create(java.lang.String)
 ```
 
-Java also gives you class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`. It also gives you `get_all_crud_operations()` and `get_all_comments()`.
+Java also gives you class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`. It also gives you `get_all_comments()`.
 
 ## Call graph and reachability
 
@@ -211,7 +211,7 @@ The typed objects that each language analysis API returns.
 
 | Language | Models |
 | --- | --- |
-| Java | `JType`, `JCallable`, `JCompilationUnit`, `JField`, `JComment`, `JCRUDOperation` |
+| Java | `JType`, `JCallable`, `JCompilationUnit`, `JField`, `JComment` |
 | Python | `PyModule`, `PyClass`, `PyCallable`, `PyImport`, `PyComment` |
 | TypeScript | `TSModule`, `TSClass`, `TSCallable`, `TSInterface`, `TSEnum`, `TSTypeAlias`, `TSImport`, `TSComment` |
 
@@ -225,7 +225,5 @@ The typed objects that each language analysis API returns.
 ## Next steps
 
 <CardGrid>
-  <LinkCard title="Common tasks" description="Copy-paste snippets for each call above." href="/guides/common-tasks/" />
-  <LinkCard title="COCOA" description="Build a Code Context Agent plugin on these methods." href="/cocoa/" />
   <LinkCard title="Python API reference" description="Every method on the Python SDK analysis APIs." href="/reference/python-api/" />
 </CardGrid>

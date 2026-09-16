@@ -54,7 +54,7 @@ With no path, the input is `.`. With no `--app-name`, the application takes the 
 ## Analysis levels
 
 <Aside type="caution" title="This scale is not the SDK scale">
-`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and `caniac` rejects level 4. Read this table, not the [dataflow levels](/guides/dataflow/#the-four-analysis-levels).
+`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and `caniac` rejects level 4. Read this table, not the [dataflow levels](/guides/concepts/#the-ladder-cldk-builds).
 </Aside>
 
 | Level | Adds | Never does |
@@ -128,7 +128,6 @@ The repository pins the accepted `codeanalyzer-schema` contract at commit [`b844
 ## See also
 
 <CardGrid>
-  <LinkCard title="IaC examples" href="/examples/iac/" description="Worked examples on the Quarkus Coffee Shop Helm chart." />
   <LinkCard title="Backends overview" href="/backends/" description="All CLDK analysis backends and their maturity tiers." />
   <LinkCard title="Analysis at scale" href="/at-scale/" description="The emit and poll split that this backend writes into." />
   <LinkCard title="Deploy on Kubernetes" href="/at-scale/kubernetes/" description="Scheduled emit jobs against a shared Neo4j." />

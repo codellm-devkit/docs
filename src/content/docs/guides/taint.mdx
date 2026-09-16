@@ -144,7 +144,7 @@ CLDK raises both exceptions, because a selector that silently matches nothing pr
 
 ## How certain a witness is
 
-Each hop carries `prov`, and the weakest hop caps the whole path. The order runs `ssa` > `reaching-defs` > `points-to`. See [How certain a path is](/guides/dataflow/#how-certain-a-path-is).
+Each hop carries `prov`, and the weakest hop caps the whole path. The order runs `ssa` > `reaching-defs` > `points-to`. See [How certain a path is](/guides/dataflow/#how-certain-an-edge-is).
 
 ```python
 for path in result.paths:

@@ -153,14 +153,11 @@ export default defineConfig({
           label: "Guides",
           items: [
             { label: "Core concepts", slug: "guides/concepts", attrs: { "data-cldk-icon": "learning-16" } },
-            { label: "Common tasks", slug: "guides/common-tasks", attrs: { "data-cldk-icon": "workflow-16" } },
-            { label: "Dataflow graphs", slug: "guides/dataflow", attrs: { "data-cldk-icon": "diagram-tree-16" } },
-            { label: "Taint analysis", slug: "guides/taint", attrs: { "data-cldk-icon": "detection-16" } },
-            {
-              label: "Code Context Agent",
-              slug: "cocoa",
-              attrs: { "data-cldk-icon": "chat-16" },
-            },
+            { label: "Symbol tables", slug: "guides/symbol-tables", attrs: { "data-cldk-icon": "metrics-glossary-16" } },
+            { label: "Call graphs", slug: "guides/call-graphs", attrs: { "data-cldk-icon": "diagram-tree-16" } },
+            { label: "Dataflow", slug: "guides/dataflow", attrs: { "data-cldk-icon": "workflow-16" } },
+            { label: "System dependence", slug: "guides/system-dependence", attrs: { "data-cldk-icon": "organization-16" } },
+            { label: "Taint analysis", slug: "guides/taint", attrs: { "data-cldk-icon": "warning-sign-16" } },
           ],
         },
         {
@@ -171,7 +168,6 @@ export default defineConfig({
             { label: "Java examples", slug: "examples/java", attrs: { "data-cldk-icon": "java" } },
             { label: "TypeScript examples", slug: "examples/typescript", attrs: { "data-cldk-icon": "typescript" } },
             { label: "JavaScript examples", slug: "examples/javascript", attrs: { "data-cldk-icon": "javascript" } },
-            { label: "IaC examples", slug: "examples/iac", attrs: { "data-cldk-icon": "cloud-16" } },
           ],
         },
         {
@@ -194,11 +190,6 @@ export default defineConfig({
                 { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "java" } },
                 { label: "TypeScript analysis", slug: "reference/python-api/typescript", attrs: { "data-cldk-icon": "typescript" } },
               ],
-            },
-            {
-              label: "TypeScript SDK",
-              link: "https://github.com/codellm-devkit/typescript-sdk",
-              attrs: { "data-cldk-icon": "typescript", target: "_blank", rel: "noopener noreferrer" },
             },
           ],
         },

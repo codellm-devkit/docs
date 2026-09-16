@@ -1,391 +1,334 @@
 ---
 title: Python examples
-description: "Worked examples for Python projects with CLDK: symbol tables, call graphs, class relationships, and the PyClass and PyCallable models."
+description: "Worked Python examples on the Flask repository: symbol table, call graph, entry points, and the PyClass and PyCallable models."
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid } from "@astrojs/starlight/components";
+import { Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples analyze a Python package called `my_pkg`, the recurring sample across the Python documentation. They are grouped by task: build an analysis, query the symbol table, walk the call graph, and inspect the model objects. The sample output is illustrative.
+These examples run against [Flask](https://github.com/pallets/flask), the sample project for the Python documentation. Each example calls one method of the CLDK Python SDK and shows the output of a real run over the Flask checkout. To use your own code, change `project_path`.
 
 <Aside type="note" title="Project-based analysis">
-Python analysis is project-based. `project_path` must point at a directory of importable Python files.
+Python analysis is project-based. `project_path` must point at a directory of importable Python files. The backend finds more than the library code. The 35 modules include `docs/conf.py` and the `examples` directory, but not the `tests` directory.
 </Aside>
 
-## Build the analysis
+## Set up the analysis
 
-Build a CLDK analysis object for your Python project. By default it extracts the symbol table: classes, methods, and imports. For call-graph queries, add `analysis_level=AnalysisLevel.call_graph`.
+Clone the Flask repository.
+
+```bash
+git clone https://github.com/pallets/flask.git
+```
+
+Build a CLDK analysis object that points at the checkout. The `analysis_level` parameter controls the depth of the analysis. `symbol_table`, the default, finds modules, classes, and methods. `call_graph` adds the caller and callee edges. Every example on this page uses the `call_graph` level.
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-# Symbol table only (default)
-analysis = CLDK.python(project_path="my_pkg")
-
-# Symbol table + call graph (required for callers/callees/reachability)
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
 )
 ```
 
-<Aside type="tip" title="Backend configuration">
-The backend configuration lives in a `PyCodeAnalyzerConfig` that you pass as `backend=`. Set `use_ray=True` to enable Ray-based parallel processing for large projects. It defaults to `False`. `cache_dir` controls where the backend stores its virtualenv and analysis cache. The default is `<project>/.codeanalyzer`.
+For the backend configuration, see [codeanalyzer-python](/backends/codeanalyzer-python/).
+
+## Symbol table: modules, classes, and methods
+
+The symbol table holds the modules, the classes, and the methods that the backend finds in the project.
+
+### List the modules
+
+Each analyzed Python file becomes one module, keyed by its path from the root of the repository.
 
 ```python
-from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
-
-analysis = CLDK.python(
-    project_path="my_pkg",
-    analysis_level=AnalysisLevel.call_graph,
-    backend=PyCodeAnalyzerConfig(use_ray=True, cache_dir="/tmp/my_pkg_cache"),
-)
-```
-</Aside>
-
-## Symbol table: modules, classes, methods
-
-### List all modules
-
-Each Python file becomes a `PyModule` in the symbol table. Get them by file path, or as a flat list.
-
-```python
-# Get all modules as a dictionary: file_path -> PyModule
-symbol_table = analysis.get_symbol_table()
-for file_path, module in symbol_table.items():
-    print(file_path, "->", module.module_name)
-# my_pkg/options.py -> my_pkg.options
-# my_pkg/parser.py -> my_pkg.parser
-
-# Or get a flat list
 modules = analysis.get_modules()
-print(len(modules), "modules analyzed")
-# 5 modules analyzed
+print(len(modules))
+# 35
+
+symbol_table = analysis.get_symbol_table()
+for path in sorted(symbol_table)[:5]:
+    print(path)
+# docs/conf.py
+# examples/celery/make_celery.py
+# examples/celery/src/task_app/__init__.py
+# examples/celery/src/task_app/tasks.py
+# examples/celery/src/task_app/views.py
 ```
 
-### List all classes
+### List the classes
 
-Get all classes in the project by qualified name, for example `my_pkg.options.Options`.
+The key of each class is its dotted signature from the root of the repository.
 
 ```python
 classes = analysis.get_classes()
-for qualified_name, pyclass in classes.items():
-    print(f"{qualified_name}: {len(pyclass.callables)} methods")
-# my_pkg.options.Options: 7 methods
-# my_pkg.parser.DefaultParser: 5 methods
-# my_pkg.cli.CommandLine: 3 methods
-```
+print(len(classes))
+# 52
 
-### Get a specific class
-
-Get a class by its qualified name. Then inspect its methods, attributes, and base classes.
-
-```python
-pyclass = analysis.get_class("my_pkg.options.Options")
-if pyclass:
-    print("Methods:", list(pyclass.callables.keys()))
-    print("Base classes:", pyclass.base_classes)
-    print("Fields:", len(pyclass.attributes))
-# Methods: ['__init__', 'add_option', 'get_option', 'has_option', ...]
-# Base classes: ['object']
-# Fields: 3
-```
-
-### List methods in a class
-
-List every method declared in a class.
-
-```python
-methods = analysis.get_methods_in_class("my_pkg.options.Options")
-for method_name, callable_obj in methods.items():
-    print(f"{method_name}: {callable_obj.signature}")
-# __init__: def __init__(self)
-# add_option: def add_option(self, option)
-# get_option: def get_option(self, name)
-# has_option: def has_option(self, name)
-```
-
-### Get a specific method
-
-Get the exact method object by class name and method name. It includes the signature and the parameters. `get_method_bodies` returns the source body.
-
-```python
-method = analysis.get_method("my_pkg.options.Options", "add_option")
-if method:
-    print("Signature:", method.signature)
-    print("Parameters:", [p.name for p in method.parameters])
-    print("Source:")
-    print(analysis.get_method_bodies([method.signature])[method.signature])
-# Signature: def add_option(self, option)
-# Parameters: ['self', 'option']
-# Source:
-# def add_option(self, option):
-#     self._options[option.name] = option
-#     return self
-```
-
-### Get constructors
-
-Get the `__init__` methods of a class.
-
-```python
-constructors = analysis.get_constructors("my_pkg.options.Options")
-for name, ctor in constructors.items():
-    print(f"{name}: {ctor.signature}")
-# __init__: def __init__(self)
-```
-
-### Get class attributes (fields)
-
-Get every attribute declared in a class.
-
-```python
-attributes = analysis.get_fields("my_pkg.options.Options")
-for attr in attributes:
-    print(f"{attr.name}: {attr.type or 'untyped'}")
-# _options: dict
-# _required: list
-# _short_flags: dict
-```
-
-### Filter classes by name pattern
-
-Use substring matching to find classes that match inclusion and exclusion patterns.
-
-```python
-# Find all parser-related classes
-parser_classes = analysis.get_classes_by_criteria(
-    inclusions=["parser"],
-    exclusions=["internal"],
-)
-for name in parser_classes.keys():
+for name in sorted(classes)[:5]:
     print(name)
-# my_pkg.parser.DefaultParser
-# my_pkg.parser.Parser
-# my_pkg.parsers.argument_parser.ArgumentParser
+# src.flask.app.Flask
+# src.flask.blueprints.Blueprint
+# src.flask.cli.AppGroup
+# src.flask.cli.CertParamType
+# src.flask.cli.FlaskGroup
 ```
 
-### List all imports
+### Get one class
 
-Get imports from all modules in the project.
+Pass the dotted signature to `get_class` to get one class object.
+
+```python
+pyclass = analysis.get_class("src.flask.app.Flask")
+print(len(pyclass.callables))
+# 35
+
+print(sorted(pyclass.callables)[:5])
+# ['__call__', '__init__', '__init_subclass__', 'app_context', 'async_to_sync']
+```
+
+### List the methods of a class
+
+`get_methods_in_class` returns the methods that the class declares in its own body.
+
+```python
+methods = analysis.get_methods_in_class("src.flask.blueprints.Blueprint")
+print(sorted(methods))
+# ['__init__', 'get_send_file_max_age', 'open_resource', 'send_static_file']
+```
+
+### Get one method
+
+Pass the class signature and the method name to `get_method`.
+
+```python
+method = analysis.get_method("src.flask.sansio.scaffold.Scaffold", "route")
+print(method.signature)
+# src.flask.sansio.scaffold.Scaffold.route
+
+print([parameter.name for parameter in method.parameters])
+# ['self', 'rule', 'options']
+```
+
+### Get the constructors
+
+`get_constructors` returns the constructors of a class, keyed by name.
+
+```python
+constructors = analysis.get_constructors("src.flask.app.Flask")
+print(list(constructors))
+# ['__init__']
+```
+
+### Filter the classes by name
+
+`get_classes_by_criteria` matches the class signatures against your inclusion strings.
+
+```python
+blueprint_classes = analysis.get_classes_by_criteria(inclusions=["Blueprint"])
+for name in sorted(blueprint_classes):
+    print(name)
+# src.flask.blueprints.Blueprint
+# src.flask.sansio.blueprints.Blueprint
+# src.flask.sansio.blueprints.BlueprintSetupState
+```
+
+### List the imports of a module
+
+`get_imports` returns the imports of every module, keyed by file path. Each import carries a name and a module.
 
 ```python
 imports = analysis.get_imports()
-for file_path, import_list in imports.items():
-    print(f"{file_path}: {len(import_list)} imports")
-# my_pkg/options.py: 3 imports
-# my_pkg/parser.py: 5 imports
+wrappers = imports["src/flask/wrappers.py"]
+
+for imported in wrappers[:4]:
+    print(imported.name, "from", imported.module)
+# annotations from __future__
+# t from typing
+# BadRequest from werkzeug.exceptions
+# HTTPException from werkzeug.exceptions
 ```
 
-## Call graph: callers, callees, reachability
+## Call graph: callers, callees, and reachability
 
-<Aside type="caution" title="Always set analysis_level">
-All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table.
-</Aside>
+The call graph is a `networkx.DiGraph`. Its edges point from the caller to the callee. Each edge carries a `provenance` value that names the technique that found the call. `jedi` marks an edge from symbol resolution, and `defuse` marks an edge from the def-use linker.
 
-### Build a call graph
+### Build the call graph
 
-The call graph is a `networkx.DiGraph`. Its edges point from **caller** to **callee**. Use it for reachability and dependency analysis.
+Call `get_call_graph` to get the graph of the whole project.
 
 ```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-import networkx as nx
-
-analysis = CLDK.python(
-    project_path="my_pkg",
-    analysis_level=AnalysisLevel.call_graph,
-)
-
 cg = analysis.get_call_graph()
-print(f"{cg.number_of_nodes()} methods, {cg.number_of_edges()} edges")
-# 87 methods, 113 edges
+print(cg.number_of_nodes(), "callables,", cg.number_of_edges(), "edges")
+# 811 callables, 1250 edges
 ```
 
-### Find who calls a method
+### Find the callers of a method
 
-Use `get_callers` to find every method that calls a target method. This query is the basis of impact analysis.
+`get_callers` finds every callable that calls the target method. The `('defuse',)` value on the edge means that the def-use linker found this call.
 
 ```python
 callers = analysis.get_callers(
-    target_class_name="my_pkg.options.Options",
-    target_method_declaration="add_option",
+    target_class_name="src.flask.app.Flask",
+    target_method_declaration="full_dispatch_request",
 )
-print("Callers:", [c["caller_signature"] for c in callers["caller_details"]])
-# Callers: ['my_pkg.cli.build_options', 'my_pkg.options.Options.add_required']
+print(callers["target_method"])
+# src.flask.app.Flask.full_dispatch_request
+
+for detail in callers["caller_details"]:
+    print(detail["caller_signature"], detail["edge"]["provenance"])
+# src.flask.app.Flask.wsgi_app ('defuse',)
 ```
 
-### Find what a method calls
+### Find the callees of a method
 
-Use `get_callees` to find every method that a target method calls. This query gives the dependency view.
+`get_callees` finds every callable that the source method calls. A signature that starts with `can://flask/@external/` names a target outside the analyzed modules.
 
 ```python
 callees = analysis.get_callees(
-    source_class_name="my_pkg.parser.DefaultParser",
-    source_method_declaration="parse",
+    source_class_name="src.flask.app.Flask",
+    source_method_declaration="full_dispatch_request",
 )
-print("Callees:", [c["callee_signature"] for c in callees["callee_details"]])
-# Callees: ['my_pkg.options.Options.get_option', 'my_pkg.cli.CommandLine.add_option']
-```
-
-### Extract call graph for a class
-
-Get all call edges reachable from a specific class or method.
-
-```python
-edges = analysis.get_class_call_graph("my_pkg.cli.CLI")
-print("Edges reachable from CLI:")
-for caller, callee in edges:
-    print(f"  {caller} -> {callee}")
-# Edges reachable from CLI:
-#   my_pkg.cli.CLI.main -> my_pkg.cli.build_options
-#   my_pkg.cli.build_options -> my_pkg.options.Options.add_option
-#   ...
+for detail in callees["callee_details"]:
+    print(detail["callee_signature"], detail["edge"]["provenance"])
+# can://flask/@external/_warnings/warn ('jedi',)
+# can://flask/@external/flask.app.Flask/dispatch_request ('jedi',)
+# can://flask/@external/flask.app.Flask/finalize_request ('jedi',)
+# can://flask/@external/flask.app.Flask/handle_user_exception ('jedi',)
+# can://flask/@external/flask.app.Flask/preprocess_request ('jedi',)
+# src.flask.app.Flask.dispatch_request ('defuse',)
+# src.flask.app.Flask.finalize_request ('defuse',)
+# src.flask.app.Flask.handle_user_exception ('defuse',)
+# src.flask.app.Flask.preprocess_request ('defuse',)
+# can://flask/@external/src.flask.signals.request_started/send ('defuse',)
 ```
 
 ### Compute reachability
 
-Reachability is a `networkx` query over the call graph. Get the endpoints from the graph. Then use `nx.has_path()`.
+The nodes of the graph are the callable signatures, so `networkx` answers reachability questions directly.
 
 ```python
 import networkx as nx
 
 cg = analysis.get_call_graph()
 
-# Find a source node by searching metadata
-def find_node(class_name, method_name):
-    for node, data in cg.nodes(data=True):
-        if class_name in str(data) and method_name in str(data):
-            return node
-    return None
+source = "src.flask.app.Flask.wsgi_app"
+sink = "src.flask.app.Flask.dispatch_request"
 
-src = find_node("my_pkg.cli", "main")
-sink = find_node("my_pkg.database", "execute")
+print(nx.has_path(cg, source, sink))
+# True
 
-if src and sink:
-    reachable = nx.has_path(cg, src, sink)
-    print(f"Sink reachable from entry point: {reachable}")
-    if reachable:
-        path = nx.shortest_path(cg, src, sink)
-        print(f"Call chain: {' -> '.join(path)}")
-# Sink reachable from entry point: True
-# Call chain: my_pkg.cli.main -> my_pkg.parser.parse -> my_pkg.database.execute
+edge = cg["src.flask.app.Flask.full_dispatch_request"][sink]
+print(edge["type"], edge["weight"], edge["provenance"])
+# CALL_DEP 1 ('defuse',)
 ```
 
 ## The PyClass and PyCallable models
 
-CLDK returns typed model objects, not plain strings. Inspect these objects for detail about classes and callables.
+CLDK returns typed model objects. Inspect these objects for the detail that the plain names do not carry.
 
 ### Inspect a PyClass
 
-A `PyClass` object contains methods, attributes, base classes, and decorators.
+A `PyClass` object holds the methods, the base classes, and the decorators of the class.
 
 ```python
-pyclass = analysis.get_class("my_pkg.options.Options")
-print("Name:", pyclass.name)
-print("Signature:", pyclass.signature)
-print("Base classes:", pyclass.base_classes)
-print("Methods:", list(pyclass.callables.keys()))
-print("Attributes:", [attr.name for attr in pyclass.attributes.values()])
-# Name: Options
-# Signature: my_pkg.options.Options
-# Base classes: ['object']
-# Methods: ['__init__', 'add_option', 'get_option', 'has_option', ...]
-# Attributes: ['_options', '_required', '_short_flags']
+pyclass = analysis.get_class("src.flask.app.Flask")
+print(pyclass.base_classes)
+# ['App']
+
+print(sorted(pyclass.callables)[-4:])
+# ['test_request_context', 'update_template_context', 'url_for', 'wsgi_app']
 ```
 
 ### Inspect a PyCallable
 
-A `PyCallable` represents a method or function. It includes the signature, parameters, and decorators. `get_method_bodies` returns the source body.
+A `PyCallable` object holds the signature, the parameters, the decorators, and the source span.
 
 ```python
-method = analysis.get_method("my_pkg.options.Options", "add_option")
-print("Name:", method.name)
-print("Signature:", method.signature)
-print("Parameters:", [p.name for p in method.parameters])
-print("Decorators:", method.decorators)
-print("Source body:")
-print(analysis.get_method_bodies([method.signature])[method.signature])
-# Name: add_option
-# Signature: def add_option(self, option)
-# Parameters: ['self', 'option']
-# Decorators: []
-# Source body:
-# def add_option(self, option):
-#     self._options[option.name] = option
-#     return self
+method = analysis.get_method("src.flask.sansio.scaffold.Scaffold", "route")
+print(method.name, method.kind)
+# route function
+
+print(method.return_type)
+# t.Callable[[T_route], T_route]
+
+print([decorator.name for decorator in method.decorators])
+# ['setupmethod']
+
+print([(parameter.name, parameter.type) for parameter in method.parameters])
+# [('self', 'Scaffold'), ('rule', 'str'), ('options', 't.Any')]
+
+print(method.start_line, method.end_line)
+# 344 373
 ```
 
-### Access method parameters
+### Read the source of a method
 
-Get the list of parameter names from a method signature.
+`get_method_bodies` returns the source of each signature that you give it.
 
 ```python
-params = analysis.get_method_parameters(
-    "my_pkg.parser.DefaultParser",
-    "parse"
-)
-print("Parameters:", params)
-# Parameters: ['options_obj', 'args']
+bodies = analysis.get_method_bodies(["src.flask.sansio.scaffold.Scaffold.route"])
+print(bodies["src.flask.sansio.scaffold.Scaffold.route"])
+# def route(self, rule: str, **options: t.Any) -> t.Callable[[T_route], T_route]:
+#         """Decorate a view function to register it with the given URL
+#         rule and options. Calls :meth:`add_url_rule`, which has more
+#         details about the implementation.
+#         ...
+#         """
+#
+#         def decorator(f: T_route) -> T_route:
+#             endpoint = options.pop("endpoint", None)
+#             self.add_url_rule(rule, endpoint, f, **options)
+#             return f
+#
+#         return decorator
 ```
 
-### Inspect inheritance and nesting
+### Find the subclasses of a class
 
-Extract base classes from a class object, or find nested classes.
+`get_sub_classes` returns the classes that name the given class as a base class.
 
 ```python
-pyclass = analysis.get_class("my_pkg.cli.CommandHandler")
-print("Base classes:", pyclass.base_classes)
-# Base classes: ['my_pkg.cli.BaseHandler']
-
-# Get all subclasses of a base
-subclasses = analysis.get_sub_classes("my_pkg.cli.BaseHandler")
-for name in subclasses.keys():
+subclasses = analysis.get_sub_classes("src.flask.sansio.scaffold.Scaffold")
+for name in sorted(subclasses):
     print(name)
-# my_pkg.cli.CommandHandler
-# my_pkg.cli.HelpHandler
-
-# Get nested classes inside a class
-nested = analysis.get_nested_classes("my_pkg.cli.CommandHandler")
-for nc in nested:
-    print(nc.signature)
-# my_pkg.cli.CommandHandler.Config
+# src.flask.sansio.app.App
+# src.flask.sansio.blueprints.Blueprint
 ```
 
-### Get extended classes
+### Get the base classes
 
-`get_extended_classes` returns the same list as `pyclass.base_classes` in the previous example, without the class object.
+`get_extended_classes` returns the base class names. It gives the same list as the `base_classes` attribute of the class object.
 
 ```python
-bases = analysis.get_extended_classes("my_pkg.parser.DefaultParser")
-print("Base classes:", bases)
-# Base classes: ['my_pkg.parser.Parser']
+bases = analysis.get_extended_classes("src.flask.app.Flask")
+print(bases)
+# ['App']
 ```
 
-## Validate syntax and parse snippets
+## Entry points
 
-Use the Tree-sitter parser to validate syntax and to extract the AST.
+The backend marks the callables that code outside the project calls, such as CLI commands and route handlers. The `get_entrypoints` method is part of CLDK 2.0. The stable PyPI release is 1.5.0. Install the pre-release with `pip install --pre cldk`.
+
+### Find the framework entry points <Badge text="2.0" variant="caution" />
+
+`get_entrypoints` returns one overview object for each callable that the backend marked as an entry point.
 
 ```python
-# Check if code is valid Python
-is_valid = analysis.is_parsable("def f(): return 1")
-print(f"Valid syntax: {is_valid}")
-# Valid syntax: True
-
-is_valid = analysis.is_parsable("def f(): pass if")
-print(f"Valid syntax: {is_valid}")
-# Valid syntax: False
-
-# Parse code and get the raw AST
-ast = analysis.get_raw_ast("x = 1")
-print(f"AST type: {type(ast)}")
-# AST type: <class 'tree_sitter.Tree'>
+entrypoints = analysis.get_entrypoints()
+for entrypoint in entrypoints[:5]:
+    print(entrypoint.signature)
+# src.flask.cli.run_command
+# src.flask.cli.shell_command
+# src.flask.cli.routes_command
+# examples.tutorial.flaskr.db.init_db_command
+# examples.tutorial.flaskr.blog.index
 ```
 
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="Java examples" description="The same patterns for Java projects: inheritance, interface implementation, comments, and reachability." href="/examples/java/" />
-  <LinkCard title="Common tasks" description="The same calls as a quick task-indexed reference." href="/guides/common-tasks/" />
-  <LinkCard title="Python API reference" description="Full method signatures and docstrings for PythonAnalysis." href="/reference/python-api/python/" />
+  <LinkCard title="Call graphs" description="How CLDK builds the call graph, and what the edge types and the provenance values mean." href="/guides/call-graphs/" />
+  <LinkCard title="Python API reference" description="Every method signature and return type for PythonAnalysis and the Py models." href="/reference/python-api/python/" />
+  <LinkCard title="codeanalyzer-python" description="The backend behind PythonAnalysis, its analysis levels, and its command-line flags." href="/backends/codeanalyzer-python/" />
 </CardGrid>

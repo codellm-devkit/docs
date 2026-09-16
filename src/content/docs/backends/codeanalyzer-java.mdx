@@ -14,7 +14,6 @@ codeanalyzer-java is a **standalone JAR tool**. It takes a Java project, or a so
 - **Symbol table**: All types (classes, interfaces, enums, records), their fields, methods/constructors, and imports
 - **Call graph** (optional, at analysis level 2): Edges between callers and callees, computed by the interprocedural analysis of WALA
 - **Type hierarchy**: Extends/implements relationships, nested types, parent-child relationships
-- **CRUD operations**: Database access patterns (INSERT, SELECT, UPDATE, DELETE) in enterprise code
 - **Comments and Javadoc**: The text and the position of each comment, attached to its entity
 - **Entrypoints**: Main methods and framework-identified entrypoints (REST endpoints, Struts actions)
 
@@ -188,8 +187,6 @@ A method or constructor:
   accessedFields: string[]                   // Fields read/written
   variableDeclarations: JVariableDeclaration[]
   
-  crudOperations: JCRUDOperation[]           // DB operations detected
-  crudQueries: JCRUDQuery[]
   
   cyclomaticComplexity: number
   isConstructor: boolean

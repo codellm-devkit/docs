@@ -1,531 +1,382 @@
 ---
 title: TypeScript examples
-description: "Worked examples for TypeScript projects with CLDK: symbol tables, call graphs, decorators, and the TSClass and TSCallable models."
+description: "Worked TypeScript examples on the Zod package: modules, classes, interfaces, enums, type aliases, and the call graph."
 ---
 
-import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs/starlight/components";
+import { Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples analyze a TypeScript project called `my_app`, the recurring sample across the TypeScript documentation. The page groups them by task: build an analysis, query the symbol table, walk the call graph, inspect the model objects, and locate a source position. Each expected output comes from a real run of CLDK 2.0.0rc7 over `my_app`.
+These examples run against [Zod](https://github.com/colinhacks/zod), a TypeScript schema declaration library, and its published package `zod/packages/zod`. Each example calls one method of the CLDK Python SDK. A real run of CLDK 2.0.0rc7 over Zod produced every output comment on this page. A section with the <Badge text="2.0" variant="caution" /> badge needs the pre-release, so install it with `pip install --pre cldk`. The stable release on PyPI is 1.5.0. Some examples carry no output comment, because that run did not record one.
 
 <Aside type="note" title="Project-based analysis">
-TypeScript analysis is project-based. `project_path` must point at the project directory. There is no single-file mode. The backend also analyzes `.js`, `.jsx`, `.mjs`, and `.cjs` files in that directory.
-</Aside>
-
-<Aside type="caution" title="CLDK 2.0 sections">
-The sections marked <Badge text="2.0" variant="caution" /> use methods that exist only in the pre-release. Install it with `pip install --pre cldk`. The stable PyPI release is 1.5.0.
+TypeScript analysis is project-based. `project_path` must point at a project directory. There is no single-file mode. The backend also analyzes `.js`, `.jsx`, `.mjs`, and `.cjs` files in that directory.
 </Aside>
 
 ## Set up the analysis
 
-Build a CLDK analysis object for your TypeScript project. By default it extracts the symbol table: modules, classes, interfaces, enums, functions, and imports. For call-graph queries, add `analysis_level=AnalysisLevel.call_graph`.
+Clone Zod first.
+
+```bash
+git clone https://github.com/colinhacks/zod.git
+```
+
+Then point CLDK at the published package.
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-# Symbol table only (default)
-analysis = CLDK.typescript(project_path="my_app")
-
-# Symbol table + call graph (required for callers/callees/reachability)
-# eager=True rebuilds the cache that the symbol-table run above wrote
 analysis = CLDK.typescript(
-    project_path="my_app",
+    project_path="zod/packages/zod",
     analysis_level=AnalysisLevel.call_graph,
-    eager=True,
 )
 ```
 
-<Aside type="tip" title="Cache directory and analysis level">
-The backend configuration is a `CodeAnalyzerConfig` that you pass as `backend=`. `cache_dir` sets where the backend stores its analysis output. The default is `<project>/.codeanalyzer`, and the TypeScript output goes in its `typescript` subdirectory.
+The `zod/packages/zod` directory holds both the v3 and the v4 source trees. A signature under one of those trees carries a `src/v3` or a `src/v4` prefix. The default analysis level builds the symbol table only. The `call_graph` level adds the caller and callee edges.
 
-The backend reuses a cached `analysis.json` at any level, with no warning. If the backend wrote the cache at the symbol-table level, a call-graph analysis over it has 0 nodes. Pass `eager=True` once to rebuild the cache at the new level. Later runs reuse the new cache.
+The backend reuses a cached `analysis.json` at any level. If an earlier run wrote that cache at the symbol-table level, pass `eager=True` once.
 
 ```python
-from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
-
 analysis = CLDK.typescript(
-    project_path="my_app",
+    project_path="zod/packages/zod",
     analysis_level=AnalysisLevel.call_graph,
     eager=True,
-    backend=CodeAnalyzerConfig(cache_dir="/tmp/my_app_cache"),
 )
 ```
-</Aside>
 
-## Symbol table: modules, classes, methods
+## Symbol table: modules, classes, and methods
 
 ### List all modules
 
-Each source file becomes a `TSModule` in the symbol table. The key is the repo-relative file path with its extension. Get the modules by file path, or as a flat list.
+The symbol table holds one `TSModule` per source file. Each key is the package-relative file path with its extension.
 
 ```python
-# Get all modules as a dictionary: file_path -> TSModule
-symbol_table = analysis.get_symbol_table()
-for file_path, module in symbol_table.items():
-    print(file_path, "->", module.id)
-# src/controllers.ts -> can://my_app/typescript/src/controllers.ts
-# src/index.ts -> can://my_app/typescript/src/index.ts
-# src/models.ts -> can://my_app/typescript/src/models.ts
-# src/services.ts -> can://my_app/typescript/src/services.ts
-# src/util.ts -> can://my_app/typescript/src/util.ts
-
-# Or get a flat list
 modules = analysis.get_modules()
-print(len(modules), "modules analyzed")
-# 5 modules analyzed
+print(len(modules), "modules")
+
+symbol_table = analysis.get_symbol_table()
+for file_path in sorted(symbol_table)[:5]:
+    print(file_path)
+# expected output:
+# 135 modules
+# src/compile.ts
+# src/index.ts
+# src/locales/index.ts
+# src/mini/index.ts
+# src/v3/ZodError.ts
 ```
 
 ### List all classes
 
-Get all classes in the project by signature. A signature is the file path without its extension, then the dotted member path, for example `src/models.User`.
+A class signature is the file path without its extension, then the dotted member path.
 
 ```python
 classes = analysis.get_classes()
-for signature, tsclass in classes.items():
-    print(f"{signature}: {len(tsclass.methods)} methods")
-# src/controllers.UserController: 3 methods
-# src/models.Entity: 2 methods
-# src/models.User: 4 methods
-# src/models.Robot: 2 methods
-# src/services.UserService: 5 methods
-# src/util.StringUtil.Builder: 3 methods
+print(len(classes), "classes")
+for signature in sorted(classes)[:6]:
+    print(signature)
+# expected output:
+# 53 classes
+# src/v3/ZodError.ZodError
+# src/v3/helpers/parseUtil.ParseStatus
+# src/v3/types.Class
+# src/v3/types.ParseInputLazyPath
+# src/v3/types.ZodAny
+# src/v3/types.ZodArray
 ```
 
-### Get a specific class
+### Get one class
 
-Get a class by its signature. Then inspect its methods, base classes, and fields. `base_classes` lists the extended class and the implemented interfaces together. A getter has the key `isAdmin#get` in `methods`.
+Get one class by its signature. Read `methods` and `base_classes` from the `TSClass` that comes back.
 
 ```python
-tsclass = analysis.get_class("src/models.User")
-if tsclass:
-    print("Methods:", list(tsclass.methods.keys()))
-    print("Base classes:", tsclass.base_classes)
-    print("Fields:", len(tsclass.attributes))
-# Methods: ['describe', 'recordLogin', 'constructor', 'isAdmin#get']
-# Base classes: ['src/models.Entity', 'src/models.Named']
-# Fields: 4
+tsclass = analysis.get_class("src/v3/ZodError.ZodError")
+print(tsclass.signature)
+print(sorted(tsclass.methods))
+print(tsclass.base_classes)
 ```
 
-### List methods in a class
+### List the fields of a class
 
-List every method declared in a class. Each value is a `TSCallable` with a `kind` and a `return_type`.
+Get every field of one class. Each field is a `TSField` with a `name` and a `type`.
 
 ```python
-methods = analysis.get_methods_in_class("src/services.UserService")
-for method_name, callable_obj in methods.items():
-    print(f"{method_name}: {callable_obj.kind} -> {callable_obj.return_type}")
-# create: method -> User
-# createGuest: method -> User
-# describeAll: method -> string[]
-# loginAll: method -> Promise<number>
-# constructor: constructor -> None
+fields = analysis.get_fields("src/v3/types.ZodArray")
+for field in fields:
+    print(field.name, field.type)
 ```
 
-### Get a specific method
+### Get one method
 
-Get the exact method object by class signature and method name. It includes the signature, the parameters, and the source body.
-
-```python
-method = analysis.get_method("src/services.UserService", "create")
-if method:
-    print("Signature:", method.signature)
-    print("Parameters:", [p.name for p in method.parameters])
-    print("Source:")
-    print(method.code)
-# Signature: src/services.UserService.create
-# Parameters: ['name', 'role']
-# Source:
-# create(name: string, role: Role = Role.Member): User {
-#     const id = nextId(this.users.length + this.startId);
-#     const user = new User(id, name, role);
-#     this.users.push(user);
-#     return user;
-#   }
-```
-
-### Get constructors
-
-Get the constructor of a class. The result has the key `constructor`. If a class declares no constructor, the result holds an implicit one with `is_implicit=True`.
+Get one method by the class signature and the method name. Read its source from `code`.
 
 ```python
-constructors = analysis.get_constructors("src/models.User")
-for name, ctor in constructors.items():
-    print(f"{name}: {ctor.signature}")
-    print("Parameters:", [p.name for p in ctor.parameters])
-# constructor: src/models.User.constructor
-# Parameters: ['id', 'name', 'role']
-```
+methods = analysis.get_methods_in_class("src/v3/ZodError.ZodError")
+name = sorted(methods)[0]
 
-### Get class attributes (fields)
-
-Get every field declared in a class. Constructor parameter properties, such as `name` and `role`, count as fields.
-
-```python
-attributes = analysis.get_fields("src/models.User")
-for attr in attributes:
-    print(f"{attr.name}: {attr.type} ({attr.accessibility}, static={attr.is_static})")
-# loginCount: number (private, static=False)
-# instances: number (None, static=True)
-# name: string (public, static=False)
-# role: Role (private, static=False)
+method = analysis.get_method("src/v3/ZodError.ZodError", name)
+print(method.signature)
+print(method.return_type)
+print(method.code)
 ```
 
 ### Filter classes by name pattern
 
-Use substring matching on the signature to find classes that match inclusion and exclusion patterns.
+Match an inclusion pattern and an exclusion pattern against the class signature.
 
 ```python
-# Find all user-related classes, but not the controller
-user_classes = analysis.get_classes_by_criteria(
-    inclusions=["User"],
-    exclusions=["Controller"],
+matches = analysis.get_classes_by_criteria(
+    inclusions=["ZodError"],
+    exclusions=["v4"],
 )
-for name in user_classes.keys():
-    print(name)
-# src/models.User
-# src/services.UserService
+for signature in sorted(matches):
+    print(signature)
 ```
 
-### List all imports
+### List imports
 
-Get imports from all modules in the project. Each imported name is one `TSImport`, with the resolved module path.
+Get the imports of every module. Each entry is a `TSImport` with the imported name and the resolved module path.
 
 ```python
 imports = analysis.get_imports()
-for file_path, import_list in imports.items():
-    print(f"{file_path}: {len(import_list)} imports")
-# src/controllers.ts: 1 imports
-# src/index.ts: 7 imports
-# src/models.ts: 0 imports
-# src/services.ts: 4 imports
-# src/util.ts: 0 imports
-
-for imp in imports["src/services.ts"]:
-    print(f"{imp.name} from {imp.module} -> {imp.resolved_module} (type_only={imp.is_type_only})")
-# Named from ./models -> src/models.ts (type_only=True)
-# Role from ./models -> src/models.ts (type_only=False)
-# User from ./models -> src/models.ts (type_only=False)
-# UserId from ./models -> src/models.ts (type_only=True)
+for file_path, import_list in sorted(imports.items())[:3]:
+    print(file_path, len(import_list), "imports")
 ```
 
-### List interfaces, enums, and type aliases
+## Type declarations: interfaces, enums, and type aliases
 
-TypeScript has type declarations that Python does not. Get them with `get_interfaces()`, `get_enums()`, `get_enum_members()`, and `get_type_aliases()`.
+TypeScript has type declarations that Python does not have. Zod declares its error types in `src/v3/ZodError.ts`.
+
+### List interfaces
+
+Zod declares an interface for each kind of validation issue.
 
 ```python
 interfaces = analysis.get_interfaces()
-for signature, iface in interfaces.items():
-    print(f"{signature}: methods={list(iface.methods.keys())} properties={[p.name for p in iface.properties.values()]}")
-# src/models.Identifiable: methods=[] properties=['id']
-# src/models.Named: methods=['describe'] properties=['name']
+for signature in sorted(interfaces)[:4]:
+    print(signature)
+# expected output:
+# src/v3/ZodError.ZodCustomIssue
+# src/v3/ZodError.ZodInvalidArgumentsIssue
+# src/v3/ZodError.ZodInvalidDateIssue
+# src/v3/ZodError.ZodInvalidEnumValueIssue
+```
 
-enums = analysis.get_enums()
-for signature, enum in enums.items():
-    print(f"{signature}: is_const={enum.is_const} members={[m.name for m in enum.members]}")
-# src/models.Role: is_const=False members=['Admin', 'Member', 'Guest']
-# src/models.Flag: is_const=True members=['None', 'Active']
+### List enums
 
-for member in analysis.get_enum_members("src/models.Role"):
-    print(f"{member.name} = {member.value}")
-# Admin = admin
-# Member = member
-# Guest = guest
+Zod declares two enums, one in each source tree.
 
+```python
+for signature in sorted(analysis.get_enums()):
+    print(signature)
+# expected output:
+# src/v3/types.ZodFirstPartyTypeKind
+# src/v4/classic/compat.ZodFirstPartyTypeKind
+```
+
+To read the members of one enum, call `get_enum_members` with the enum signature. Each member holds a `name` and a `value`.
+
+```python
+for member in analysis.get_enum_members("src/v3/types.ZodFirstPartyTypeKind"):
+    print(member.name, "=", member.value)
+```
+
+### List type aliases
+
+A type alias keeps the same signature shape as a class or an interface.
+
+```python
 type_aliases = analysis.get_type_aliases()
-for signature, alias in type_aliases.items():
-    print(f"{signature} = {alias.aliased_type}")
-# src/models.UserId = string | number
+for signature in sorted(type_aliases)[:6]:
+    print(signature)
+# expected output:
+# src/v3/ZodError.DenormalizedError
+# src/v3/ZodError.ErrorMapCtx
+# src/v3/ZodError.IssueData
+# src/v3/ZodError.StringValidation
+# src/v3/ZodError.ZodErrorMap
+# src/v3/ZodError.ZodFormattedError
 ```
 
-### Get decorators
+## Decorators
 
-The backend captures each decorator with its arguments. `positional_arguments` holds the raw source text of each argument. Look up a callable, a class, or every callable that carries a given decorator name.
+### Read the decorators
+
+The backend captures each decorator with its arguments. Pass a class signature to `get_class_decorators`. Pass a list of decorator names to `get_methods_with_decorators`.
 
 ```python
-for decorator in analysis.get_decorators("src/controllers.UserController.show"):
-    print(decorator.name, decorator.positional_arguments)
-# Get ['"/:id"']
-
-for decorator in analysis.get_class_decorators("src/controllers.UserController"):
-    print(decorator.name, decorator.positional_arguments)
-# Controller ['"/users"']
-
+print(analysis.get_class_decorators("src/v3/types.ZodArray"))
 print(analysis.get_methods_with_decorators(["Get"]))
-# {'Get': ['src/controllers.UserController.show', 'src/controllers.UserController.list']}
 ```
 
-## Call graph: callers, callees, reachability
+## Call graph: callers, callees, and reachability
 
-<Aside type="caution" title="Always set analysis_level">
-All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table, and the call graph has 0 nodes and 0 edges.
-</Aside>
+Every call-graph query needs `analysis_level=AnalysisLevel.call_graph`. The default level builds the symbol table only, and it resolves no call targets.
 
-### Build a call graph
+### Build the call graph
 
-The call graph is a `networkx.DiGraph`. Its edges point from **caller** to **callee**. The node keys are the signatures.
-
-Every node carries a `kind` attribute and an `id` attribute. In `my_app` the kinds are `module`, `callable`, and `external`. A module node is the caller of its top-level code. Filter on `kind == "callable"` to remove the module nodes and the external nodes.
+The call graph is a `networkx.DiGraph`, and its edges point from the caller to the callee.
 
 ```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-
-# eager=True rebuilds a cache that a lower level wrote
-analysis = CLDK.typescript(
-    project_path="my_app",
-    analysis_level=AnalysisLevel.call_graph,
-    eager=True,
-)
-
 cg = analysis.get_call_graph()
-print(f"{cg.number_of_nodes()} nodes, {cg.number_of_edges()} edges")
-# 40 nodes, 45 edges
-
-print(cg.nodes["src/index.main"])
-# {'id': 'can://my_app/typescript/src/index.ts/main', 'kind': 'callable'}
-
-# Keep only the callable nodes
-callables = [n for n, d in cg.nodes(data=True) if d["kind"] == "callable"]
-print(len(callables), "callable nodes")
-# 30 callable nodes
+print(cg.number_of_nodes(), "nodes,", cg.number_of_edges(), "edges")
+# expected output:
+# 2255 nodes, 4610 edges
 ```
 
-### Find who calls a method
+### List the external targets
 
-Use `get_callers` to find every caller of a target method. The result holds `target_method` and a list of `caller_details`. Each entry has a `caller_signature` and an `edge` with `type`, `weight`, and `provenance`. The `provenance` tuple names the resolver that found the edge.
+An external symbol is a call target that the backend never analyzed. Its key is the module name and the symbol name. A runtime built-in has the module name `(builtin)`.
 
 ```python
+externals = sorted(analysis.get_external_symbols())
+print(externals[:4])
+# expected output:
+# ['(builtin).abs', '(builtin).add', '(builtin).all', '(builtin).apply']
+```
+
+### Find the callers of a method
+
+The result holds `target_method` and a list of `caller_details`. Each entry in `caller_details` holds a `caller_signature` and an `edge` with `type`, `weight`, and `provenance`. The `provenance` tuple names the resolver that found the edge.
+
+```python
+target = sorted(analysis.get_methods_in_class("src/v3/ZodError.ZodError"))[0]
+
 callers = analysis.get_callers(
-    target_class_name="src/services.UserService",
-    target_method_declaration="create",
+    target_class_name="src/v3/ZodError.ZodError",
+    target_method_declaration=target,
 )
-print("Target:", callers["target_method"])
+print(callers["target_method"])
 for detail in callers["caller_details"]:
     print(detail["caller_signature"], detail["edge"]["provenance"])
-# Target: src/services.UserService.create
-# src/controllers.UserController.show ('tsc',)
-# src/index.main ('tsc',)
-# src/services.UserService.createGuest ('tsc',)
 ```
 
-### Find what a method calls
+### Find the callees of a method
 
-Use `get_callees` to find every callee of a source method. The result holds `source_method` and a list of `callee_details`. The decorator factories `Param` and `Get` are callees too, because the backend attributes decorator calls to the decorated method.
+The result holds `source_method` and a list of `callee_details`, with the same edge shape.
 
 ```python
+source = sorted(analysis.get_methods_in_class("src/v3/types.ZodArray"))[0]
+
 callees = analysis.get_callees(
-    source_class_name="src/controllers.UserController",
-    source_method_declaration="show",
+    source_class_name="src/v3/types.ZodArray",
+    source_method_declaration=source,
 )
 for detail in callees["callee_details"]:
     print(detail["callee_signature"], detail["edge"]["provenance"])
-# src/services.UserService.create ('tsc',)
-# src/models.User.describe ('tsc',)
-# src/controllers.Param ('tsc', 'defuse')
-# src/controllers.Get ('defuse',)
 ```
 
-### Extract call graph for a class
+### Get the call graph of a class
 
-Get all call edges reachable from the methods of a class. To start from one method, pass its full signature as `method_signature`.
+Get every call edge reachable from the methods of one class. To start from one method, pass its full signature as the second argument.
 
 ```python
-edges = analysis.get_class_call_graph("src/controllers.UserController")
-print(len(edges), "edges reachable from UserController")
+edges = analysis.get_class_call_graph("src/v3/types.ZodArray")
+print(len(edges), "edges")
 for caller, callee in edges[:4]:
-    print(f"  {caller} -> {callee}")
-# 13 edges reachable from UserController
-#   src/controllers.UserController.show -> src/services.UserService.create
-#   src/controllers.UserController.show -> src/models.User.describe
-#   src/controllers.UserController.show -> src/controllers.Param
-#   src/controllers.UserController.show -> src/controllers.Get
-
-edges = analysis.get_class_call_graph(
-    "src/controllers.UserController",
-    "src/controllers.UserController.show",
-)
-print(len(edges), "edges reachable from show")
-# 8 edges reachable from show
+    print(caller, "->", callee)
 ```
 
 ### Compute reachability
 
-Reachability is a `networkx` query over the call graph. The node keys are the signatures, so pass them to `nx.has_path()` directly.
+Reachability is a `networkx` query over the call graph. The key of a callable node is its signature, so pass the key to `nx.has_path()` directly.
 
 ```python
 import networkx as nx
 
 cg = analysis.get_call_graph()
-src = "src/index.main"
-sink = "src/models.User.describe"
 
-reachable = nx.has_path(cg, src, sink)
-print(f"Sink reachable from entry point: {reachable}")
-if reachable:
-    path = nx.shortest_path(cg, src, sink)
-    print(f"Call chain: {' -> '.join(path)}")
-# Sink reachable from entry point: True
-# Call chain: src/index.main -> src/controllers.UserController.show -> src/models.User.describe
+# Pick a source node and a target node from the graph itself
+source = sorted(n for n in cg.nodes if n.startswith("src/v3/types.ZodArray."))[0]
+target = sorted(n for n in cg.nodes if n.startswith("src/v3/ZodError.ZodError."))[0]
+
+if nx.has_path(cg, source, target):
+    print(" -> ".join(nx.shortest_path(cg, source, target)))
 ```
 
-### List call paths by name <Badge text="2.0" variant="caution" />
+### Find the call paths between two callables <Badge text="2.0" variant="caution" />
 
-`reaches()` and `call_paths_between()` accept short names, such as `main` or `User.describe`. Each path is a list of hops, and each hop has `frm` and `to` nodes.
+`reaches()` and `call_paths_between()` take a callable name. A name matches a whole signature, or a dotted suffix of one. Each path is a list of hops, and each hop has a `frm` node and a `to` node.
 
 ```python
-print(analysis.reaches("main", "User.describe"))
-# True
+methods = analysis.get_methods_in_class("src/v3/ZodError.ZodError")
+source = analysis.get_method("src/v3/ZodError.ZodError", sorted(methods)[0]).signature
+target = "src/v3/ZodError.quotelessJson"
 
-result = analysis.call_paths_between("main", "User.describe")
+print(analysis.reaches(source, target))
+
+result = analysis.call_paths_between(source, target)
 for path in result.paths:
-    nodes = [path.hops[0].frm.callable] + [hop.to.callable for hop in path.hops]
+    nodes = [path.hops[0].frm.callable]
+    nodes += [hop.to.callable for hop in path.hops]
     print(" -> ".join(nodes))
-# src/index.main -> src/controllers.UserController.show -> src/models.User.describe
-# src/index.main -> src/services.announce -> src/models.User.describe
 ```
 
-## Working with the TSClass and TSCallable models
+## Model objects: TSClass and TSCallable
 
-CLDK returns typed model objects, not plain strings. Inspect these objects for detail about classes and callables.
+CLDK returns typed model objects, not plain strings. The run for this page did not record the field values of these objects for Zod. For the full field list of each model, read the [TypeScript API reference](/reference/python-api/typescript/).
 
 ### Inspect a TSClass
 
-A `TSClass` object contains methods, fields, base classes, implemented interfaces, decorators, and its line span.
+A `TSClass` holds the methods, the fields, the base classes, the implemented interfaces, and the line span of a class.
 
 ```python
-tsclass = analysis.get_class("src/models.User")
-print("Name:", tsclass.name)
-print("Signature:", tsclass.signature)
-print("Base classes:", tsclass.base_classes)
-print("Implements:", tsclass.implements_types)
-print("Methods:", list(tsclass.methods.keys()))
-print("Attributes:", [attr.name for attr in tsclass.attributes.values()])
-print("Lines:", tsclass.start_line, "to", tsclass.end_line)
-# Name: User
-# Signature: src/models.User
-# Base classes: ['src/models.Entity', 'src/models.Named']
-# Implements: ['src/models.Named']
-# Methods: ['describe', 'recordLogin', 'constructor', 'isAdmin#get']
-# Attributes: ['loginCount', 'instances', 'name', 'role']
-# Lines: 31 to 56
+tsclass = analysis.get_class("src/v3/types.ZodArray")
+print(tsclass.name)
+print(tsclass.signature)
+print(tsclass.base_classes)
+print(tsclass.start_line, "to", tsclass.end_line)
 ```
 
 ### Inspect a TSCallable
 
-A `TSCallable` represents a function, a method, a constructor, an accessor, or an arrow function. Its `kind` is one of `function`, `method`, `constructor`, `getter`, `setter`, `arrow`, and `function_expression`. It includes the parameters, the return type, the cyclomatic complexity, and the source body.
+A `TSCallable` represents a function, a method, a constructor, an accessor, or an arrow function. Its `kind` is one of `function`, `method`, `constructor`, `getter`, `setter`, `arrow`, and `function_expression`.
 
 ```python
-method = analysis.get_method("src/models.User", "recordLogin")
-print("Name:", method.name)
-print("Kind:", method.kind)
-print("Return type:", method.return_type)
+methods = analysis.get_methods_in_class("src/v3/types.ZodArray")
+method = methods[sorted(methods)[0]]
+
+print(method.kind, "->", method.return_type)
 print("Async:", method.is_async)
 print("Complexity:", method.cyclomatic_complexity)
-print("Source body:")
 print(method.code)
-# Name: recordLogin
-# Kind: method
-# Return type: Promise<number>
-# Async: True
-# Complexity: 1
-# Source body:
-# async recordLogin(): Promise<number> {
-#     this.loginCount += 1;
-#     return this.loginCount;
-#   }
 ```
 
-### Access method parameters
+### Read the class hierarchy
 
-`get_method_parameters()` returns the parameter names only. For the types, read `parameters` on the `TSCallable`.
+Read the base classes of a class. Find the direct subclasses of a class. `get_sub_classes()` also accepts an interface signature. `get_nested_classes()` always returns `[]` on schema v2, because a class node has no bucket for nested types.
 
 ```python
-params = analysis.get_method_parameters("src/services.UserService", "create")
-print("Parameters:", params)
-# Parameters: ['name', 'role']
-
-method = analysis.get_method("src/controllers.UserController", "show")
-print([f"{p.name}: {p.type}" for p in method.parameters])
-# ['id: string']
+print(analysis.get_extended_classes("src/v3/types.ZodArray"))
+print(analysis.get_implemented_interfaces("src/v3/types.ZodArray"))
+print(list(analysis.get_sub_classes("src/v3/types.ZodAny").keys()))
+print(analysis.get_nested_classes("src/v3/types.ZodArray"))
 ```
 
-### Inspect inheritance and nesting
+## Source positions <Badge text="2.0" variant="caution" />
 
-Read the base classes from a class object, or find the direct subclasses of a class. `get_sub_classes()` also works for an interface. `get_nested_classes()` always returns `[]` on schema v2, because a class node has no bucket for nested types. A callable declared inside a function is in `inner_callables` of the `TSCallable`.
+### Locate a line
+
+`locate()` resolves a file path and a 1-based line number to the callable that encloses that line. The result also names the type that owns the callable, the module, and the innermost body node. If the line sits at module scope, `callable` is `None` and `diagnostics` holds a `module_scope` code.
 
 ```python
-tsclass = analysis.get_class("src/models.User")
-print("Base classes:", tsclass.base_classes)
-# Base classes: ['src/models.Entity', 'src/models.Named']
-
-# Get the direct subclasses of a base class
-subclasses = analysis.get_sub_classes("src/models.Entity")
-for name in subclasses.keys():
-    print(name)
-# src/models.User
-
-# Get every class that implements an interface
-print(list(analysis.get_sub_classes("src/models.Named").keys()))
-# ['src/models.User', 'src/models.Robot']
-
-print("Interfaces:", analysis.get_implemented_interfaces("src/models.User"))
-# Interfaces: ['src/models.Named']
-
-# Always [] on schema v2
-print(analysis.get_nested_classes("src/models.User"))
-# []
-
-# A function nested inside a function
-classify = analysis.get_functions()["src/util.classify"]
-print(list(classify.inner_callables.keys()))
-# ['keyOf']
+loc = analysis.locate("src/v3/ZodError.ts", 100)
+print(loc.callable)
+print(loc.module.path)
+print([d.code for d in loc.diagnostics])
 ```
 
-### Get extended classes
+### Read the source of a callable
 
-List the base classes that a class extends. Implemented interfaces are not in this list.
-
-```python
-bases = analysis.get_extended_classes("src/models.User")
-print("Base classes:", bases)
-# Base classes: ['src/models.Entity']
-```
-
-## Locate a source position <Badge text="2.0" variant="caution" />
-
-`locate()` resolves a file path and a 1-based line number to the callable that encloses it. The result also names the owning type, the module, and the innermost body node. `span` covers the source of the enclosing callable. `get_source()` returns the source text of a callable signature.
+`get_source()` returns the source text of one callable signature.
 
 ```python
-loc = analysis.locate("src/services.ts", 27)
-print("Callable:", loc.callable.signature)
-print("Class:", loc.callable.class_signature)
-print("Module:", loc.module.path)
-print("Body node:", loc.body.kind, "->", loc.body.callee)
-print("Lines:", loc.span.start[0], "to", loc.span.end[0])
-# Callable: src/services.UserService.create
-# Class: src/services.UserService
-# Module: src/services.ts
-# Body node: call -> can://my_app/@external/(builtin)/push
-# Lines: 24 to 29
-
-# A line at module scope has no callable and a diagnostic
-loc = analysis.locate("src/services.ts", 1)
-print("Callable:", loc.callable)
-print("Diagnostics:", [d.code for d in loc.diagnostics])
-# Callable: None
-# Diagnostics: ['module_scope']
-
-# Get the source text of a callable by its signature
-print(analysis.get_source("src/services.makeGuestName"))
-# export function makeGuestName(seed: number): string {
-#   return `guest-${seed}`;
-# }
+print(analysis.get_source("src/v3/ZodError.quotelessJson"))
 ```
 
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="Python examples" description="The same patterns for Python projects: symbol tables, call graphs, and the PyClass and PyCallable models." href="/examples/python/" />
-  <LinkCard title="Common tasks" description="The same calls as a quick task-indexed reference." href="/guides/common-tasks/" />
-  <LinkCard title="TypeScript API reference" description="Method signatures and docstrings for TypeScriptAnalysis." href="/reference/python-api/typescript/" />
+  <LinkCard title="Python examples" description="The same patterns for Python packages: symbol table, call graph, and class relationships." href="/examples/python/" />
+  <LinkCard title="TypeScript API reference" description="Method signatures and return types for TypeScriptAnalysis and the TypeScript models." href="/reference/python-api/typescript/" />
+  <LinkCard title="TypeScript backend" description="How the TypeScript backend builds the symbol table and the call graph, and where it writes its cache." href="/backends/codeanalyzer-ts/" />
 </CardGrid>
