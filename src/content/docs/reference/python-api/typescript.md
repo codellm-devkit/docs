@@ -3,11 +3,12 @@ title: "TypeScript API"
 description: "Program analysis for TypeScript and related data models."
 ---
 
-TypeScript analysis is **beta**. `TypeScriptAnalysis` exposes a typed symbol
-table, classes, interfaces, enums, decorators, and a call graph through nearly
-the same API as [Java](/reference/python-api/java/) and
-[Python](/reference/python-api/python/). Its symbol table and call graph are
-stable, and CLDK 2.0 adds the dataflow graphs and framework entrypoint detection.
+`TypeScriptAnalysis` exposes a typed symbol table, classes, interfaces, enums,
+decorators, and a call graph through nearly the same API as
+[Java](/reference/python-api/java/) and [Python](/reference/python-api/python/).
+The symbol table and the call graph are stable, and CLDK 2.0 adds the dataflow
+graphs and framework entrypoint detection. The backend also analyzes JavaScript
+sources.
 
 ## Overview
 

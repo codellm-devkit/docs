@@ -27,7 +27,7 @@ CLDK?](/what-is-cldk/), or the [Quickstart](/quickstart/).
 - **[Core (CLDK)](/reference/python-api/core/)**, the factory: the per-language `CLDK.java()`, `CLDK.python()`, and `CLDK.typescript()` entry points.
 - **[Python analysis](/reference/python-api/python/)**: symbol table and call graph, from Jedi and the level-2 defuse linker.
 - **[Java analysis](/reference/python-api/java/)**, the most complete analysis: symbol table, call graph, subclasses, and interfaces.
-- **[TypeScript analysis](/reference/python-api/typescript/)** <span title="beta">(beta)</span>: symbol table, call graph, interfaces, enums, decorators, and framework entrypoints.
+- **[TypeScript analysis](/reference/python-api/typescript/)**: symbol table, call graph, interfaces, enums, decorators, and framework entrypoints. It also analyzes JavaScript sources.
 
 CLDK 2.0 adds the dataflow and taint methods to all three. See [Dataflow graphs](/guides/dataflow/). Go and Rust are planned.
 

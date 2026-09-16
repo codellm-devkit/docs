@@ -79,19 +79,16 @@ The language selects the backend. Java uses [codeanalyzer-java](/backends/codean
 
 ## Language coverage
 
-You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java, Python, and TypeScript. Java goes deepest, because it adds class-hierarchy analysis.
-
-TypeScript is in beta. Its symbol table and call graph work through `CLDK.typescript(...)`. The backend does not detect all framework entrypoints yet. Go and Rust backends are not started. Contributors are welcome.
+You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java, Python, and TypeScript, and all three are production-ready. Java goes deepest, because it adds class-hierarchy analysis. TypeScript also analyzes JavaScript sources, and it detects framework entrypoints.
 
 | Language   | Status         | Symbol table | Call graph / callers / callees |
 | ---------- | -------------- | ------------ | ------------------------------ |
 | Java       | Supported      | Yes          | Yes                            |
 | Python     | Supported      | Yes          | Yes                            |
-| TypeScript | Beta           | Yes          | Yes                            |
-| Go         | Not started    | Planned      | Planned                        |
-| Rust       | Not started    | Planned      | Planned                        |
+| TypeScript | Supported      | Yes          | Yes                            |
+| JavaScript | Supported      | Yes          | Yes                            |
 
-Infrastructure-as-code (Helm) has a beta backend, [codeanalyzer-iac](/backends/codeanalyzer-iac/), with no `CLDK.iac(...)` factory yet. See [The codeanalyzer backends](/backends/) for every backend and its maturity.
+Infrastructure-as-code (Helm) has a beta backend, [codeanalyzer-iac](/backends/codeanalyzer-iac/). It has no `CLDK.iac(...)` factory yet, so you run `caniac` as a command. See [The codeanalyzer backends](/backends/) for every backend and its maturity.
 
 ## Next steps
 
