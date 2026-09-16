@@ -88,8 +88,10 @@ One call converts a directory of source files into a typed `analysis` object. Th
 
 ## Next steps
 
-The same calls can run behind an agent tool. **COCOA** is a Claude Code plugin. It runs CLDK to answer questions about callers, reachability, and change impact.
+The same calls run behind any tool that needs program facts. To understand what the backends build under these calls, read the guides in order.
 
 <CardGrid>
+  <LinkCard title="Core concepts" description="What a static analysis is, why it approximates, and the four rungs CLDK builds." href="/guides/concepts/" />
   <LinkCard title="What is CLDK?" description="The programming model: language factory -> analysis object -> typed models." href="/what-is-cldk/" />
+  <LinkCard title="Python examples" description="Worked snippets against Flask, from symbol table to call graph." href="/examples/python/" />
 </CardGrid>
