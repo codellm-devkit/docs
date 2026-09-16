@@ -257,7 +257,7 @@ Callable reachability asks whether one function can call another, through any nu
 ## What the pinned Python backend does not link
 
 <Aside type="caution" title="A Python refutation is not evidence of absence">
-This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it. A later CLDK release raises the pin. The rest of this section describes the behavior of the pinned 1.5.2 backend, which is what the pre-release installs today.
+This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. The rest of this section describes the behavior of the pinned 1.5.2 backend, which is what the pre-release installs today.
 
 At CLDK 2.0.0rc7 with codeanalyzer-python 1.5.2, the SDK does not link a value across a call. Add one more function to the fixture, so that a caller of `build_query` is in view as well:
 

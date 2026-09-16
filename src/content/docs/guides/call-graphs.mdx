@@ -183,7 +183,7 @@ ts.flows_to_call("userInput", "sanitize", within="buildQuery")
 # -> True
 ```
 
-The pinned Python backend does not link value flow across a call, so a Python `False` from `flows_to_call` refutes nothing. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it. A later CLDK release raises the pin. In Python, keep value questions inside one callable. See [Dataflow graphs](/guides/dataflow/).
+The pinned Python backend does not link value flow across a call, so a Python `False` from `flows_to_call` refutes nothing. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. In Python, keep value questions inside one callable. See [Dataflow graphs](/guides/dataflow/).
 </Aside>
 
 ## What CLDK returns

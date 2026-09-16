@@ -75,7 +75,7 @@ analysis.flows_to_call("request", "build_query", within="handle")
 # -> False
 ```
 
-The graph holds the vertices for this call. The traversal in the pinned backend does not connect them. A real behavior is absent from the model, and that is under-approximation. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it. A later CLDK release raises the pin.
+The graph holds the vertices for this call. The traversal in the pinned backend does not connect them. A real behavior is absent from the model, and that is under-approximation. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`.
 
 The cost to you is a clean answer that is wrong. A batch query reports the pair as searched and empty, with no diagnostic to warn you.
 
@@ -312,7 +312,7 @@ analysis.slice_forward("userInput", within="buildQuery").total
 ```
 
 <Aside type="caution" title="Rung 4 crosses calls in TypeScript, not in Python">
-codeanalyzer-typescript 1.6.0 links value flow across a call, as the numbers above record. codeanalyzer-python 1.5.2 emits the parameter vertices and the summary records, and the SDK traversal does not connect them. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it. A later CLDK release raises the pin. Every cross-procedure value-flow example in this track uses TypeScript, because that is what the pinned backends answer today. For Python on 1.5.2, treat rung 4 value queries as intraprocedural.
+codeanalyzer-typescript 1.6.0 links value flow across a call, as the numbers above record. codeanalyzer-python 1.5.2 emits the parameter vertices and the summary records, and the SDK traversal does not connect them. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. Every cross-procedure value-flow example in this track uses TypeScript, because that is what the pinned backends answer today. For Python on 1.5.2, treat rung 4 value queries as intraprocedural.
 </Aside>
 
 ## How to read this track
