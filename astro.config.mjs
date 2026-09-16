@@ -28,6 +28,11 @@ export default defineConfig({
       },
       favicon: "/favicon.png",
       customCss: ["./src/styles/docs.css"],
+      // Wraps Starlight's SocialIcons to prepend live GitHub counts for
+      // codellm-devkit/python-sdk. See src/components/HeaderStats.astro.
+      components: {
+        SocialIcons: "./src/components/HeaderStats.astro",
+      },
       expressiveCode: {
         plugins: [pluginCollapsibleSections(), pluginLineNumbers()],
         styleOverrides: {

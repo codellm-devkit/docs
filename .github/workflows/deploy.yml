@@ -55,6 +55,12 @@ jobs:
         run: npm ci
 
       - name: Build site
+        # HeaderStats.astro reads the python-sdk star/fork/watcher counts at
+        # build time. Runners share outbound IPs, so the anonymous GitHub API
+        # budget of 60/hour is easy to exhaust; without a token the counts
+        # silently vanish from the header. The build never fails either way.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build
 
       - name: Publish dist to gh-pages
