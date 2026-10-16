@@ -194,6 +194,8 @@ export default defineConfig({
                 { label: "Python analysis", slug: "reference/python-api/python", attrs: { "data-cldk-icon": "python" } },
                 { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "java" } },
                 { label: "TypeScript analysis", slug: "reference/python-api/typescript", attrs: { "data-cldk-icon": "typescript" } },
+                { label: "Results and errors", slug: "reference/python-api/results", attrs: { "data-cldk-icon": "results-16" } },
+                { label: "Tree-sitter utilities", slug: "reference/python-api/treesitter", attrs: { "data-cldk-icon": "diagram-tree-16" } },
               ],
             },
           ],
