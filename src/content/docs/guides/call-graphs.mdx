@@ -9,13 +9,13 @@ A call graph is the map of which code can call which other code. This page answe
 
 ## Nodes are callables, edges are possible calls
 
-A **call graph** has one node for each **callable** in a project. A callable is a function, a method, a constructor, or an arrow function. Each directed edge points from a caller to a callee.
+A **call graph** has one node for each **callable** in a project that makes or receives a call. In a Java graph, a call to code outside the project does not count. A callable is a function, a method, a constructor, or an arrow function. Each directed edge points from a caller to a callee.
 
 An edge from `A` to `B` claims one thing: a call to `B` **can** happen while `A` runs. The word *can* carries the whole claim.
 
 CLDK reads the source text and never runs the program. An edge inside a branch that no input ever takes is still an edge. A call graph does not say how often a call happens, in what order two calls happen, or whether any call happens at all.
 
-Every example on this page uses one small fixture.
+Most examples on this page use one small fixture.
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
@@ -53,6 +53,12 @@ Every example on this page uses one small fixture.
     ```
   </TabItem>
 </Tabs>
+
+Save the Python file as `calls_py/queries.py` and the TypeScript file as `calls_ts/src/queries.ts`. If you use `tiny_py` or `tiny_ts` from [Symbol tables](/guides/symbol-tables/) for this page instead, some outputs on that page change. The outputs on this page come from cldk 2.0.0, with codeanalyzer-python 1.5.3 and codeanalyzer-typescript 1.6.0.
+
+If `CLDK.python(...)` stops with `RuntimeError: Could not find a suitable base Python interpreter`, set `SYSTEM_PYTHON` as the Python Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies) shows.
+
+Two blocks on this page build a TypeScript analysis of `calls_ts`, at two different analysis levels. If a TypeScript cache exists, CLDK reuses it, whatever analysis level it holds. So both blocks pass `eager=True`, which runs the analysis again at the level that each block asks for.
 
 The Python fixture has three callables and two call edges. CLDK keys each node by its **signature**, the dotted name that every other accessor takes. Each edge carries the name of the resolver that drew it.
 
@@ -104,7 +110,7 @@ The callee is a value here, not a name. The resolver must first track which func
 
 ## Resolvers differ in precision
 
-A **resolver** is the part of a backend that answers the question "which callable does this call site reach". Resolvers form a ladder, and each rung costs more time than the one below it.
+A **resolver** is the part of a backend that answers the question "which callable does this call site reach". The list below orders four kinds of resolver from the least precise to the most precise. Each kind costs more time than the kind before it.
 
 1. **A name match.** The resolver takes every callable whose name equals the text at the call site. It is cheap, and it over-reports for every name that two modules share.
 2. **A scope-aware resolution.** The resolver follows imports and local bindings to the one definition that the name binds to.
@@ -141,6 +147,14 @@ Read `prov` as the reason that the edge exists, not as a confidence score. None 
 The wire record names the field `prov`. On the `networkx` graph the same information is the edge attribute `provenance`, and it holds a tuple.
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="calls_py",
+    analysis_level=AnalysisLevel.call_graph,
+)
+
 cg = analysis.get_call_graph()
 for caller, callee, data in cg.edges(data=True):
     print(caller, "->", callee, data["provenance"])
@@ -162,9 +176,9 @@ The direction of the error is the important part, because the two claims you can
 So an absence claim needs more than a missing path. A **sink** is a place where a value becomes dangerous, such as a database query or a shell command. If you plan to state that a request handler never reaches a sink, the call graph alone does not support you.
 
 <Aside type="caution" title="A missing edge is not a proof">
-`exhausted` holds each source-sink pair that `taint()` searched to the end with nothing found. `unresolved` holds one entry for each thing that stopped a pair short of an answer, such as a call site that `taint()` cannot follow. While `unresolved` holds an entry, no absence claim in that result stands.
+`exhausted` holds each source-sink pair that `taint()` searched to the end with nothing found. `unresolved` holds one entry for each pair that `taint()` skipped. In CLDK 2.0.0, each entry has the code `degenerate_pair`, which marks a source and a sink at the same position. No backend reports a call site that `taint()` cannot follow. While `unresolved` holds an entry, no absence claim in that result stands.
 
-An empty `unresolved` still does not turn `exhausted` into a proof. `exhausted` is a claim about the graph that the backend emitted, never about the program. On the Python fixture, `taint()` puts `('request', 'raw')` in `exhausted` and leaves `unresolved` empty. The source text plainly carries that flow. In Python, no `taint()` result refutes a flow that crosses a call. See [Taint analysis](/guides/taint/).
+An empty `unresolved` still does not turn `exhausted` into a proof. `exhausted` is a claim about the graph that the backend emitted, never about the program. On the Python fixture, `taint()` puts `('request', 'raw')` in `exhausted` and leaves `unresolved` empty. The source text plainly carries that flow. On codeanalyzer-python 1.5.3 and on 1.5.4, no Python `taint()` result refutes a flow that crosses a call. See [Taint analysis](/guides/taint/).
 
 The two graphs miss in opposite directions. A **data dependence** links a line that writes a value to a line that reads it. The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call edges under-approximate, which is the unsafe one.
 </Aside>
@@ -175,15 +189,21 @@ For a longer treatment of the two directions, read Michael D. Ernst, "Program An
 An edge says that a call can happen. It does not say which value crosses it. For a value question, use the dataflow methods. The TypeScript backend links value flow across a call:
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
 ts = CLDK.typescript(
-    project_path="tiny_ts",
+    project_path="calls_ts",
     analysis_level=AnalysisLevel.system_dependency_graph,
+    eager=True,
 )
-ts.flows_to_call("userInput", "sanitize", within="buildQuery")
+print(ts.flows_to_call("userInput", "sanitize", within="buildQuery"))
 # -> True
 ```
 
-The pinned Python backend does not link value flow across a call, so a Python `False` from `flows_to_call` refutes nothing. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. In Python, keep value questions inside one callable. See [Dataflow graphs](/guides/dataflow/).
+If a caller passes a parameter straight into a call, the pinned Python backend does not carry that value into the callee. So a Python `False` from `flows_to_call` refutes nothing. This is also true inside one callable. For example, `flows_to_call("user_input", "sanitize", within="build_query")` returns `False` on 1.5.3. See [Dataflow graphs](/guides/dataflow/).
+
+codeanalyzer-python 1.5.4 fixes this defect ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0 pins `codeanalyzer-python==1.5.3`, which still has the defect ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. pip prints an `ERROR` line about the pin conflict, and then installs 1.5.4. In a uv project, `uv add` refuses the conflict. For uv, follow [Get the fix](/guides/system-dependence/#get-the-fix).
 </Aside>
 
 ## What CLDK returns
@@ -198,11 +218,13 @@ The pinned Python backend does not link value flow across a call, so a Python `F
 | `call_paths_between(src, dst, *, depth=None, max_paths=10)` <Badge text="2.0" variant="caution" /> | `FlowPaths` | Which call paths connect them |
 
 <Aside type="caution" title="Two of these methods need CLDK 2.0">
-`reaches` and `call_paths_between` need CLDK 2.0. Version 2.0 is a release candidate, so `pip install cldk` gives you 1.5.0. To install the pre-release, run:
+`reaches` and `call_paths_between` need CLDK 2.0 or later. To upgrade from CLDK 1.x, run:
 
 ```bash frame="none"
-pip install --pre cldk
+pip install -U cldk
 ```
+
+CLDK 2.0 installs the Java analyzer only with the `java` extra. If you analyze Java code, run `pip install -U "cldk[java]"` instead.
 </Aside>
 
 ### The whole graph
@@ -214,7 +236,7 @@ pip install --pre cldk
     from cldk.analysis import AnalysisLevel
 
     analysis = CLDK.python(
-        project_path="tiny_py",
+        project_path="calls_py",
         analysis_level=AnalysisLevel.call_graph,
     )
 
@@ -231,8 +253,9 @@ pip install --pre cldk
     from cldk.analysis import AnalysisLevel
 
     analysis = CLDK.typescript(
-        project_path="tiny_ts",
+        project_path="calls_ts",
         analysis_level=AnalysisLevel.call_graph,
+        eager=True,
     )
 
     cg = analysis.get_call_graph()
@@ -247,39 +270,41 @@ pip install --pre cldk
   </TabItem>
 </Tabs>
 
-The result is a plain `networkx.DiGraph`, so every `networkx` algorithm applies to it. Each edge carries three attributes: `type`, which is always `"CALL_DEP"`, `weight`, and `provenance`.
+The result is a plain `networkx.DiGraph`, so every `networkx` algorithm applies to it. Each Python or TypeScript edge carries three attributes: `type`, which is always `"CALL_DEP"`, `weight`, and `provenance`. Java edges differ, as [Language support](#language-support) shows.
 
 <Aside type="caution" title="Build the analysis deep enough">
-If `get_call_graph` returns an empty graph, or `caller_details` comes back empty, you asked for the default `symbol_table` level. Build the analysis again with `analysis_level=AnalysisLevel.call_graph`, or deeper.
+Below the `call_graph` analysis level, the Java and TypeScript backends return an empty call graph. If `get_call_graph` returns an empty graph for a Java or TypeScript project, build the analysis again with `analysis_level=AnalysisLevel.call_graph`, or deeper. If a TypeScript project has a cache from a lower analysis level, also pass `eager=True` once. Without it, CLDK reuses the old cache and gives no warning.
 
-The Python backend is the exception. It emits the `jedi` edges at every level, and it adds the `defuse` edges only at `call_graph` and deeper. So a Python graph that looks complete at `symbol_table` still misses edges.
+The Python backend is the exception. It emits the `jedi` edges at every level, and it adds the `defuse` edges only at `call_graph` and deeper. So a Python graph that looks complete at `symbol_table` can still miss edges.
+
+An empty `caller_details` list has more causes than a low analysis level. See [Direct neighbors](#direct-neighbors).
 </Aside>
 
 ### Direct neighbors
 
-`get_callers` and `get_callees` answer for one callable instead of the whole project. Both return a dictionary, and both carry the edge attributes of every neighbor.
+`get_callers` and `get_callees` answer for one callable instead of the whole project. Both return a dictionary, and both carry the edge attributes of every neighbor. These blocks continue the blocks in [The whole graph](#the-whole-graph).
 
 <Tabs syncKey="lang">
   <TabItem label="Python">
     ```python
-    analysis.get_callers("queries", "sanitize")
+    print(analysis.get_callers("queries", "sanitize"))
     # -> {'target_method': 'queries.sanitize',
     #     'caller_details': [{'caller_signature': 'queries.build_query',
     #                         'edge': {'type': 'CALL_DEP', 'weight': 1,
     #                                  'provenance': ('jedi',)}}]}
 
-    analysis.get_callees("queries", "build_query")
+    print(analysis.get_callees("queries", "build_query"))
     # -> {'source_method': 'queries.build_query',
     #     'callee_details': [{'callee_signature': 'queries.sanitize',
     #                         'edge': {'type': 'CALL_DEP', 'weight': 1,
     #                                  'provenance': ('jedi',)}}]}
     ```
 
-    The first argument names the owner and the second names the method. For a module-level function, pass the module as the owner.
+    The first argument names the owner and the second names the method. For a module-level function, pass the `module_name` of its module as the owner, for example `orders` for `store/orders.py`. [Symbol tables](/guides/symbol-tables/#classes-and-one-callable) explains this rule.
   </TabItem>
   <TabItem label="TypeScript">
     ```python
-    analysis.get_callers("src/queries.sanitize")
+    print(analysis.get_callers("src/queries.sanitize"))
     # -> {'target_method': 'src/queries.sanitize',
     #     'caller_details': [{'caller_signature': 'src/queries.buildQuery',
     #                         'edge': {'type': 'CALL_DEP', 'weight': 1,
@@ -290,25 +315,47 @@ The Python backend is the exception. It emits the `jedi` edges at every level, a
   </TabItem>
 </Tabs>
 
-An empty `caller_details` list is ambiguous. It means that nothing calls the target, or that the name matched no callable at all. CLDK 2.0 has `callers_of(name)` and `callees_of(name)` for that case. <Badge text="2.0" variant="caution" /> Both take a name alone, and both raise `SelectorNotInGraph` when the name matches nothing.
+An empty `caller_details` list is ambiguous. It means that nothing calls the target, or that the name matched no callable at all. CLDK 2.0 has `callers_of(name)` and `callees_of(name)` for that case. <Badge text="2.0" variant="caution" /> Both take a name alone. When the name matches nothing, both raise `SelectorNotInGraph`.
 
 ### The edges of one class
 
-`get_class_call_graph` returns the call edges that are reachable from one class, as a list of `(caller, callee)` pairs.
+`get_class_call_graph` returns the call edges that are reachable from one class, as a list of `(caller, callee)` pairs. The fixture above declares no class. So this example uses a second Python project directory, `billing_py`. Save this file as `billing_py/models.py`:
 
 ```python
-for caller, callee in analysis.get_class_call_graph("my_pkg.models.Invoice"):
-    print(caller, "->", callee)
+# models.py
+class Invoice:
+    def __init__(self, amount):
+        self.amount = amount
+
+    def tax(self):
+        return self.amount * 0.2
+
+    def total(self):
+        return self.amount + self.tax()
 ```
 
-Pass `method_signature` as well to start the walk from one method of that class instead of all of them.
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+billing = CLDK.python(project_path="billing_py", analysis_level=AnalysisLevel.call_graph)
+
+print(list(billing.get_classes()))
+# -> ['models.Invoice']
+print(billing.get_class_call_graph("models.Invoice"))
+# -> [('models.Invoice.total', 'models.Invoice.tax')]
+```
+
+Use the class signature that `get_classes()` returns. The signature starts below the project directory, so `billing_py.models.Invoice` matches no class. A name that matches no class gives an empty list, with no error.
+
+To start the walk from one method of the class, also pass `method_signature`. In Python, pass the method name, for example `method_signature="total"`. The full signature `models.Invoice.total` matches no method and gives an empty list, with no error. TypeScript and Java take other forms, and the Java walk stops after one hop. See [Language support](#language-support).
 
 ### Reachability and call paths
 
-`reaches` asks whether a call path exists. `call_paths_between` returns the paths themselves.
+`reaches` asks whether a call path exists. `call_paths_between` returns the paths themselves. These calls use the Python `analysis` object from [The whole graph](#the-whole-graph).
 
 ```python
-analysis.reaches("build_query", "sanitize")
+print(analysis.reaches("build_query", "sanitize"))
 # -> True
 
 flows = analysis.call_paths_between("build_query", "sanitize")
@@ -324,14 +371,14 @@ print([[hop.to.callable for hop in path.hops] for path in flows.paths])
 
 A path holds the callables after `src`, and `src` itself is not a hop. Every hop carries `via="call"`, no `var`, and an empty `prov`, because a call edge carries no variable and no data-dependence evidence.
 
-Both methods take a whole name, or a unique dotted suffix of one. A name that matches two callables raises `AmbiguousName`. `depth` is `None` on both by default, so neither walk stops at a hop limit. If you set `depth`, a real path that is longer than the limit becomes a `False`, or an empty list.
+Both methods take a whole name, or a unique dotted suffix of one. A name that matches two callables raises `AmbiguousName`. To fix it, pass more of the dotted path, for example `queries.sanitize` instead of `sanitize`. The message can also name `in_module=`, but `reaches` and `call_paths_between` raise `TypeError` for that keyword. `depth` is `None` on both by default, so neither walk stops at a hop limit. If you set `depth`, a real path that is longer than the limit becomes a `False`, or an empty list.
 
 <Aside type="caution" title="Both methods take callable names, never value names">
 `reaches(src, dst)` asks whether one **callable** reaches another. It does not ask whether one value reaches another value. A value name raises:
 
 ```python
 analysis.reaches("user_input", "raw")
-# -> SelectorNotInGraph: 1 of 1 callable not in graph: 'user_input'
+# raises SelectorNotInGraph: 1 of 1 callable not in graph: 'user_input'
 ```
 
 `call_paths_between` takes the same two callable names, under the same rule.
@@ -341,7 +388,15 @@ For the value question, use `paths_between(src, dst, src_within=..., dst_within=
 
 ## Language support
 
-Java, Python, and TypeScript expose the same six methods through their `analysis` objects. The `prov` values differ by backend, because the resolvers differ. In Java, `get_class_call_graph` returns pairs of `JMethodDetail` objects, and in Python and TypeScript it returns pairs of strings.
+Java, Python, and TypeScript expose the same six methods through their `analysis` objects. The `prov` values differ by backend, because the resolvers differ. The Java graph has no `provenance` attribute: its edges carry `type`, `weight` and `calling_lines`.
+
+`get_class_call_graph` also differs between the languages. The start methods of its walk are all the methods of the class, or the one method that `method_signature` names. Each language takes its own form of `method_signature`. A different form matches no method and gives an empty list, with no error.
+
+| Language | `method_signature` takes | Each pair holds | The result holds |
+| --- | --- | --- | --- |
+| Python | The method name, for example `total` | Two strings | Every edge that is reachable from the start methods |
+| TypeScript | The full signature, for example `src/orders.OrderBook.total` | Two strings | Every edge that is reachable from the start methods |
+| Java | The signature inside the class, for example `getOptionValue(java.lang.String)` | Two `JMethodDetail` objects | Only the edges that leave the start methods |
 
 ## Where to go next
 

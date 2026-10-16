@@ -5,21 +5,25 @@ description: "How CLDK models control flow, control dependence and data dependen
 
 import { Aside, Badge, Steps, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-<p><Badge text="2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
+<p><Badge text="2.0" variant="caution" /></p>
 
-This page answers one question: how does CLDK describe the order that statements run in, and the way values move between them, inside one function? Every graph on this page belongs to one function. Where a value crosses a call, this page says so and points at [System dependence graphs](/guides/system-dependence/).
+This page answers one question: how does CLDK describe the order that statements run in, and the way values move between them, inside one function? Every graph on this page belongs to one function. Where a value crosses a call, this page says so and points at [System dependence](/guides/system-dependence/).
 
 <Aside type="caution" title="These graphs need CLDK 2.0">
-Level 3 and level 4, and every method on this page, arrive in CLDK 2.0. The stable release on PyPI is 1.5.0, so `pip install cldk` gives you 1.5.0. To get the pre-release, run:
+Level 3 and level 4, and every method on this page, arrive in CLDK 2.0. If you have CLDK 1.x, upgrade it:
 
 ```bash frame="none"
-pip install --pre cldk
+pip install -U cldk
 ```
+
+CLDK 2.0 installs the Java analyzer only with the `java` extra. If you analyze Java code, run `pip install -U "cldk[java]"` instead.
+
+CLDK 2.0.0 cannot read the cache that CLDK 1.x wrote for a Java or TypeScript project. Java stops with an error that contains `predates schema v2`, and TypeScript stops with a `ValidationError`. If you see either error, pass `eager=True` once, or delete `<project>/.codeanalyzer`. The Java error suggests `eager_analysis=True`, but `CLDK.java()` does not accept that keyword.
 </Aside>
 
 ## The function on this page
 
-Every node, every edge and every number below comes from one real run against this file.
+Save this file as `queries.py` in a project directory named `queries`. The results on this page come from real runs. Unless the text names another project, a result comes from this file. The runs use cldk 2.0.0 with codeanalyzer-python 1.5.3, the version that cldk 2.0.0 pins. Where codeanalyzer-python 1.5.4 gives a different answer, this page says so.
 
 ```python
 # queries.py
@@ -46,6 +50,8 @@ analysis = CLDK.python(
 )
 ```
 
+If `CLDK.python(...)` stops with `RuntimeError: Could not find a suitable base Python interpreter`, set `SYSTEM_PYTHON` as the Python Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies) shows.
+
 CLDK names a node inside a callable with the `can://` id of that callable, an `@`, and a key for the position. The full id runs to the project name, the language, the module path and the callable signature, so this page shortens each one. `build_query@8:8` stands for the node at line 8, column 8. Treat the whole id as opaque. Pass it back to CLDK rather than take it apart.
 
 ## The control-flow graph
@@ -68,7 +74,7 @@ Two nodes hold no code at all. `build_query@entry` is the single place control e
 | `exception` | The source can raise, so control can leave the function here |
 | `return` | The function hands its result back and stops |
 
-A loop adds a `loop_back` edge to the top of the loop. `build_query` has no loop, so no `loop_back` edge appears here.
+Other code adds more kinds. A loop adds a `loop_back` edge to the top of the loop. A `break` adds a `break` edge, and a `continue` adds a `continue` edge. A `yield` adds a `yield` edge, and an `await` adds an `await_resume` edge. On Java and TypeScript, the cases of a `switch` add `switch_case` edges. `build_query` uses none of these kinds.
 
 ### The real CFG of `build_query`
 
@@ -107,7 +113,7 @@ The branch node is `build_query@7:7`, at column 7. That is the test `limit > 100
 
 Read `build_query@6:4 -> build_query@exit  kind=exception` again. Line 6 calls `sanitize`. Any call can raise. If `sanitize` raises, `build_query` stops at line 6, and lines 7, 8 and 9 never run.
 
-An edge set without that edge claims that line 7 always runs after line 6. The claim is false. Every later computation on this page reads the CFG, so one wrong edge here spreads. The exception edge is the single edge that shapes both of the other two graphs of this function.
+An edge set without that edge claims that line 7 always runs after line 6. The claim is false. Every later computation on this page reads the CFG, so one wrong edge here spreads. The exception edge shapes the control-dependence graph of this function. It makes line 6 a decision point.
 
 ## Control dependence
 
@@ -117,7 +123,7 @@ Node A has two or more successors in the CFG. From one successor, B is certain t
 
 "Certain to run" has a name of its own. Node P **post-dominates** node N when every path from N to `exit` passes through P. So the test reads: B post-dominates one successor of A, and B does not post-dominate another successor of A.
 
-Ferrante, Ottenstein and Warren defined control dependence this way in 1987, and the CLDK backend follows them. The file `codeanalyzer/dataflow/dominance.py` says so in its own words: "Control dependence follows Ferrante-Ottenstein-Warren".
+Ferrante, Ottenstein and Warren defined control dependence this way in 1987, and the Python backend follows them. The docstring of `codeanalyzer/dataflow/dominance.py`, in codeanalyzer-python, names them as its source.
 
 ### The real CDG of `build_query`
 
@@ -147,7 +153,7 @@ A `CdgEdge` carries `src` and `dst` and nothing else. The labels in the figure n
 
 ### What each edge says
 
-`build_query@entry -> build_query@6:4`. Line 6 runs whenever `build_query` runs. The classic construction adds an edge from `entry` to `exit` before it applies the test. That gives `entry` a second successor, and every statement that always runs becomes control-dependent on `entry`. So read an edge out of `entry` as "this node always runs".
+`build_query@entry -> build_query@6:4`. Whenever `build_query` runs, line 6 runs. If no other node decides whether a node runs, the Python backend makes that node control-dependent on `entry`. The textbook construction gets the same edge another way: it adds an edge from `entry` to `exit` before it applies the test. `get_cfg` does not return that extra edge. So read an edge out of `entry` as "this node always runs".
 
 `build_query@6:4 -> build_query@7:7` and `build_query@6:4 -> build_query@9:4`. This is the exception edge at work. Line 6 has two successors: line 7 and `exit`. Down the `exit` successor, neither line 7 nor line 9 runs. Down the other successor, both are certain to run. So line 6 decides both of them.
 
@@ -199,7 +205,9 @@ Each `DdgEdge` carries four fields. `src` and `dst` are node ids. `var` names th
 
 The figure below draws nine of the seventeen edges: the ones that carry `limit`, `name` and the result.
 
-Four more edges bring `user_input` and `queries::sanitize` into line 6. The last four sit on `build_query@6:4/actual_in:0`, `build_query@6:4/actual_out:0`, `build_query@6:4/actual_out:1` and `build_query@formal_out:1`. Those four belong to the call at line 6, and [System dependence graphs](/guides/system-dependence/) explains them.
+Four more edges bring `user_input` and `queries::sanitize` into line 6. The last four sit on `build_query@6:4/actual_in:0`, `build_query@6:4/actual_out:0`, `build_query@6:4/actual_out:1` and `build_query@formal_out:1`. Those four belong to the call at line 6, and [System dependence](/guides/system-dependence/) explains them.
+
+On codeanalyzer-python 1.5.4, one of those four edges starts at a different node. The edge into `build_query@6:4/actual_in:0` starts at `build_query@formal_in:0`, not at `build_query@entry`. That change is the fix for the defect that the caution in [Slice one function](#slice-one-function) explains.
 
 ```mermaid
 graph TD
@@ -229,7 +237,7 @@ Every value that enters `build_query` has two source nodes in the DDG.
 
 The three ports of `build_query` carry `user_input`, `limit` and `sanitize`. The third one surprises most readers. `sanitize` is a module-level name that the body reads, so CLDK treats it as a value that enters the callable. `resolve_value("sanitize", within="build_query")` returns the kind `global`, not `parameter`, and a `defined_in` of `queries`. The `var` field of the DDG spells the same value `queries::sanitize`, and the name you address it by is `sanitize`.
 
-`build_query@formal_out:0` and `:1` are the ports for values that leave. `formal_out:0` carries `<return>`, the result of the function. `formal_out:1` carries `user_input`, because the call at line 6 can change what `user_input` refers to. CLDK writes that as `user_input.*`, which names the object rather than the name.
+`build_query@formal_out:0` and `:1` are the ports for values that leave. `formal_out:0` carries `<return>`, the result of the function. `formal_out:1` carries `user_input`, because the call at line 6 can change the object that `user_input` refers to. CLDK writes that as `user_input.*`, which names the object rather than the name.
 
 ### Two definitions reach line 9
 
@@ -242,9 +250,9 @@ The fourth row, `build_query@6:4 -> build_query@9:4` with `prov=['points-to']`, 
 
 Only one of the two is the real value in any single run. If the test at line 7 holds, line 8 runs, and line 9 reads `100`. If the test does not hold, line 8 never runs, and line 9 reads what the caller passed. The graph is static. It never runs the program, so it cannot know which branch a run takes. It records both.
 
-Two definitions on one use mean one thing for you. Any claim you make about `limit` at line 9 must hold for both of them. CLDK errs in one direction only. It lists every definition that can reach the use, and it can list a definition that a particular run never takes. It does not drop a definition that a run does take.
+Two definitions on one use mean one thing for you. Any claim you make about `limit` at line 9 must hold for both of them. For `limit` at line 9, CLDK errs in one direction only. It lists every definition that can reach the use, and it can list a definition that a particular run never takes. It does not drop a definition that a run does take.
 
-A backward slice from line 9 is the set of nodes that can affect line 9. That slice is never too small, and it can be too large. The price you pay is extra nodes to read, not a missed source.
+A backward slice from line 9 is the set of nodes that can affect line 9. With `depth=None`, that slice holds every node that the graph links to line 9, and it can hold extra nodes. The price you pay is extra nodes to read, not a missed source.
 
 Compare `name` at line 9. One edge carries it, `build_query@6:4 -> build_query@9:4` with `prov=['ssa']`, because line 6 is the only definition of `name`. One definition, one use, no choice to make.
 
@@ -252,7 +260,7 @@ Compare `name` at line 9. One edge carries it, `build_query@6:4 -> build_query@9
 
 The `prov` list is the evidence for an edge. Three values appear in the DDG of `build_query`, and they rank by certainty:
 
-```
+```text
 ssa  >  reaching-defs  >  points-to
 ```
 
@@ -270,9 +278,12 @@ The two `points-to` edges here start at line 6. Line 6 calls `sanitize(user_inpu
 
 ### The weakest hop caps the claim
 
-A path is a sequence of hops. A path is only as strong as its least certain hop, so one `points-to` hop makes the whole path a "can". `FlowPath.weakest` returns that hop. The two-hop path below comes from a TypeScript analysis of the same two functions.
+A path is a sequence of hops. A path is only as strong as its least certain hop, so one `points-to` hop makes the whole path a "can". `FlowPath.weakest` returns that hop. The two-hop path below comes from a TypeScript analysis of the same two functions, on codeanalyzer-typescript 1.6.0. [System dependence](/guides/system-dependence/#what-cldk-gives-you-over-the-sdg) shows the TypeScript file.
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
 ts = CLDK.typescript(
     project_path="queries-ts",
     analysis_level=AnalysisLevel.system_dependency_graph,
@@ -307,10 +318,14 @@ The forward slice below makes that concrete. Line 8 assigns a constant and reads
 <Aside type="caution" title="Build at level 4">
 Below level 3, `get_cfg`, `get_cdg`, `get_ddg`, `slice_forward` and `slice_backward` raise `CodeanalyzerUsageException`. The backend writes no control flow and no data flow below level 3, and an empty page reads exactly like a callable with no dependence.
 
-Level 3 builds the three graphs. Level 3 does not build the `formal_in` and `formal_out` ports that a value name resolves to. So `resolve_value`, the two slices, `paths_between` and `taint` need level 4. At level 3 they raise `SelectorNotInGraph`, which names your value.
+Level 3 builds the three graphs. The value methods need level 4: the two slices, `flows_to_call`, `flows_to_argument`, `paths_between` and `taint`. Level 4 builds the `formal_in` and `formal_out` ports that a value name resolves to, with their edges.
 
-Build with `analysis_level=AnalysisLevel.system_dependency_graph` for everything on this page.
+At level 3, Python and TypeScript raise `SelectorNotInGraph` for these methods and for `resolve_value`. The message names your value. On Java, `slice_forward`, `flows_to_call`, `flows_to_argument`, `paths_between` and `taint` raise `CodeanalyzerExecutionException` instead. On Java, `slice_backward` returns an empty slice, and `resolve_value` answers. The Java results come from codeanalyzer-java 3.3.3 on Commons CLI 1.7.0.
+
+Build with `analysis_level=AnalysisLevel.system_dependency_graph` for everything on this page. If you analyzed a TypeScript project at a lower level before, also pass `eager=True` once.
 </Aside>
+
+The Python blocks below continue with the `analysis` object that you built at the top of this page.
 
 ### Read the three graphs
 
@@ -329,20 +344,21 @@ All three return an `EdgePage`.
 | `next_cursor` | `str \| None` | Where to resume. `None` means this page ends the set |
 | `complete` | `bool` | `True` when `next_cursor` is `None` |
 
-CLDK pages the answer rather than cuts it. Per-callable scope bounds which edges you get, not how many. On one real application, the largest CFG measured runs to 402 edges and the largest CDG to 314 edges, so both fit one page. One single callable in the same application has 1,386,918 DDG edges. That is 27 percent of the 5,134,655 DDG edges in the whole application. To read past the first page, pass `next_cursor` back as `cursor`.
+CLDK pages the answer rather than cuts it. Per-callable scope bounds which edges you get, not how many. On Flask 3.1.3, the largest graphs of one callable belong to `Blueprint.register`: 1,511 DDG edges, 107 CFG edges and 65 CDG edges. All three fit in one page of 10,000 edges. In a larger application, one callable can have more DDG edges than one page holds. To read past the first page, pass `next_cursor` back as `cursor`.
 
 ```python
 page = analysis.get_ddg("build_query")
-print(page.total, "edges in total")
+print(page.total, "edges in total")    # 17 edges in total
 
-for edge in page.edges:
-    print(edge.src, "->", edge.dst, edge.var, edge.prov)
-
-while not page.complete:
+while True:
+    for edge in page.edges:
+        print(edge.src, "->", edge.dst, edge.var, edge.prov)
+    if page.complete:
+        break
     page = analysis.get_ddg("build_query", cursor=page.next_cursor)
 ```
 
-In that application, 15,520 callables of 15,549 have fewer than 10,000 DDG edges, so the common call needs no loop at all.
+On Flask 3.1.3, all 386 callables have fewer than 10,000 DDG edges, so the common call needs no loop at all.
 
 ### Address a node before you query it
 
@@ -378,26 +394,26 @@ A slice is the set of nodes that a value reaches, or the set that reaches a valu
 | `slice_backward(src, *, within, depth=5, max_nodes=10000)` | Backward | What determined this value? |
 | `backward_cone(sinks, *, depth=5, max_nodes=10000)` | Backward | Which callables can reach any of these sinks? |
 
-The first two work over the PDG, so their nodes are positions inside a callable. `backward_cone` works over the call graph, so its nodes are whole callables rather than positions. It reads the call graph alone, so it answers from level 2 up. Keep that difference in mind, because the three sit next to each other in the API.
+The first two work over the PDG, so their nodes are positions inside a callable. `backward_cone` works over the call graph, so its nodes are whole callables rather than positions. It reads the call graph alone, so build the analysis at level 2 or higher. Below level 2, `backward_cone` does not raise. The cone that it returns can miss callers, and its `complete` field is still `True`. Keep that difference in mind, because the three sit next to each other in the API.
 
-Each returns a `Slice` with `nodes`, `roots`, `resolved`, `total` and `diagnostics`. `total` reports how far the value reaches, even when `max_nodes` cut the returned list.
+Each returns a `Slice` with `nodes`, `roots`, `resolved`, `total`, `complete` and `diagnostics`. Even when `max_nodes` cuts the returned list, `total` counts every node that the walk reached. The default `depth=5` bounds the walk itself. A node more than 5 hops away is not in `nodes` or in `total`, and `complete` stays `True`. Pass `depth=None` to get the whole slice.
 
-Here is the forward slice of `user_input` in `build_query`, exactly as CLDK returns it:
+Here is the forward slice of `user_input` in `build_query`:
 
 ```python
 sl = analysis.slice_forward("user_input", within="build_query")
-print(sl.total)     # 7
+print(sl.total)     # 7 (14 on codeanalyzer-python 1.5.4)
 ```
 
-`sl.roots` holds one node, `build_query@formal_in:0`, the port for `user_input`. The seven nodes are:
+`sl.roots` holds one node, `build_query@formal_in:0`, the port for `user_input`. On codeanalyzer-python 1.5.3, `sl.nodes` holds these seven nodes, in this order:
 
 | `line` | `kind` | `name` | `ref` |
 | --- | --- | --- | --- |
-| 5 | `parameter` | `user_input` | `build_query@formal_in:0` |
 | 6 | `statement` | `None` | `build_query@6:4` |
 | 7 | `branch` | `None` | `build_query@7:7` |
 | 8 | `statement` | `None` | `build_query@8:8` |
 | 9 | `return` | `None` | `build_query@9:4` |
+| 5 | `parameter` | `user_input` | `build_query@formal_in:0` |
 | 5 | `return` | `None` | `build_query@formal_out:0` |
 | 5 | `return` | `user_input` | `build_query@formal_out:1` |
 
@@ -407,14 +423,14 @@ Line 8 assigns the constant `100` and reads nothing from `user_input`, yet it is
 
 The three synthetic nodes at line 5 carry no source position of their own, so CLDK reports the first line of the callable for them.
 
-<Aside type="caution" title="On Python, a value slice stays inside one callable">
-Line 6 passes `user_input` into `sanitize`, and no node of `sanitize` appears in the slice above. On codeanalyzer-python 1.5.2, the traversal does not follow a value across a call. CLDK 2.0.0rc7 pins codeanalyzer-python 1.5.2, so `pip install --pre cldk` gives you that version. `slice_forward("request", within="handle")` behaves the same way, with `total` of 4 and every node inside `handle`.
+<Aside type="caution" title="codeanalyzer-python 1.5.3 does not follow a parameter passed straight into a call">
+Line 6 passes `user_input` into `sanitize`, and no node of `sanitize` appears in the slice above. CLDK 2.0.0 pins codeanalyzer-python 1.5.3, which still has this defect ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). The data edge into the `actual_in` port of the call starts at `build_query@entry`, not at `build_query@formal_in:0`. So the slice from the parameter never reaches the `actual_in` port, and never enters `sanitize`. If the caller first assigns the value to a variable, the flow continues into the callee.
 
-The parts exist. `build_query` carries `formal_in`, `formal_out`, `actual_in` and `actual_out` nodes, a `summary` is set on the callable, and `application.param_in` and `application.param_out` each hold 4 edges. The traversal in the pinned backend does not join them. This is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins 1.5.2 ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, run `pip install "codeanalyzer-python==1.5.4"`.
+codeanalyzer-python 1.5.4 fixes the defect. [python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the change of the cldk pin from 1.5.3 to 1.5.4. After you install cldk, run `pip install "codeanalyzer-python==1.5.4"` to get the fix. pip prints an `ERROR` line about the pin conflict, and then installs 1.5.4. On 1.5.4, the same slice holds 14 nodes, and 4 of them belong to `sanitize`. [System dependence](/guides/system-dependence/#what-the-pinned-python-backend-does-not-link) gives the details, and [Get the fix](/guides/system-dependence/#get-the-fix) gives the steps for uv.
 
-For value flow across a call, use the TypeScript backend. On codeanalyzer-typescript 1.6.0, the same fixture gives `slice_forward("userInput", within="buildQuery").total` of 11, and `paths_between("userInput", "raw", src_within="buildQuery", dst_within="sanitize")` returns one path.
+The TypeScript backend links this call on the pinned versions. On codeanalyzer-typescript 1.6.0, the TypeScript version of the fixture gives a `slice_forward("userInput", within="buildQuery").total` of 11. `paths_between("userInput", "raw", src_within="buildQuery", dst_within="sanitize")` returns one path.
 
-If the source and the sink sit in different callables, do not trust an `exhausted` pair from `taint()` on codeanalyzer-python. The fixture above returns `paths == []`, `exhausted == [('request', 'raw')]` and `complete == True` for a flow that plainly exists.
+codeanalyzer-python 1.5.4 still stops a value at some calls, for example `sanitize(PREFIX)`, where `PREFIX` is a module-level name. So on 1.5.3 and on 1.5.4, a cross-call `False` from `flows_to_call`, or an `exhausted` pair from `taint()`, is not evidence of no flow.
 </Aside>
 
 ### `reaches` takes callable names, not value names
@@ -440,7 +456,7 @@ For a question about a value, use `slice_forward`, `slice_backward`, `flows_to_c
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="System dependence graphs" description="Parameter ports, summary edges, and value flow across a call boundary." href="/guides/system-dependence/" />
+  <LinkCard title="System dependence" description="Parameter ports, summary edges, and value flow across a call boundary." href="/guides/system-dependence/" />
   <LinkCard title="Taint analysis" description="Source-to-sink queries over these graphs, with sanitizer cuts and a verdict on pairs that do not connect." href="/guides/taint/" />
   <LinkCard title="Call graphs" description="Caller and callee edges, and the callable-level questions that reaches answers." href="/guides/call-graphs/" />
 </CardGrid>

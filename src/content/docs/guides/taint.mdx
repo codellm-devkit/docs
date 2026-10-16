@@ -5,46 +5,56 @@ description: "Source-to-sink queries in one traversal, with sanitizer cuts and a
 
 import { Tabs, TabItem, Aside, Badge, LinkCard, CardGrid, Steps } from "@astrojs/starlight/components";
 
-<p><Badge text="New in 2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
+<p><Badge text="New in 2.0" variant="caution" /></p>
 
-`taint()` tests m sources against n sinks in one traversal. For each pair it reports one of three outcomes: a flow was found, no flow was found, or the search cannot finish.
+`taint()` tests m sources against n sinks in one traversal. With the default `depth=None`, each pair gets one of three outcomes: a flow was found, no flow was found, or CLDK skipped the pair. With an explicit `depth`, a pair with no path is in none of the three.
 
 <Aside type="caution" title="This method needs CLDK 2.0">
-`taint()` arrives in CLDK 2.0. Version 2.0 is a release candidate today, so `pip install cldk` gives you 1.5.0 instead. To get the pre-release, run:
+`taint()` arrives in CLDK 2.0. If you have CLDK 1.x, upgrade it:
 
 ```bash frame="none"
-pip install --pre cldk
+pip install -U cldk
 ```
 
-Taint queries read the dataflow graph, so build the analysis at level 3 or level 4. A source and a sink in different callables need level 4. See [Dataflow graphs](/guides/dataflow/).
+CLDK 2.0 installs the Java analyzer only with the `java` extra. If you analyze Java code, run `pip install -U "cldk[java]"` instead.
+
+CLDK 2.0.0 cannot read the cache that CLDK 1.x wrote for a Java or TypeScript project. Java stops with an error that contains `predates schema v2`, and TypeScript stops with a `ValidationError`. If you see either error, pass `eager=True` once, or delete `<project>/.codeanalyzer`. The Java error suggests `eager_analysis=True`, but `CLDK.java()` does not accept that keyword.
+
+Taint queries walk the system dependence graph, so build the analysis at level 4 (`system_dependency_graph`). At level 3, `taint()` raises on all three languages. See [Dataflow inside one function](/guides/dataflow/#the-api).
 </Aside>
 
 ## The call
+
+The example runs on the TypeScript file from [System dependence](/guides/system-dependence/#what-cldk-gives-you-over-the-sdg), in a project directory named `queries-ts`. The outputs come from cldk 2.0.0 with codeanalyzer-typescript 1.6.0.
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
-analysis = CLDK.python(
-    project_path="odoo",
+analysis = CLDK.typescript(
+    project_path="queries-ts",
     analysis_level=AnalysisLevel.system_dependency_graph,
 )
 
 result = analysis.taint(
-    sources=[("invoice_id", "PaymentPortal.invoice_transaction")],
-    sinks=[("query", "AccountMove._execute")],
-    sanitizers=["PaymentPortal._sanitize_id"],
+    sources=[("userInput", "buildQuery"), ("limit", "buildQuery")],
+    sinks=[("raw", "sanitize")],
 )
 
 for path in result.paths:                  # the witnesses
-    print(" -> ".join(hop.to.name for hop in path.hops))
+    print([(hop.via, hop.var) for hop in path.hops])
+# [('data', 'userInput'), ('argument', 'raw')]
 
 for src, sink in result.exhausted:         # searched, nothing found
     print(src, "does not reach", sink)
+# limit does not reach raw
 
 for d in result.unresolved:                # neither: read this first
     print(d.code, d.message)
+# (no output: the ledger is empty)
 ```
+
+Each path in `result.paths` is a witness. A witness is a route in the graph from a source to a sink. Print a hop by `via` and `var`, or by `hop.to.kind`. Do not join `hop.to.name` values. Many nodes have no name, for example a statement node or a TypeScript argument node. For such a node, `hop.to.name` is `None`, and the join raises `TypeError`.
 
 | Argument | Type | Meaning |
 | --- | --- | --- |
@@ -66,14 +76,18 @@ The word sanitizer covers two different things. The shape of the argument tells 
 
 | Shape | Cuts | Use for |
 | --- | --- | --- |
-| `"PaymentPortal._sanitize_id"` | A **callable** on the path | A transforming sanitizer |
-| `("checked_id", "PaymentPortal.invoice_transaction")` | A **variable** inside that callable | A validating guard |
+| `"sanitize"` | A **callable** on the path | A transforming sanitizer |
+| `("userInput", "buildQuery")` | A **variable** inside that callable | A validating guard |
 
-A bare string names the wrapper **in this application** that calls something like `html.escape`. CLDK resolves it with `resolve_callable`.
+A bare string names a callable in your application, for example a wrapper that calls `html.escape`. CLDK resolves it with `resolve_callable`.
 
 A `(name, within)` pair is the only shape that cuts a validating guard, because a guard never sits on the data path at all. It tests a value and raises, so a cut on the callable does not cut the flow.
 
 The search applies both cuts. What comes back is the shortest **unsanitized** route, not a filtered list of sanitized ones.
+
+On the `queries-ts` project from [The call](#the-call), each shape cuts the only path. With `sources=[("userInput", "buildQuery")]`, `sinks=[("raw", "sanitize")]` and either sanitizer, `paths` is empty and `exhausted` is `[('userInput', 'raw')]`.
+
+This project is too small to show a real sanitizer. The callable cut removes every node of `sanitize`, and the sink `raw` is one of them. The variable cut removes the first hop out of the source. In your application, name a sanitizer that sits between the source and the sink.
 
 ## What the result says
 
@@ -81,7 +95,7 @@ The search applies both cuts. What comes back is the shortest **unsanitized** ro
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `paths` | `list[FlowPath]` | The witnesses, shortest first |
+| `paths` | `list[FlowPath]` | The witnesses, grouped by pair in the order of `sources` and then `sinks`, shortest first in each pair |
 | `complete` | `bool` | Whether the **whole batch** answered cleanly |
 | `exhausted` | `list[tuple[str, str]]` | Pairs searched to exhaustion with nothing found |
 | `unresolved` | `list[Diagnostic]` | The ledger of what stopped a pair short |
@@ -105,29 +119,31 @@ An explicit `depth` always empties `exhausted`. A bound turns a real long flow i
 <Aside type="caution" title="What a refutation claims, and what it does not">
 `exhausted` is a claim about **the emitted graph plus the ledger**. It is never a claim about the program. The field is named for the search, not for the conclusion.
 
-The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call structure **under**-approximates wherever dispatch is unresolved, so a real flow can exist with no path in the graph. A missing path bounds the program only where the walk fully resolved the frontier. The `unresolved` list names where it did not.
+By design, the data-dependence edges over-approximate, which is the safe direction for an absence claim. The pinned Python backend misses some of them at a call. See [Language support](#language-support). The call structure **under**-approximates wherever dispatch is unresolved, so a real flow can exist with no path in the graph.
+
+In CLDK 2.0.0, no backend writes an unresolved call into `unresolved`. So a pair whose flow goes through a call that the dependence graph does not link comes back in `exhausted`, with an empty `unresolved`. For example, let `sink(v)` return `v`, let `apply(f, x)` return `f(x)`, and let `run(input)` return `apply(sink, input)`. On codeanalyzer-typescript 1.6.0, `taint(sources=[("x", "apply")], sinks=[("v", "sink")])` returns no path, and `exhausted` is `[('x', 'v')]`.
 
 You decide whether an `exhausted` pair means that the alert is a false positive.
 </Aside>
 
 ### `complete` is the batch flag, not the pair flag
 
-`complete` is `True` only when no cap truncated `paths` **and** `unresolved` is empty. One skipped or blocked pair makes it `False`, however cleanly the other pairs answered.
+`complete` is `True` only when `max_paths` cut nothing from `paths` **and** `unresolved` is empty. One skipped or blocked pair makes it `False`, however cleanly the other pairs answered.
 
-While `complete` is `False`, no absence claim stands on **any** pair in the result. The ledger voids the whole batch, not just the pair it names.
+While `complete` is `False`, no absence claim stands on **any** pair in the result. A degenerate pair, a source and a sink at the same position, sets `complete` to `False` but does not empty `exhausted`. So read `complete` first. Then read `exhausted`.
 
-A `False` here does not mean "raise `max_paths` and ask again". If `max_paths` did not truncate `paths`, a bigger cap returns the same flag. Read `unresolved` to find out why.
+A `False` here does not always mean "raise `max_paths` and ask again". Read `unresolved` first. If `unresolved` is empty, `max_paths` cut `paths`, and a bigger cap returns more witnesses. If `unresolved` has an entry, a bigger cap returns the same flag.
 
 ### The ledger
 
-Two diagnostic codes reach `unresolved`:
+CLDK defines two diagnostic codes for `unresolved`:
 
 | Code | Meaning |
 | --- | --- |
-| `unresolved_dispatch` | The walk met a frontier that it cannot follow |
+| `unresolved_dispatch` | The walk met a call that it cannot follow. No backend writes this code in CLDK 2.0.0 |
 | `degenerate_pair` | A requested pair whose source and sink resolved to the same position |
 
-CLDK skips a degenerate pair and does not search it. Both codes name the affected pair in the `message` prose.
+So in CLDK 2.0.0, only `degenerate_pair` reaches `unresolved`. CLDK skips a degenerate pair and does not search it. The `message` prose names the affected pair.
 
 <Aside type="note" title="Read the message, do not parse it">
 `Diagnostic` has no structured field for the pair, so `message` is a human-readable explanation. Do not compute with it. If you need the pair association in code, open an issue on the [python-sdk repository](https://github.com/codellm-devkit/python-sdk/issues). Ask for an additive `subject` field on `Diagnostic`.
@@ -135,30 +151,42 @@ CLDK skips a degenerate pair and does not search it. Both codes name the affecte
 
 ## Errors
 
-| Exception | Cause |
-| --- | --- |
-| `AmbiguousName` | A name, or the `within` of a sanitizer, matched more than one thing |
-| `SelectorNotInGraph` | A name matched nothing, or a sanitizer shape disagrees with what it resolves to |
+| Exception | Cause | What to do |
+| --- | --- | --- |
+| `AmbiguousName` | A name, or the `within` of a sanitizer, matched more than one thing | Pass one of the full names that the message lists |
+| `SelectorNotInGraph` | A name matched nothing, or a sanitizer shape disagrees with what it resolves to. On Python and TypeScript, an analysis below level 4 also raises it | Check the name with `resolve_value(name, within=...)`. A source or a sink cannot be a local variable. Build the analysis at level 4. If a TypeScript cache holds a lower level, also pass `eager=True` once |
+| `CodeanalyzerUsageException` | Java only: the analysis is below level 3 | Build the analysis at level 4 |
+| `CodeanalyzerExecutionException` | Java only: the analysis is at level 3 | Build the analysis at level 4 |
+| `TypeError` | `sources` or `sinks` is a bare string | Pass a list of `(name, within)` pairs. The message suggests a list of names, which raises `ValueError` |
+| `ValueError` | `depth` is not an `int` of 1 or more, `max_paths` is below 1, or a sanitizer names a blank variable | Correct that argument |
+| `ValueError` | `sources` or `sinks` is empty, or an entry in it is not a `(name, within)` pair. A missing outer list, as in `sources=("userInput", "buildQuery")`, raises it with the message `too many values to unpack (expected 2)` | Pass a list of `(name, within)` pairs with at least one entry |
 
-CLDK raises both exceptions, because a selector that silently matches nothing produces an empty result that reads like a refutation.
+Import the CLDK exceptions from `cldk.utils.exceptions`. CLDK raises `AmbiguousName` and `SelectorNotInGraph`, because a selector that silently matches nothing produces an empty result that reads like a refutation.
 
 ## How certain a witness is
 
-Each hop carries `prov`, and the weakest hop caps the whole path. The order runs `ssa` > `reaching-defs` > `points-to`. See [How certain a path is](/guides/dataflow/#how-certain-an-edge-is).
+Each hop carries `prov`, and the weakest hop caps the whole path. The order runs `ssa` > `reaching-defs` > `points-to`. See [How certain an edge is](/guides/dataflow/#how-certain-an-edge-is).
+
+This block continues with `result` from [the call](#the-call) above.
 
 ```python
 for path in result.paths:
     print(path.weakest.via, path.weakest.prov)
+# data ['reaching-defs']
 ```
 
 ## Language support
 
 `taint()` is available on the Java, Python, and TypeScript `analysis` objects, with the same signature on each.
 
+<Aside type="caution" title="On Python, a cross-call exhausted pair is not evidence">
+CLDK 2.0.0 pins codeanalyzer-python 1.5.3. If a caller passes a parameter straight into a call, 1.5.3 does not follow that value into the callee ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). codeanalyzer-python 1.5.4 fixes that defect, but it still stops a value at some other calls. So on Python, an `exhausted` pair whose source and sink sit in different callables is not evidence of no flow. [System dependence](/guides/system-dependence/#what-the-pinned-python-backend-does-not-link) shows the defect and the 1.5.4 fix.
+</Aside>
+
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="Dataflow graphs" description="The levels, graphs, slices, and paths that taint queries are built on." href="/guides/dataflow/" />
+  <LinkCard title="Dataflow inside one function" description="The levels, graphs, slices, and paths that taint queries are built on." href="/guides/dataflow/" />
   <LinkCard title="Analysis at scale" description="Emit once into Neo4j, then run taint queries from many read-only agents." href="/at-scale/" />
   <LinkCard title="Cheat sheet" description="Every dataflow and taint method in one table." href="/resources/cheatsheet/" />
 </CardGrid>
