@@ -23,6 +23,15 @@ Every CLDK program follows the same three steps: select a language, analyze a pr
 
 </Steps>
 
+The samples below run on two pinned sample projects. Clone them into your working directory first:
+
+```bash
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+git clone --depth 1 --branch 3.1.3 https://github.com/pallets/flask.git
+```
+
+The Java sample needs the `cldk[java]` extra. For the call graph, it also needs a JDK 11 or later on `JAVA_HOME` and Maven on `PATH`. The Python sample needs network access on its first run. In an activated virtual environment, set `SYSTEM_PYTHON` before you run it. See [Installing CLDK](/installing/#language-specific-dependencies). The outputs come from cldk 2.0.0 on Commons CLI 1.7.0 and Flask 3.1.3.
+
 <Tabs syncKey="lang">
   <TabItem label="Java">
 ```python
@@ -37,8 +46,8 @@ analysis = CLDK.java(
 
 print(len(analysis.get_classes()), "classes")
 print(analysis.get_call_graph())          # -> networkx.DiGraph
-# 23 classes
-# DiGraph with caller -> callee edges
+# 75 classes
+# DiGraph with 652 nodes and 1980 edges
 ```
   </TabItem>
   <TabItem label="Python">
@@ -48,15 +57,19 @@ from cldk.analysis import AnalysisLevel
 
 # Python requires a project_path (no single-file mode)
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
 )
 
 print(len(analysis.get_classes()), "classes")
 print(analysis.get_call_graph())          # -> networkx.DiGraph
+# 46 classes
+# DiGraph with 786 nodes and 1199 edges
 ```
   </TabItem>
 </Tabs>
+
+The Java outputs come from JDK 17. With JDK 21 or 25, the Java call graph has 1976 edges, not 1980. The Python call graph can change slightly between runs and between Python versions. On fresh runs of Flask 3.1.3, it had 785 to 787 nodes and 1198 or 1199 edges.
 
 <Aside type="note" title="Analysis levels">
   `analysis_level` defaults to `AnalysisLevel.symbol_table`, which resolves classes, methods, and fields. Call graphs, callers, and callees need `AnalysisLevel.call_graph`. If you want call relationships, you must set this level.
@@ -79,7 +92,7 @@ The language selects the backend. Java uses [codeanalyzer-java](/backends/codean
 
 ## Language coverage
 
-You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java, Python, and TypeScript, and all three are production-ready. Java goes deepest, because it adds class-hierarchy analysis. TypeScript also analyzes JavaScript sources, and it detects framework entrypoints.
+You query every language through the same `analysis` API. A different backend answers for each one. CLDK supports Java, Python, and TypeScript, and all three are production-ready. Java and TypeScript also give you `get_class_hierarchy()`, `get_interfaces()` and `get_enums()`. The TypeScript backend reads JavaScript sources too.
 
 | Language   | Status         | Symbol table | Call graph / callers / callees |
 | ---------- | -------------- | ------------ | ------------------------------ |

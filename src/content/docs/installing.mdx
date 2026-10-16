@@ -9,28 +9,47 @@ import { Tabs, TabItem, Aside } from "@astrojs/starlight/components";
 
 ## Installation
 
-Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), or [uv](https://docs.astral.sh/uv/):
+CLDK 2.0.0 needs Python 3.11, 3.12, 3.13, or 3.14. It does not install on Python 3.15 yet. See [Supported Python versions](#supported-python-versions).
+
+Use [pip](https://pypi.org/project/pip/), [poetry](https://python-poetry.org/), or [uv](https://docs.astral.sh/uv/). The base package analyzes Python and TypeScript. Extras are optional parts of the package that add Java analysis and the Neo4j driver. To install an extra, put its name in brackets after `cldk`, for example `cldk[java]`.
+
+`poetry add` and `uv add` add CLDK to the `pyproject.toml` file of your project. If the directory has no `pyproject.toml` file, run `poetry init` or `uv init` first.
 
 <Tabs>
   <TabItem label="pip">
     ```bash
     pip install cldk
+    pip install "cldk[java]"
+    pip install "cldk[neo4j]"
+    pip install "cldk[all]"
     ```
   </TabItem>
   <TabItem label="poetry">
     ```shell
     poetry add cldk
+    poetry add "cldk[java]"
+    poetry add "cldk[neo4j]"
+    poetry add "cldk[all]"
     ```
   </TabItem>
   <TabItem label="uv">
     ```shell
     uv add cldk
+    uv add "cldk[java]"
+    uv add "cldk[neo4j]"
+    uv add "cldk[all]"
     ```
   </TabItem>
 </Tabs>
 
-<Aside type="note" title="CLDK 2.0 is a release candidate">
-Dataflow levels, `taint()`, and the other 2.0 methods are not in the stable release. `pip install cldk` gives you 1.5.0. To get the pre-release, run `pip install --pre cldk`. In 2.0, the Java backend is an optional extra. For Java analysis, run `pip install --pre "cldk[java]"` instead. See [Dataflow graphs](/guides/dataflow/).
+Run only the line that you need. `cldk` analyzes Python and TypeScript. `cldk[java]` adds Java analysis, `cldk[neo4j]` adds the Neo4j driver, and `cldk[all]` adds both extras. Keep the quotes around an extra, because zsh reads the brackets as a file pattern.
+
+The `java` extra installs the Java analyzer with its own JVM. Java call graphs also need a JDK 11 or later, and Maven or Gradle. See the Java Analysis tab in [Language-specific dependencies](#language-specific-dependencies). The `neo4j` extra installs the driver for the read-only Neo4j backend. See [Analysis at scale](/at-scale/).
+
+<Aside type="note" title="Upgrading from CLDK 1.x">
+If you have CLDK 1.x, `pip install cldk` keeps it. To upgrade, add `-U`, for example `pip install -U "cldk[java]"`.
+
+CLDK 2.0.0 cannot read the cache that CLDK 1.x wrote for a Java or TypeScript project. Java stops with an error that contains `predates schema v2`, and TypeScript stops with a `ValidationError`. Delete `<project>/.codeanalyzer`, or pass `eager=True` to `CLDK.java(...)` or `CLDK.typescript(...)` once. The Java error suggests `eager_analysis=True`, but `CLDK.java()` does not accept that keyword.
 </Aside>
 
 ## Language-specific dependencies
@@ -39,18 +58,65 @@ CLDK analyzes several languages. Each language needs its own dependencies:
 
 <Tabs>
   <TabItem label="Python Analysis">
-    The CLDK Python SDK and Python analysis both need Python 3.11 or later. [pyenv](https://github.com/pyenv/pyenv) installs and manages several Python versions on one machine.
+    CLDK analyzes Python with [`codeanalyzer-python`](/backends/codeanalyzer-python/), which `pip install cldk` installs. CLDK runs on Python 3.11 to 3.14 (see [Supported Python versions](#supported-python-versions)). [pyenv](https://github.com/pyenv/pyenv) installs and manages several Python versions on one machine.
+
+    The first analysis of a project makes a virtual environment in `<project>/.codeanalyzer/python/` and installs the project into it. This step needs network access, so the first analysis is slower than later runs.
+
+    <Aside type="caution" title="Set SYSTEM_PYTHON in a virtual environment">
+    Whenever Python runs from a virtual environment, activated or not, `CLDK.python(...)` can stop with this error:
+
+    ```text
+    RuntimeError: Could not find a suitable base Python interpreter. Current environment: ... Please set the SYSTEM_PYTHON environment variable to point to a working Python interpreter that can create virtual environments.
+    ```
+
+    Before you run CLDK, set `SYSTEM_PYTHON` to the Python that made your virtual environment. This prevents the error.
+
+    On macOS and Linux, in the activated virtual environment:
+
+    ```bash
+    export SYSTEM_PYTHON="$(python -c 'import sys; print(sys._base_executable)')"
+    ```
+
+    On macOS and Linux, in a uv project:
+
+    ```bash
+    export SYSTEM_PYTHON="$(uv run python -c 'import sys; print(sys._base_executable)')"
+    ```
+
+    On macOS and Linux, in a Poetry project:
+
+    ```bash
+    export SYSTEM_PYTHON="$(poetry run python -c 'import sys; print(sys._base_executable)')"
+    ```
+
+    In Windows PowerShell, in the activated virtual environment:
+
+    ```powershell
+    $env:SYSTEM_PYTHON = (python -c "import sys; print(sys._base_executable)")
+    ```
+
+    If you start the `python` of the environment by its path, such as `.venv/bin/python`, use that path instead of `python`.
+    </Aside>
   </TabItem>
   <TabItem label="Java Analysis">
-    For Java analysis, CLDK uses a companion backend, [`codeanalyzer-java`](/backends/codeanalyzer-java/). In CLDK 2.0, install it as an extra: `pip install --pre "cldk[java]"`. The backend carries its own JVM. To build the target project with Maven, you need the Java Development Kit (JDK), version 11 or later.
+    For Java analysis, CLDK uses a companion backend, [`codeanalyzer-java`](/backends/codeanalyzer-java/). Install it as an extra: `pip install "cldk[java]"`. The extra carries the analyzer and its own JVM, so the symbol table needs nothing else.
 
-    [SDKMAN](https://sdkman.io/) installs and manages JDK versions.
+    For call graphs and deeper analysis levels, the analyzer compiles your project with Maven or Gradle. This step needs two tools:
+
+    - A Java Development Kit (JDK), version 11 or later. Maven finds it through `JAVA_HOME`. If `JAVA_HOME` is not set, Maven uses the `java` command on your `PATH`.
+    - The `mvn` or `gradle` command on your `PATH`. A project with a wrapper script (`mvnw` or `gradlew`) does not need it.
+
+    Without these tools, the analysis still finishes, but the call graph is incomplete. For example, on Commons CLI 1.7.0 it has 648 nodes and 1950 edges. With the tools, it has 652 nodes and 1980 edges on JDK 17, or 1976 edges on JDK 21 or 25. CLDK prints a warning that starts with `codeanalyzer-java did not fully compute`. CLDK also caches the incomplete result. After you install the tools, run the analysis once with `eager=True`.
+
+    [SDKMAN](https://sdkman.io/) installs and manages JDK and Maven versions.
 
     - Install SDKMAN with this command:
 
       ```bash
       curl -s "https://get.sdkman.io" | bash
       ```
+
+      The installer needs Bash 4 or later, but macOS has Bash 3.2. If the installer stops with `SDKMAN requires Bash 4 or higher`, run `brew install bash`. If you do not have Homebrew, install it from [brew.sh](https://brew.sh/) first. After you install Bash, open a new terminal. Then run the installer again.
 
     - Open a new terminal, or load the SDKMAN scripts:
 
@@ -66,26 +132,31 @@ CLDK analyzes several languages. Each language needs its own dependencies:
       sdk list java | grep sem
       ```
 
-      The output looks like this:
-      ```bash
-      Semeru      |     | 21.0.5       | sem     |            | 21.0.5-sem
-                  |     | 17.0.13      | sem     |            | 17.0.13-sem
-                  |     | 11.0.25      | sem     |            | 11.0.25-sem
-                  |     | 8.0.432      | sem     |            | 8.0.432-sem
+      The output looks like this. The versions change over time:
+      ```text
+       Semeru         |     | 27.0.0             | 27.0.0-sem
+                      |     | 26.0.0.0           | 26.0.0.0-sem
+                      |     | 25.0.1.0           | 25.0.1.0-sem
+                      |     | 24.0.2.0           | 24.0.2.0-sem
+                      |     | 23.0.0.0           | 23.0.0.0-sem
+                      |     | 22.0.2.0           | 22.0.2.0-sem
+                      |     | 21.0.1.0           | 21.0.1.0-sem
+                      |     | 17.0.20            | 17.0.20-sem
+                      |     | 11.0.32            | 11.0.32-sem
       ```
 
-    - Install Java 11 or later. This example uses `11.0.25-sem`:
+    - Install Java 11 or later. Copy the identifier from the last column of your list. This example uses `11.0.32-sem`:
 
       ```bash
-      sdk install java 11.0.25-sem
+      sdk install java 11.0.32-sem
       ```
 
     - Set Java 11 as the current (or default) Java version:
 
       ```bash
-      sdk use java 11.0.25-sem
-      # If want to default to java 11 for all sessions, use the following command instead:
-      # sdk default java 11.0.25-sem
+      sdk use java 11.0.32-sem
+      # To make Java 11 the default for all sessions, use this command instead:
+      # sdk default java 11.0.32-sem
       ```
 
     - Make sure that the installation works:
@@ -96,16 +167,16 @@ CLDK analyzes several languages. Each language needs its own dependencies:
 
       The command shows the installed Java version.
 
-      ```bash
-      openjdk 11.0.25 2024-10-15
-      IBM Semeru Runtime Open Edition 11.0.25.0 (build 11.0.25+9)
-      Eclipse OpenJ9 VM 11.0.25.0 (build openj9-0.48.0, JRE 11 Linux amd64-64-Bit Compressed References 20241107_1233 (JIT enabled, AOT enabled)
-      OpenJ9   - 1d5831436e
-      OMR      - d10a4d553
-      JCL      - edded3f65c based on jdk-11.0.25+9)
+      ```text
+      openjdk version "11.0.32" 2026-07-21
+      IBM Semeru Runtime Open Edition 11.0.32.0 (build 11.0.32+9)
+      Eclipse OpenJ9 VM 11.0.32.0 (build 11.0.32+9-openj9-0.60.0, JRE 11 Mac OS X aarch64-64-Bit 20260728_1285 (JIT enabled, AOT enabled)
+      OpenJ9   - 396c827fb3
+      OMR      - 2e3166f7a
+      JCL      - cb00718c9b based on jdk-11.0.32+9)
       ```
 
-    Finally, for call graphs and deeper levels, the Java backend builds your project automatically with Maven or Gradle. For a Maven project, install Maven with SDKMAN:
+    Finally, for a Maven project without a Maven wrapper, install Maven with SDKMAN:
 
     - Install Maven:
 
@@ -132,7 +203,11 @@ CLDK analyzes several languages. Each language needs its own dependencies:
       The command shows the installed Maven version.
   </TabItem>
   <TabItem label="TypeScript Analysis">
-    For TypeScript and JavaScript analysis, CLDK uses a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). The prebuilt binary itself needs no Bun or Node. To install the dependencies of your project, the backend needs `npm`, which ships with Node. The `cldk` package installs `codeanalyzer-typescript` at the version that CLDK pins, so the SDK needs no separate install. The package adds a `cants` command to your `PATH`. To install only the command, use PyPI or Homebrew.
+    For TypeScript and JavaScript analysis, CLDK uses a companion backend, [`codeanalyzer-ts`](/backends/codeanalyzer-ts/). The `cldk` package installs `codeanalyzer-typescript` at the version that CLDK pins, so the SDK needs no separate install. The prebuilt binary runs without Bun or Node. The backend reads `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, and `.cjs` files, and skips tests.
+
+    To resolve library call targets, the backend runs `npm install` in your project, which makes a `node_modules` directory. For this step, install Node, which includes `npm`. The step also needs network access. If `npm` is missing, or `npm install` fails, the analysis continues with fewer resolved types. CLDK prints no warning.
+
+    The package adds a `cants` command to your `PATH`. To install only the command, use PyPI or Homebrew.
 
     Install it from PyPI:
 
@@ -152,7 +227,7 @@ CLDK analyzes several languages. Each language needs its own dependencies:
     cants --help
     ```
 
-    The package is named `codeanalyzer-typescript`, but the command is **`cants`**. To resolve library call targets, the backend needs the dependencies of the project. If `npm` is on your `PATH`, the backend creates `node_modules` for you. To skip this step, use `--no-build`. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
+    The package is named `codeanalyzer-typescript`, but the command is **`cants`**. When you run `cants` yourself, `--no-build` skips the `npm install` step. For the full list of CLI options, see the [codeanalyzer-ts backend reference](/backends/codeanalyzer-ts/).
   </TabItem>
   <TabItem label="IaC Analysis">
     For infrastructure-as-code analysis, the companion backend is [`codeanalyzer-iac`](/backends/codeanalyzer-iac/). Its command is `caniac`. It ships as a prebuilt binary and needs no Helm CLI.
@@ -199,15 +274,15 @@ CLDK analyzes several languages. Each language needs its own dependencies:
     rustc --version
     ```
     The output looks like this. The version number can be different:
-    ```shell
-    rustc 1.70.0 (90c541806 2023-05-31)
+    ```text
+    rustc 1.99.1 (58cf8f9c3 2026-10-13)
     ```
   </TabItem>
 </Tabs>
 
 ## Additional development tools
 
-If you build Python from source, for example with pyenv, some operating systems need additional development tools:
+If you build Python from source, for example with pyenv, some operating systems need additional development tools. These tools also give you the C compiler that pip needs to install CLDK on Python 3.14:
 
 <Tabs>
   <TabItem label="macOS">
@@ -236,17 +311,20 @@ If you build Python from source, for example with pyenv, some operating systems 
     - Install the build tools:
 
       ```shell
-      sudo dnf group install c-development development-tools gcc make \
-      patch zlib-devel bzip2 bzip2-devel readline-devel sqlite sqlite-devel\
-      openssl-devel tk-devel libffi-devel xz-devel
+      sudo dnf install gcc make patch python3-devel zlib-devel bzip2 bzip2-devel readline-devel sqlite \
+      sqlite-devel openssl-devel tk-devel libffi-devel xz-devel
       ```
+
+      `python3-devel` gives pip the Python header files that it needs to build `tree-sitter` on Python 3.14.
   </TabItem>
 </Tabs>
 
 ## Supported Python versions
 
-CLDK needs Python 3.11 or later:
+CLDK 2.0.0 needs Python 3.11, 3.12, 3.13, or 3.14:
 
-| Python Version | Compatible `cldk` Versions |
-| -------------- | -------------------------- |
-| 3.11           | ≥0.4.0                     |
+| Python version | CLDK 2.0.0 |
+| -------------- | ---------- |
+| 3.11, 3.12, 3.13 | Installs with no additional tools. |
+| 3.14 | Installs, but pip compiles `tree-sitter` from source, so you need a C compiler. See [Additional development tools](#additional-development-tools). |
+| 3.15 | Does not install. `ray`, a dependency of `codeanalyzer-python`, has no wheel for Python 3.15. pip then falls back to an old CLDK release and fails to build a dependency, for example `pyarrow` or `numpy`. Use Python 3.11 to 3.14. |

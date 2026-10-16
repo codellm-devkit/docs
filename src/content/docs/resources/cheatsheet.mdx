@@ -11,7 +11,12 @@ A single-page reference for the common CLDK calls. Build one `analysis` object w
 
 ```bash frame="none"
 pip install cldk
+pip install "cldk[java]"
+pip install "cldk[neo4j]"
+pip install "cldk[all]"
 ```
+
+`cldk` analyzes Python and TypeScript. `cldk[java]` adds Java analysis, `cldk[neo4j]` adds the Neo4j driver, and `cldk[all]` adds both extras. Java call graphs also need a JDK 11 or later, and Maven or Gradle. For the prerequisites of each language, see [Installing CLDK](/installing/).
 
 Reachability queries use `networkx`. `pip install cldk` installs it as a dependency. If your own code imports `networkx` directly, install it explicitly too:
 
@@ -22,6 +27,18 @@ pip install cldk networkx
 ## Construct
 
 Use the per-language factory for the language you want: `CLDK.java(...)`, `CLDK.python(...)`, or `CLDK.typescript(...)`. The analysis level controls how much CLDK computes.
+
+The examples analyze three sample projects. Clone them. Then run Python from the directory that contains them:
+
+```bash frame="none"
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+git clone --depth 1 --branch 3.1.3 https://github.com/pallets/flask.git
+git clone --depth 1 --branch v4.6.7 https://github.com/colinhacks/zod.git
+```
+
+Git can print `warning: ... is not a commit!` and a note about a detached HEAD. These messages are normal, and the clones are complete.
+
+The outputs come from cldk 2.0.0 on Commons CLI 1.7.0, Flask 3.1.3, and Zod 4.6.7.
 
 <Tabs syncKey="lang">
   <TabItem label="Java">
@@ -34,7 +51,7 @@ analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.call_graph,
 )
-print(len(analysis.get_classes()), "classes")  # -> 23 classes
+print(len(analysis.get_classes()), "classes")  # -> 75 classes
 ```
   </TabItem>
   <TabItem label="Python">
@@ -43,10 +60,10 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
 )
-print(len(analysis.get_classes()), "classes")
+print(len(analysis.get_classes()), "classes")  # -> 46 classes
 ```
   </TabItem>
   <TabItem label="TypeScript">
@@ -55,13 +72,15 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.typescript(
-    project_path="my_app",
+    project_path="zod/packages/zod",
     analysis_level=AnalysisLevel.call_graph,
 )
-print(len(analysis.get_classes()), "classes")
+print(len(analysis.get_classes()), "classes")  # -> 53 classes
 ```
   </TabItem>
 </Tabs>
+
+In an activated virtual environment, set `SYSTEM_PYTHON` before you run the Python example. See [Gotchas](#gotchas).
 
 <Aside type="note" title="Deprecated constructor form">
 The `CLDK(language="java").analysis(project_path=...)` form is **deprecated**. It forwards to the factories above. Use `CLDK.java(...)`, `CLDK.python(...)`, or `CLDK.typescript(...)` instead. `from cldk import CLDK` does not change.
@@ -70,17 +89,18 @@ The `CLDK(language="java").analysis(project_path=...)` form is **deprecated**. I
 | Argument | Value | Notes |
 | --- | --- | --- |
 | factory | `CLDK.java` / `CLDK.python` / `CLDK.typescript` | Selects the language facade. |
-| `project_path` | path to checkout | The project to analyze. |
-| `analysis_level` | `symbol_table` (default) / `call_graph` / `program_dependency_graph` / `system_dependency_graph` | Call graph, callers, and callees **need** `call_graph`. Dataflow and taint need level 3 or 4. |
-| `target_files` | list of paths (optional) | Restrict analysis to these files. |
+| `project_path` | path to the project directory | The project to analyze. |
+| `analysis_level` | `symbol_table` (default) / `call_graph` / `program_dependency_graph` / `system_dependency_graph` | Call graph, callers, and callees **need** `call_graph`. `get_cfg`, `get_cdg`, and `get_ddg` need `program_dependency_graph`. Slices, flows, and taint need `system_dependency_graph`. |
+| `target_files` | list of paths (optional) | Restrict analysis to these files. Python uses only the first file. Java does not support it in 2.0.0 and raises an error. On TypeScript, the result replaces the cache, so pass `eager=True` on the next full run. |
 | `eager` | `bool` (default `False`) | Force regeneration of cached analysis. |
-| `backend` | config object (optional) | Selects the backend by **type** (see below). Omit for the default codeanalyzer backend. |
+| `backend` | configuration object (optional) | Selects the backend by **type** (see below). Omit for the default codeanalyzer backend. |
 
 ## Select a backend
 
-The **type** of the `backend=` configuration object selects the backend. Import these types from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default in-process codeanalyzer backend. `cache_dir` and `use_ray` live **inside** these configuration objects.
+The **type** of the `backend=` configuration object selects the backend. Import these types from `cldk.analysis.commons.backend_config`. Omit `backend=` for the default local codeanalyzer backend. `cache_dir` and `use_ray` live **inside** these configuration objects.
 
 ```python
+import os
 from cldk import CLDK
 from cldk.analysis.commons.backend_config import (
     CodeAnalyzerConfig,
@@ -94,28 +114,36 @@ analysis = CLDK.java(
     backend=CodeAnalyzerConfig(cache_dir="/tmp/cache"),
 )
 
-# Python codeanalyzer backend with call-graph knobs.
+# Python codeanalyzer backend. use_ray=True builds the symbol table of each file on Ray workers.
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     backend=PyCodeAnalyzerConfig(use_ray=True),
 )
 
-# Read-only Neo4j backend (Java / Python / TypeScript); the graph is populated out of band.
-analysis = CLDK.typescript(
-    backend=Neo4jConnectionConfig(uri="bolt://localhost:7687", username="neo4j", password="neo4j", application_name="my_project"),
+# Read-only Neo4j backend (Java / Python / TypeScript). A codeanalyzer command writes the graph first,
+# for example: canjv -i commons-cli --emit neo4j --neo4j-uri bolt://localhost:7687
+analysis = CLDK.java(
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password=os.environ["NEO4J_PASSWORD"],
+        application_name="commons-cli",
+    ),
 )
 ```
 
-| Config type | Backend | Notes |
+| Configuration type | Backend | Notes |
 | --- | --- | --- |
-| (omit) / `CodeAnalyzerConfig` | In-process codeanalyzer | Default for Java/TypeScript. `cache_dir` only. |
-| `PyCodeAnalyzerConfig` | In-process codeanalyzer (Python) | Default for Python. Adds `use_ray`. |
-| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional. The graph is loaded out of band. See [Analysis at scale](/at-scale/). |
+| (omit) / `CodeAnalyzerConfig` | Local codeanalyzer, runs the analyzer as a subprocess | Default for Java/TypeScript. `cache_dir` only. |
+| `PyCodeAnalyzerConfig` | Local codeanalyzer (Python), runs in-process | Default for Python. Adds `use_ray`. |
+| `Neo4jConnectionConfig(uri=...)` | Read-only Neo4j/Cypher | Java, Python, and TypeScript. `project_path` is optional. A codeanalyzer command writes the graph to Neo4j first. See [Analysis at scale](/at-scale/). |
 
 <Aside type="note" title="Caching and the cache root">
 Caching is **on by default** for Java, Python, and TypeScript. Artifacts live under one language-keyed `cache_dir`. The default is `<project>/.codeanalyzer`, with each language under `<cache_dir>/<language>/`.
 
-The factories have no `analysis_backend_path` argument. The binary ships inside the packaged `codeanalyzer-*`. For the TypeScript backend, set the binary with the `$CODEANALYZER_TS_BIN` environment variable. The factories have no `analysis_json_path` argument. `cache_dir` sets the cache root.
+Java and TypeScript reuse the cache without a check of the sources. After you edit the code, pass `eager=True` once. TypeScript also reuses a cache from a lower analysis level. After you raise `analysis_level` on a TypeScript project, pass `eager=True` once.
+
+The factories have no `analysis_backend_path` argument. The binary ships inside the packaged `codeanalyzer-*`. To use another TypeScript analyzer binary, for example one that you built, set the `CODEANALYZER_TS_BIN` environment variable. The factories have no `analysis_json_path` argument. `cache_dir` sets the cache root.
 </Aside>
 
 ## Symbol table
@@ -129,6 +157,8 @@ The symbol table is available at every analysis level. It holds every class, met
 | `get_methods()` | `Dict[str, Dict]` | Every method, keyed by class and then by method. |
 | `get_method(qualified_class_name, qualified_method_name)` | `JCallable \| PyCallable \| TSCallable \| None` | One method. `.code` holds its source body. |
 
+This snippet continues the Java example in [Construct](#construct). Java method names use fully qualified parameter types:
+
 ```python
 m = analysis.get_method(
     "org.apache.commons.cli.OptionBuilder", "create(java.lang.String)"
@@ -136,43 +166,50 @@ m = analysis.get_method(
 print(m.code)  # -> source body of OptionBuilder.create(java.lang.String)
 ```
 
-Java also gives you class-relationship queries: `get_sub_classes(cls)`, `get_extended_classes(cls)`, and `get_implemented_interfaces(cls)`. It also gives you `get_all_comments()`.
+All three languages give you `get_sub_classes(cls)` and `get_extended_classes(cls)`. Java and TypeScript also give you `get_implemented_interfaces(cls)`. Java also gives you `get_all_comments()`.
 
 ## Call graph and reachability
 
 <Aside type="caution" title="Build at the right level">
-These methods need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not populate call edges.
+These methods need `analysis_level=AnalysisLevel.call_graph`. At the default `symbol_table` level, they do not raise. Java and TypeScript return empty results, and Python returns a partial call graph.
 </Aside>
 
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `get_call_graph()` | `networkx.DiGraph` | Edges point caller → callee. |
-| `get_call_graph_json()` | `str` | Same graph, serialized. |
+| `get_call_graph_json()` | `str` | Java: the call-graph edges as JSON. Python and TypeScript: the whole analysis as JSON. |
 | `get_callers(target_class_name, target_method_declaration)` | `Dict` | Methods that call this method. |
 | `get_callees(source_class_name, source_method_declaration)` | `Dict` | Methods that this method calls. |
-| `get_class_call_graph(qualified_class_name, method_signature=None)` | `List[Tuple]` | Call-graph edges reachable from one class or method. |
+| `get_class_call_graph(qualified_class_name, method_signature=None)` | `List[Tuple]` | Call-graph edges from one class or method. Python and TypeScript return all edges reachable from it. Java returns only its direct calls. |
+| `reaches(src, dst, ...)` | `bool` | Is there a call path from `src` to `dst`? It needs only the `call_graph` level. |
+| `backward_cone(sinks, ...)` | `Slice` | Which callables can reach any of these sinks? It needs only the `call_graph` level. Below that level, the Java and TypeScript cones hold only the sinks. |
+
+These snippets also continue the Java example:
 
 ```python
 cg = analysis.get_call_graph()          # -> networkx.DiGraph
 callers = analysis.get_callers(
     "org.apache.commons.cli.Options", "addOption(org.apache.commons.cli.Option)"
 )  # -> Dict of call sites
+print(sorted(callers))                  # -> ['caller_details', 'target_method']
 ```
 
-Reachability is a `networkx` query over the call graph:
+Reachability is a `networkx` query over the call graph. A Java node is the fully qualified class name, a dot, and the method signature:
 
 ```python
 import networkx as nx
 
 cg = analysis.get_call_graph()
-print(nx.has_path(cg, src, sink))                 # reachable? -> True / False
+src = "org.apache.commons.cli.DefaultParser.parse(org.apache.commons.cli.Options, java.lang.String[])"
+sink = "org.apache.commons.cli.DefaultParser.handleLongOption(java.lang.String)"
+print(nx.has_path(cg, src, sink))                 # reachable? -> True
 # nx.shortest_path(cg, src, sink)                 # one path
 # list(nx.all_simple_paths(cg, src, sink))        # every path
 ```
 
 ## Dataflow and taint <Badge text="New in 2.0" variant="caution" />
 
-CLDK 2.0 adds levels 3 and 4, and the methods over them. Version 2.0 is a release candidate, so install it with `pip install --pre cldk`. Java, Python, and TypeScript all expose this surface.
+CLDK 2.0 adds the `program_dependency_graph` and `system_dependency_graph` levels, and the methods over them. Java, Python, and TypeScript all expose this surface.
 
 | Method | Returns | Notes |
 | --- | --- | --- |
@@ -185,29 +222,37 @@ CLDK 2.0 adds levels 3 and 4, and the methods over them. Version 2.0 is a releas
 | `get_source(node_id)` | `str` | The source text for a node. |
 | `slice_forward(src, *, within, ...)` | `Slice` | Where does this value go? |
 | `slice_backward(src, *, within, ...)` | `Slice` | What determined this value? |
-| `backward_cone(sinks, ...)` | `Slice` | What feeds any of these sinks? |
-| `reaches(src, dst, ...)` | `bool` | Does it reach it at all? |
 | `flows_to_call(src, callee, *, within, ...)` | `bool` | Does it reach a call to this callee? |
 | `flows_to_argument(src, callee, arg, *, within, ...)` | `bool` | Does it reach that argument? |
 | `paths_between(src, dst, *, src_within, dst_within, ...)` | `FlowPaths` | The routes it takes. |
 | `taint(sources, sinks, sanitizers, ...)` | `TaintResult` | m sources against n sinks in one traversal. |
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.system_dependency_graph,   # taint needs this level
+)
 r = analysis.taint(
-    sources=[("invoice_id", "PaymentPortal.invoice_transaction")],
-    sinks=[("query", "AccountMove._execute")],
-    sanitizers=["PaymentPortal._sanitize_id"],   # str cuts a callable
-)                                                # (name, within) cuts a variable
-r.paths        # witnesses
-r.exhausted    # searched, nothing found  (empty whenever depth is set)
-r.unresolved   # the ledger: read this before trusting exhausted
+    sources=[("token", "DefaultParser.handleToken")],       # (name, within)
+    sinks=[
+        ("token", "DefaultParser.handleLongOption"),
+        ("width", "HelpFormatter.setWidth"),
+    ],
+    sanitizers=[],   # a str cuts a callable, a (name, within) pair cuts a variable
+)
+print(len(r.paths))   # flow paths found -> 1
+print(r.exhausted)    # searched, nothing found (empty whenever depth is set) -> [('token', 'width')]
+print(r.unresolved)   # what stopped a search early (read it before you trust exhausted) -> []
 ```
 
-Provenance ranks `ssa` > `reaching-defs` > `points-to`. `FlowPath.weakest` is the hop that caps the claim. See [Dataflow graphs](/guides/dataflow/) and [Taint analysis](/guides/taint/).
+Each hop of a path can carry a provenance label: `ssa`, `reaching-defs`, or `points-to`, from the most precise to the least precise. `FlowPath.weakest` is the least precise hop, so it limits how strongly you can state the flow. See [Dataflow graphs](/guides/dataflow/) and [Taint analysis](/guides/taint/).
 
 ## Models
 
-The typed objects that each language analysis API returns.
+The typed objects that each language analysis API returns. Import them from `cldk.models.java.models`, `cldk.models.python`, and `cldk.models.typescript`.
 
 | Language | Models |
 | --- | --- |
@@ -218,8 +263,10 @@ The typed objects that each language analysis API returns.
 ## Gotchas
 
 <Aside type="caution" title="Common mistakes">
-- **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. The default `symbol_table` level does not have call edges.
-- **Analysis is project-based.** Pass `project_path=...` to the factory, for example `CLDK.java(project_path=...)`. Point it at the project root. The Neo4j backend is the exception. Its graph is populated out of band, so `project_path` is optional.
+- **Call-graph level is required.** `get_call_graph`, `get_callers`, `get_callees`, and reachability need `analysis_level=AnalysisLevel.call_graph`. At the default `symbol_table` level, Java and TypeScript return empty results, and Python returns a partial call graph. CLDK prints no warning.
+- **Analysis is project-based.** Pass `project_path=...` to the factory, for example `CLDK.java(project_path=...)`. Point it at the project directory. The Neo4j backend is the exception. A codeanalyzer command writes its graph to Neo4j before you connect, so `project_path` is optional.
+- **Java names need full parameter types.** Write `create(java.lang.String)`, not `create(String)`. A short form matches nothing, and the method returns an empty result with no error.
+- **Set `SYSTEM_PYTHON` in an activated virtual environment.** In an activated virtual environment, or under `uv run` or `poetry run`, `CLDK.python(...)` can stop with `RuntimeError: Could not find a suitable base Python interpreter`. To set it, see the Python Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies).
 </Aside>
 
 ## Next steps
