@@ -22,9 +22,11 @@ This split lets one `analysis` API cover many languages. The SDK does not parse 
 A new backend that writes the canonical JSON makes its language available to the SDK. The SDK then needs only the Python bindings for that language. See [Add a language backend](/contributing/add-language-backend/).
 
 <Aside type="note" title="The SDK manages the backends">
-The SDK runs each backend for you. <Badge text="2.0" variant="caution" /> The Java backend is the optional extra `cldk[java]`. Its wheel carries the JAR and a bundled JVM, and the SDK runs `java -jar` on that JVM. Analysis level 2 and above also need a JDK 11 or later on `JAVA_HOME`. In CLDK 1.5.0, the SDK downloads a Temurin JDK on first use instead.
+The SDK runs each backend for you. <Badge text="2.0" variant="caution" /> The Java backend is the optional extra `cldk[java]`. Its wheel carries the JAR and a bundled JVM, and the SDK runs `java -jar` on that JVM. In CLDK 1.5.0, the SDK downloads a Temurin JDK on first use instead.
 
-The `codeanalyzer-python` and `codeanalyzer-typescript` packages are dependencies of `cldk`. The SDK imports the Python backend in-process, and the backend creates a virtualenv for the dependencies of the analyzed project. You do not download a JAR, and you do not set `analysis_backend_path`.
+From analysis level 2, the Java backend builds the project with Maven or Gradle. This needs Maven or Gradle (a wrapper in the project, or the tool on `PATH`) and a JDK 11 or later with `javac` on `JAVA_HOME`. Without them, the run logs a WARNING, and the call graph has declared edges only.
+
+The `codeanalyzer-python` and `codeanalyzer-typescript` packages are dependencies of `cldk`. The SDK imports the Python backend in-process, and the backend creates a virtual environment for the dependencies of the analyzed project. You do not download a JAR, and you do not set `analysis_backend_path`.
 
 These pages document the backend layer for readers who want to understand it or add to it.
 </Aside>

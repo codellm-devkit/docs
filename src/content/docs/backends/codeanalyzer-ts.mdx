@@ -97,7 +97,7 @@ cants -i <path> [options]
 | `--no-phantoms` | Disable phantom (external) nodes for library imports |
 | `-c, --cache-dir <dir>` | Cache directory (default: `<input>/.codeanalyzer`) |
 | `-v, --verbose` | Increase verbosity. Repeatable, for example `-vv` |
-| `--emit <target>` | Output target: `json` (default), `neo4j` (a `graph.cypher` script, or a live push with `--neo4j-uri`), or `schema` (the Neo4j schema contract, no `-i` needed) |
+| `--emit <target>` | Output target: `json` (default), `neo4j` (a `graph.cypher` script, or a live push with `--neo4j-uri` or `NEO4J_URI`), or `schema` (the Neo4j schema contract, no `-i` needed) |
 | `--app-name <name>` | Application name for the graph anchor (default: the input directory name) |
 | `--neo4j-uri <uri>` | Push the graph to a live Neo4j over Bolt. Also read from `NEO4J_URI` |
 | `--neo4j-user`, `--neo4j-password`, `--neo4j-database` | Connection details. Also read from `NEO4J_USERNAME`, `NEO4J_PASSWORD`, and `NEO4J_DATABASE` |
@@ -203,19 +203,17 @@ The `symbol_table` is a dictionary. It maps project-relative file paths to `TSMo
   type_parameters: [ ... ],
   return_type: "Promise<User>",
   code: "async getUser(id: string) { ... }",
-  call_sites: [
-    {
+  body: {                                          // call sites, keyed by "line:column"
+    "20:12": {
+      kind: "call",
       method_name: "fetchById",
       receiver_type: "Database",
-      callee_signature: "src/db.Database.fetchById",
-      is_optional_chain: false,
-      start_line: 20
+      callee: "can://my_app/typescript/src/db.ts/Database/fetchById",
+      is_optional_chain: false
     }
-  ],
+  },
   cyclomatic_complexity: 3,
   is_entrypoint: false,
-  accessed_symbols: [ ... ],
-  local_variables: [ ... ],
   inner_callables: { },
   inner_classes: { }
 }
@@ -307,21 +305,29 @@ TypeScript includes several language-specific constructs that codeanalyzer-ts mo
 
 ## Python SDK integration
 
-The `CLDK.typescript(...)` factory analyzes TypeScript projects through the same `CLDK` analysis API as Python and Java:
+The `CLDK.typescript(...)` factory analyzes TypeScript projects through the same `CLDK` analysis API as Python and Java. The examples in this section run on Zod 4.6.7. Clone it into your working directory first:
+
+```bash
+git clone --depth 1 --branch v4.6.7 https://github.com/colinhacks/zod.git
+```
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.typescript(
-    project_path="/path/to/ts/project",
+    project_path="zod/packages/zod",
     analysis_level=AnalysisLevel.call_graph,
 )
 
 # Standard analysis methods:
-print(analysis.get_classes())      # Dict[str, TSClass]
+classes = analysis.get_classes()   # Dict[str, TSClass]
+print(len(classes), "classes")
 graph = analysis.get_call_graph()  # networkx.DiGraph
+# 53 classes
 ```
+
+The output comes from cldk 2.0.0 on Zod 4.6.7.
 
 The `CLDK(language="typescript").analysis(...)` form is **deprecated**. Use `CLDK.typescript(...)`. The import is `from cldk import CLDK` in both forms.
 
@@ -329,7 +335,7 @@ The `CLDK(language="typescript").analysis(...)` form is **deprecated**. Use `CLD
 
 `CLDK.typescript(...)` accepts the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The **type** of the `backend=` configuration object selects the backend:
 
-- **In-process codeanalyzer** (default): omit `backend=`, or pass `backend=CodeAnalyzerConfig(cache_dir=...)` to set where the backend caches artifacts.
+- **Local codeanalyzer** (default): omit `backend=`, or pass `backend=CodeAnalyzerConfig(cache_dir=...)` to set where the backend caches artifacts.
 - **Read-only Neo4j**: pass `backend=Neo4jConnectionConfig(...)` to query a graph populated out of band.
 
 ```python
@@ -339,15 +345,14 @@ from cldk.analysis.commons.backend_config import (
     Neo4jConnectionConfig,
 )
 
-# In-memory backend with a custom cache directory
+# Local backend with a custom cache directory
 analysis = CLDK.typescript(
-    project_path="/path/to/ts/project",
+    project_path="zod/packages/zod",
     backend=CodeAnalyzerConfig(cache_dir="/tmp/analysis-cache"),
 )
 
-# Read-only Neo4j backend
+# Read-only Neo4j backend (needs a running Neo4j that holds the graph)
 analysis = CLDK.typescript(
-    project_path="/path/to/ts/project",
     backend=Neo4jConnectionConfig(
         uri="bolt://localhost:7687",
         username="neo4j",
@@ -359,6 +364,8 @@ analysis = CLDK.typescript(
 ```
 
 Import `Neo4jConnectionConfig` from `cldk.analysis.commons.backend_config`, or from `cldk.analysis.typescript.neo4j`.
+
+In cldk 2.0.0, the Neo4j backend fails on some TypeScript graphs, for example the graph of Zod 4.6.7. See the known issue in [Analysis at scale](/at-scale/#phase-2-poll-the-graph).
 
 <Aside type="tip" title="Where the graph comes from">
 The read-only backend queries a graph that codeanalyzer-ts populates with `cants --emit neo4j`. Emit the graph once, then serve many agents from it. This is the [analysis-at-scale](/at-scale/) workflow.
@@ -377,12 +384,22 @@ This rule makes sure that every call-graph edge points to a real symbol-table en
 
 ## Caching and incremental analysis
 
-The backend keeps a cache under one language-keyed `cache_dir` (default: `<project>/.codeanalyzer`). TypeScript artifacts live under `<cache_dir>/typescript/`, stamped with the backend version. Caching is **on by default**. From the SDK, set the cache root with `backend=CodeAnalyzerConfig(cache_dir=...)`. On the CLI, use `-c <dir>`. These events invalidate the cache:
+The backend keeps a cache under one language-keyed `cache_dir` (default: `<project>/.codeanalyzer`). TypeScript artifacts live under `<cache_dir>/typescript/`, stamped with the backend version. Caching is **on by default**. From the SDK, set the cache root with `backend=CodeAnalyzerConfig(cache_dir=...)`. On the CLI, use `-c <dir>`. These events invalidate the CLI cache:
 - Analyzer version change
 - Any source file modification (content hash mismatch)
 - `--eager` flag (forces clean rebuild)
 
 Use `--lazy` (default) to reuse the cache. Use `--target-files <list>` to update only specific files.
+
+The CLI cache stores absolute source paths. If you move or copy the project directory together with its cache, pass `--eager` once. Otherwise the call graph loses most of its edges, and the run gives no warning about the cache. For example, on a copy of Zod 4.6.7, 151 of 4629 call-graph edges remained.
+
+<Aside type="caution" title="The SDK does not check the cache">
+If `<cache_dir>/typescript/analysis.json` exists, and you pass neither `eager=True` nor `target_files`, `CLDK.typescript(...)` reads the file and does not run the backend. The events above therefore do not apply. The SDK does not compare the sources or the analysis level with the cache.
+
+- After you edit the code, pass `eager=True` once.
+- If you raise `analysis_level` on a project that you analyzed before, pass `eager=True` once. Otherwise you get the old analysis level with no warning.
+- A run with `target_files` writes over the cache. On the next full run, pass `eager=True`.
+</Aside>
 
 ## Performance notes
 
@@ -390,14 +407,12 @@ Use `--lazy` (default) to reuse the cache. Use `--target-files <list>` to update
 - **Call graph build**: O(c) in call sites. The checker resolution is constant-time for each site
 - **Dataflow (levels 3 and 4)**: opt-in with `-a 3` or `-a 4`. `-j <n>` runs the level-3 extraction on parallel workers, and its output is byte-identical to a sequential run
 
-For large projects (more than 100k lines), analysis takes seconds to tens of seconds.
-
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `codeanalyzer-typescript binary not found` | `$CODEANALYZER_TS_BIN` is unset and the package is missing | Run `pip install codeanalyzer-typescript`, or set `$CODEANALYZER_TS_BIN` |
-| `--analysis-level does not apply to --emit neo4j` | `-a` was passed with `--emit neo4j` | Remove `-a`. The graph is always projected at full depth |
+| `--analysis-level does not apply to --emit neo4j` | `-a 2` or higher was passed with `--emit neo4j` | Remove `-a`. The graph is always projected at full depth |
 | `--graphs requires --analysis-level 3 or 4` | `--graphs` was passed at level 1 or 2 | Pass `-a 3` or `-a 4` |
 
 ## Current maturity
@@ -406,7 +421,7 @@ codeanalyzer-ts is **production-ready**, at the same tier as the Java and Python
 
 - **Symbol table**: Stable. The backend supports all TypeScript node kinds
 - **Call graph**: Stable. The tsc resolution and the RTA expansion are proven correct
-- **Python SDK integration**: Available with `CLDK.typescript(...)`, for the in-process and read-only Neo4j backends
+- **Python SDK integration**: Available with `CLDK.typescript(...)`, for the local and read-only Neo4j backends
 - **Neo4j graph output**: Available with `--emit neo4j` and `--emit schema` (see [Analysis at scale](/at-scale/))
 - **Entrypoint detection**: Available. The backend stamps `entrypoints` and `is_entrypoint` on matched callables and classes, and writes an `entrypoint_report`. Query it with `get_entrypoints()`, `get_entrypoint_classes()`, and `get_entrypoint_coverage()`. Add rules with `--entrypoint-rules <yaml...>`
 - **Dataflow (levels 3 and 4)**: Available with `-a 3` and `-a 4`. The Python SDK queries them with `get_cfg`, `get_ddg`, `slice_backward`, and `taint`

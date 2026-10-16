@@ -41,12 +41,14 @@ The point is to keep analysis out of the request path. A model that analyzes aga
 </Aside>
 
 <Aside type="tip" title="Eyeball the graph">
-The emit step produces a real property graph. Point Neo4j Browser or Bloom at the same Bolt endpoint with read-only credentials to see the result. Scope to one app, for example: `MATCH (a:JApplication {name: 'payments-service'})-[:J_HAS_UNIT]->(:JCompilationUnit)-[:J_DECLARES_TYPE]->(t:JType) RETURN * LIMIT 50`.
+The emit step produces a real property graph. Point Neo4j Browser or Bloom at the same Bolt endpoint with read-only credentials to see the result. Scope to one app, for example: `MATCH (a:JApplication {name: 'payments-service'})-[:J_HAS_MODULE]->(:JModule)-[:J_DECLARES]->(t:JType) RETURN * LIMIT 50`.
 </Aside>
 
 ## The emit CronJob
 
-Each backend ships as a self-contained binary: `canjv` for Java, `canpy` for Python, and `cants` for TypeScript. An emit job is therefore a container with the binary, the source checkout, and the Neo4j connection in its environment. The backend reads the connection values from `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`, so the command line carries no secrets.
+Each backend is a command-line tool: `canjv` for Java, `canpy` for Python, and `cants` for TypeScript. Each one installs with pip, so an emit image needs Python and the backend package. A Java image also needs a JDK 11 or later with `javac` on `JAVA_HOME`, and Maven or Gradle. A TypeScript image also needs Node with `npm` on `PATH`, because `cants` runs `npm install` in the project. Each emit job needs network access, because the backends download the dependencies of the project.
+
+An emit job is therefore a container with the tool, the source checkout, and the Neo4j connection in its environment. The backend reads the connection values from `NEO4J_URI`, `NEO4J_USERNAME`, and `NEO4J_PASSWORD`, so the command line carries no secrets.
 
 ```yaml title="emit-cronjob.yaml"
 apiVersion: batch/v1
@@ -90,13 +92,15 @@ spec:
               emptyDir: {}
 ```
 
-Change the image and `args` for each language. Java uses `canjv -i /src/payments-service -a 2 --emit neo4j --app-name payments-service`. TypeScript uses `cants -i /src/web-frontend --emit neo4j --app-name web-frontend`. Point every job at the **same** `NEO4J_URI`. The `J*`, `Py*`, and `TS*` namespacing keeps them apart.
+Change the image and `args` for each language. Java uses `canjv -i /src/payments-service --emit neo4j --app-name payments-service --strict`. TypeScript uses `cants -i /src/web-frontend --emit neo4j --app-name web-frontend`. Point every job at the **same** `NEO4J_URI`. The `J*`, `Py*`, and `TS*` namespacing keeps them apart. If two Java projects share files, for example two branches of one project, read [Writes are idempotent and incremental](/at-scale/#writes-are-idempotent-and-incremental) first.
+
+Without the JDK or the build tool, a Java job still exits with code 0 and prints nothing. The graph then has declared call edges only. `--strict` makes such a run fail, so the CronJob shows a failed job. Without `npm`, a TypeScript job also exits with code 0. It prints a `dependency materialization failed` warning, and the graph has fewer call edges. `cants` has no option that makes such a run fail.
 
 ## The agent Deployment
 
-The agents read with a read-only credential. You build the object the same way as in the [poll examples](/at-scale/#phase-2--poll-the-graph). Only two details are specific to Kubernetes: the URI is the in-cluster Neo4j `Service`, and the password comes from a `Secret`.
+The agents read with a read-only credential. You build the object the same way as in the [poll examples](/at-scale/#phase-2-poll-the-graph). Only two details are specific to Kubernetes: the URI is the in-cluster Neo4j `Service`, and the password comes from a `Secret`.
 
-```python title="agent.py — constructed once per request handler"
+```python title="agent.py: constructed once per request handler"
 import os
 from cldk import CLDK
 from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
@@ -119,7 +123,7 @@ CLDK parses no source at query time, so an agent pod starts at once and answers 
 [Odoo](https://github.com/odoo/odoo) is a good stress test for multi-project analysis at scale. It is large, and it is split into **hundreds of addon modules**, all Python. A real fleet rarely stops at one language. This walkthrough therefore pairs the Python addons of Odoo with a **TypeScript service** in the same graph, and queries both through one API.
 
 <Aside type="note" title="Illustrative">
-The commands below are real, and you can copy them. The counts and timings are typical of a large multi-module codebase. They make the workflow concrete, but they are illustrative, not measured.
+The commands below are templates. This page shows no measured output for Odoo.
 </Aside>
 
 <Aside type="note" title="The Odoo frontend is JavaScript, not TypeScript">
@@ -138,21 +142,20 @@ Run one Python job over the Odoo addons and one TypeScript job over the storefro
       --neo4j-uri bolt://neo4j:7687 \
       --neo4j-user writer --neo4j-password "$NEO4J_PASSWORD"
     # -> writes :PyApplication {name: "odoo"} and its :PyModule / :PySymbol graph
-    # -> ~hundreds of modules; subsequent runs only rewrite changed files
     ```
   </TabItem>
   <TabItem label="TypeScript (storefront service)">
     ```bash title="cants over a TypeScript service"
-    cants -i ./storefront/src -a 2 --emit neo4j \
+    cants -i ./storefront/src --emit neo4j \
       --app-name storefront \
       --neo4j-uri bolt://neo4j:7687 \
       --neo4j-user writer --neo4j-password "$NEO4J_PASSWORD"
-    # -> writes :TSApplication {name: "storefront"} and its :TSModule / :CanNode graph
+    # -> writes :TSApplication {id: "can://storefront"} and its :TSModule / :CanNode graph
     ```
   </TabItem>
 </Tabs>
 
-In a cluster these are two `CronJob`s on the same schedule. After the first full run, each later run is an incremental Bolt push. It rewrites only the modules whose content hash changed. The Python and TypeScript writers scope their prunes to the application anchor, so the two apps never touch each other. Keep two Java apps in separate databases (see the [prune note](/at-scale/#writes-are-idempotent-and-incremental)).
+In a cluster these are two `CronJob`s on the same schedule. After the first full run, each later run is an incremental Bolt push. It rewrites only the modules whose content hash changed. Each writer scopes its prune to its own application, so the two apps never touch each other (see the [prune note](/at-scale/#writes-are-idempotent-and-incremental)).
 
 ### 2. Query across modules and languages
 
@@ -178,16 +181,19 @@ ts = connect(CLDK.typescript, "storefront")  # the TypeScript service graph
 # "Which callables across all addons reach SaleOrder.action_confirm?"
 # Signatures are rooted at the emit -i directory (./odoo/addons), so no "odoo.addons." prefix.
 callers = py.get_callers("sale.models.sale_order.SaleOrder", "action_confirm")
-# -> callers spread across the sale, stock, and account addons — one query, no per-addon parsing
 
 # The same agent inspects the TypeScript service's call graph through the same API.
 storefront_cg = ts.get_call_graph()   # -> networkx.DiGraph
 ```
 
-The first query touched modules from several addons in one call. The agent then reached a second language through the same `analysis` vocabulary. This is the multi-lingual, multi-project result. A new analysis of these projects for every such question is not practical. A read of a precomputed graph is constant work.
+In cldk 2.0.0, the `CLDK.typescript(...)` call can raise `ValueError` for some graphs. See the known issue in [Analysis at scale](/at-scale/#phase-2-poll-the-graph).
+
+One `get_callers` call covers every addon, because all addons are in one application graph. The agent then reaches a second language through the same `analysis` vocabulary. This is the multi-lingual, multi-project result. A new analysis of these projects for every such question is not practical. A read of a precomputed graph is constant work.
 
 <Aside type="caution" title="Operational notes">
-Schedule the emit jobs as periodic **full** runs. A full run prunes the modules whose files were deleted. For `cants`, add `--eager` to the full run, because the TypeScript writer prunes only on an eager full run. Use the targeted-run flag of the backend (`--file-name <path>` for `canpy`, `--target-files <paths>` for `codeanalyzer` and `cants`) only for fast mid-cycle refreshes, because targeted runs skip orphan pruning. Give the agents a **read-only** Neo4j role. Keep the write credentials on the CronJobs alone.
+- Schedule the emit jobs as periodic **full** runs. A full run prunes the modules whose files were deleted. For `canpy` and `cants`, add `--eager` to the full run, because their writers prune only on an eager full run.
+- Use a targeted run only for a fast mid-cycle refresh, because a targeted run skips orphan pruning. The flag is `--file-name <path>` for `canpy` and `--target-files <paths>` for `cants`. Run every `canjv` emit as a full run, because CLDK 2.0.0 cannot read a targeted Java graph.
+- Give the agents a **read-only** Neo4j role. Roles need Neo4j Enterprise Edition. Neo4j Community Edition has no roles, so every user can write. Keep the write credentials on the CronJobs alone.
 </Aside>
 
 ## See also
