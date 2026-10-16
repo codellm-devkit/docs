@@ -24,12 +24,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Clone python-sdk at latest release tag
+      - name: Clone python-sdk at latest stable release tag
         run: |
           set -euo pipefail
           git clone https://github.com/codellm-devkit/python-sdk.git ../python-sdk
           cd ../python-sdk
-          LATEST_TAG=$(git tag --sort=-v:refname | head -n1)
+          # Stable tags only (vX.Y.Z): version sort puts v2.0.0-rc.8 above v2.0.0.
+          LATEST_TAG=$(git tag --list 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1)
           echo "Using python-sdk release tag: ${LATEST_TAG}"
           git checkout "tags/${LATEST_TAG}"
 
@@ -40,7 +41,7 @@ jobs:
           # Installing cldk (from the release-tagged clone) pulls in the
           # codeanalyzer-* backends that the schema pages re-export from.
           pip install -e ../python-sdk
-          pip install griffe
+          pip install -r scripts/requirements.txt
 
       - name: Generate API reference markdown
         run: python scripts/gen_api_docs.py
