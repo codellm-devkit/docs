@@ -2,4 +2,6 @@
 # `cldk` itself is installed separately from the release-tagged python-sdk
 # (e.g. `pip install -e ../python-sdk`), which also pulls in the codeanalyzer-*
 # backends that the schema pages re-export from.
-griffe>=2.0,<3.0
+# griffe is pinned: the pages depend on how it parses docstrings, so a regeneration
+# with this version gives the committed pages. Change it only with a regeneration.
+griffe==2.3.2
