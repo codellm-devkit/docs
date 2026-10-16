@@ -5,7 +5,9 @@ description: "Worked TypeScript examples on the Zod package: modules, classes, i
 
 import { Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-These examples run against [Zod](https://github.com/colinhacks/zod), a TypeScript schema declaration library, and its published package `zod/packages/zod`. Each example calls one method of the CLDK Python SDK. A real run of CLDK 2.0.0rc7 over Zod produced every output comment on this page. A section with the <Badge text="2.0" variant="caution" /> badge needs the pre-release, so install it with `pip install --pre cldk`. The stable release on PyPI is 1.5.0. Some examples carry no output comment, because that run did not record one.
+These examples run against [Zod](https://github.com/colinhacks/zod), a TypeScript schema declaration library, and its published package `zod/packages/zod`. Each example calls one method of the CLDK Python SDK. The outputs come from cldk 2.0.0 (codeanalyzer-typescript 1.6.0) on Zod 4.6.7.
+
+A section with the <Badge text="2.0" variant="caution" /> badge uses a method that is new in CLDK 2.0. If you have CLDK 1.x, upgrade with `pip install -U cldk`. If you analyzed Zod with CLDK 1.x, the cache from that run makes `CLDK.typescript` raise a `ValidationError` for `TSAnalysis`. To fix it, delete `zod/packages/zod/.codeanalyzer`. You can also pass `eager=True` to `CLDK.typescript` once.
 
 <Aside type="note" title="Project-based analysis">
 TypeScript analysis is project-based. `project_path` must point at a project directory. There is no single-file mode. The backend also analyzes `.js`, `.jsx`, `.mjs`, and `.cjs` files in that directory.
@@ -13,13 +15,13 @@ TypeScript analysis is project-based. `project_path` must point at a project dir
 
 ## Set up the analysis
 
-Clone Zod first.
+Clone Zod 4.6.7 first.
 
 ```bash
-git clone https://github.com/colinhacks/zod.git
+git clone --depth 1 --branch v4.6.7 https://github.com/colinhacks/zod.git
 ```
 
-Then point CLDK at the published package.
+Then point CLDK at the published package. Run Python from the directory that contains `zod`.
 
 ```python
 from cldk import CLDK
@@ -31,7 +33,7 @@ analysis = CLDK.typescript(
 )
 ```
 
-The `zod/packages/zod` directory holds both the v3 and the v4 source trees. A signature under one of those trees carries a `src/v3` or a `src/v4` prefix. The default analysis level builds the symbol table only. The `call_graph` level adds the caller and callee edges.
+The other code blocks on this page continue this block. The `zod/packages/zod` directory holds both the v3 and the v4 source trees. A signature under one of those trees carries a `src/v3` or a `src/v4` prefix. The default analysis level builds the symbol table only. The `call_graph` level adds the caller and callee edges.
 
 The backend reuses a cached `analysis.json` at any level. If an earlier run wrote that cache at the symbol-table level, pass `eager=True` once.
 
@@ -52,12 +54,11 @@ The symbol table holds one `TSModule` per source file. Each key is the package-r
 ```python
 modules = analysis.get_modules()
 print(len(modules), "modules")
+# 135 modules
 
 symbol_table = analysis.get_symbol_table()
 for file_path in sorted(symbol_table)[:5]:
     print(file_path)
-# expected output:
-# 135 modules
 # src/compile.ts
 # src/index.ts
 # src/locales/index.ts
@@ -72,10 +73,10 @@ A class signature is the file path without its extension, then the dotted member
 ```python
 classes = analysis.get_classes()
 print(len(classes), "classes")
+# 53 classes
+
 for signature in sorted(classes)[:6]:
     print(signature)
-# expected output:
-# 53 classes
 # src/v3/ZodError.ZodError
 # src/v3/helpers/parseUtil.ParseStatus
 # src/v3/types.Class
@@ -86,42 +87,49 @@ for signature in sorted(classes)[:6]:
 
 ### Get one class
 
-Get one class by its signature. Read `methods` and `base_classes` from the `TSClass` that comes back.
+Get one class by its signature. Read `methods` from the `TSClass` that comes back. The key of a getter ends in `#get`. The key of an arrow function in a class property is its position: `<anon@298:14>` is line 298, column 14.
 
-```python
+```python frame="none"
 tsclass = analysis.get_class("src/v3/ZodError.ZodError")
 print(tsclass.signature)
+# src/v3/ZodError.ZodError
+
 print(sorted(tsclass.methods))
-print(tsclass.base_classes)
+# ['<anon@298:14>', '<anon@302:15>', 'assert', 'constructor', 'errors#get', 'flatten', 'formErrors#get', 'format', 'isEmpty#get', 'message#get', 'toString']
 ```
 
 ### List the fields of a class
 
-Get every field of one class. Each field is a `TSField` with a `name` and a `type`.
+Get every field of one class. Each field is a `TSField` with a `name` and a `type`. `ZodArray` has one field, the static `create` function.
 
 ```python
 fields = analysis.get_fields("src/v3/types.ZodArray")
 for field in fields:
     print(field.name, field.type)
+# create <El extends ZodTypeAny>(schema: El, params?: RawCreateParams) => ZodArray<El>
 ```
 
 ### Get one method
 
 Get one method by the class signature and the method name. Read its source from `code`.
 
-```python
-methods = analysis.get_methods_in_class("src/v3/ZodError.ZodError")
-name = sorted(methods)[0]
-
-method = analysis.get_method("src/v3/ZodError.ZodError", name)
+```python frame="none"
+method = analysis.get_method("src/v3/ZodError.ZodError", "toString")
 print(method.signature)
+# src/v3/ZodError.ZodError.toString
+
 print(method.return_type)
+# string
+
 print(method.code)
+# override toString() {
+#     return this.message;
+#   }
 ```
 
-### Filter classes by name pattern
+### Filter classes by name
 
-Match an inclusion pattern and an exclusion pattern against the class signature.
+`get_classes_by_criteria` keeps each class whose signature contains an inclusion string and no exclusion string.
 
 ```python
 matches = analysis.get_classes_by_criteria(
@@ -130,31 +138,36 @@ matches = analysis.get_classes_by_criteria(
 )
 for signature in sorted(matches):
     print(signature)
+# src/v3/ZodError.ZodError
 ```
 
 ### List imports
 
-Get the imports of every module. Each entry is a `TSImport` with the imported name and the resolved module path.
+Get the imports of every module, keyed by file path. Each entry is a `TSImport` with the imported name, the module specifier, and the resolved module key. Zod imports `.js` paths, and the backend resolves them to the `.ts` files.
 
 ```python
 imports = analysis.get_imports()
-for file_path, import_list in sorted(imports.items())[:3]:
-    print(file_path, len(import_list), "imports")
+for imp in imports["src/v3/ZodError.ts"]:
+    print(imp.name, "from", imp.module, "->", imp.resolved_module)
+# Primitive from ./helpers/typeAliases.js -> src/v3/helpers/typeAliases.ts
+# util from ./helpers/util.js -> src/v3/helpers/util.ts
+# ZodParsedType from ./helpers/util.js -> src/v3/helpers/util.ts
+# TypeOf from ./index.js -> src/v3/index.ts
+# ZodType from ./index.js -> src/v3/index.ts
 ```
 
 ## Type declarations: interfaces, enums, and type aliases
 
-TypeScript has type declarations that Python does not have. Zod declares its error types in `src/v3/ZodError.ts`.
+The TypeScript analysis has methods for interfaces, enums, and type aliases. The Python analysis does not have these methods. Zod declares its error types in `src/v3/ZodError.ts`.
 
 ### List interfaces
 
 Zod declares an interface for each kind of validation issue.
 
-```python
+```python frame="none"
 interfaces = analysis.get_interfaces()
 for signature in sorted(interfaces)[:4]:
     print(signature)
-# expected output:
 # src/v3/ZodError.ZodCustomIssue
 # src/v3/ZodError.ZodInvalidArgumentsIssue
 # src/v3/ZodError.ZodInvalidDateIssue
@@ -165,10 +178,9 @@ for signature in sorted(interfaces)[:4]:
 
 Zod declares two enums, one in each source tree.
 
-```python
+```python frame="none"
 for signature in sorted(analysis.get_enums()):
     print(signature)
-# expected output:
 # src/v3/types.ZodFirstPartyTypeKind
 # src/v4/classic/compat.ZodFirstPartyTypeKind
 ```
@@ -176,19 +188,22 @@ for signature in sorted(analysis.get_enums()):
 To read the members of one enum, call `get_enum_members` with the enum signature. Each member holds a `name` and a `value`.
 
 ```python
-for member in analysis.get_enum_members("src/v3/types.ZodFirstPartyTypeKind"):
+for member in analysis.get_enum_members("src/v3/types.ZodFirstPartyTypeKind")[:4]:
     print(member.name, "=", member.value)
+# ZodString = ZodString
+# ZodNumber = ZodNumber
+# ZodNaN = ZodNaN
+# ZodBigInt = ZodBigInt
 ```
 
 ### List type aliases
 
 A type alias keeps the same signature shape as a class or an interface.
 
-```python
+```python frame="none"
 type_aliases = analysis.get_type_aliases()
 for signature in sorted(type_aliases)[:6]:
     print(signature)
-# expected output:
 # src/v3/ZodError.DenormalizedError
 # src/v3/ZodError.ErrorMapCtx
 # src/v3/ZodError.IssueData
@@ -201,11 +216,14 @@ for signature in sorted(type_aliases)[:6]:
 
 ### Read the decorators
 
-The backend captures each decorator with its arguments. Pass a class signature to `get_class_decorators`. Pass a list of decorator names to `get_methods_with_decorators`.
+The backend captures each decorator with its arguments. Pass a class signature to `get_class_decorators`. Pass a list of decorator names to `get_methods_with_decorators`. Zod uses no decorators, so both calls return empty results.
 
 ```python
 print(analysis.get_class_decorators("src/v3/types.ZodArray"))
+# []
+
 print(analysis.get_methods_with_decorators(["Get"]))
+# {'Get': []}
 ```
 
 ## Call graph: callers, callees, and reachability
@@ -219,8 +237,7 @@ The call graph is a `networkx.DiGraph`, and its edges point from the caller to t
 ```python
 cg = analysis.get_call_graph()
 print(cg.number_of_nodes(), "nodes,", cg.number_of_edges(), "edges")
-# expected output:
-# 2255 nodes, 4610 edges
+# 2261 nodes, 4629 edges
 ```
 
 ### List the external targets
@@ -230,39 +247,50 @@ An external symbol is a call target that the backend never analyzed. Its key is 
 ```python
 externals = sorted(analysis.get_external_symbols())
 print(externals[:4])
-# expected output:
 # ['(builtin).abs', '(builtin).add', '(builtin).all', '(builtin).apply']
 ```
 
 ### Find the callers of a method
 
-The result holds `target_method` and a list of `caller_details`. Each entry in `caller_details` holds a `caller_signature` and an `edge` with `type`, `weight`, and `provenance`. The `provenance` tuple names the resolver that found the edge.
+The result holds `target_method` and a list of `caller_details`. Each entry in `caller_details` holds a `caller_signature` and an `edge` with `type`, `weight`, and `provenance`. The `provenance` tuple names the resolver that found the edge. The name `<anon@2305:14>` is an anonymous function at line 2305, column 14.
 
 ```python
-target = sorted(analysis.get_methods_in_class("src/v3/ZodError.ZodError"))[0]
-
 callers = analysis.get_callers(
-    target_class_name="src/v3/ZodError.ZodError",
-    target_method_declaration=target,
+    target_class_name="src/v3/helpers/parseUtil.ParseStatus",
+    target_method_declaration="mergeArray",
 )
 print(callers["target_method"])
+# src/v3/helpers/parseUtil.ParseStatus.mergeArray
+
 for detail in callers["caller_details"]:
     print(detail["caller_signature"], detail["edge"]["provenance"])
+# src/v3/types.ZodArray._parse ('tsc',)
+# src/v3/types.ZodArray._parse.<anon@2305:14> ('tsc',)
+# src/v3/types.ZodTuple._parse ('tsc',)
+# src/v3/types.ZodTuple._parse.<anon@3446:38> ('tsc',)
 ```
 
 ### Find the callees of a method
 
-The result holds `source_method` and a list of `callee_details`, with the same edge shape.
+The result holds `source_method` and a list of `callee_details`, with the same edge shape. `tsc` marks an edge from the TypeScript checker, and `defuse` marks an edge from the def-use linker. `import` marks an edge to an external target.
 
 ```python
-source = sorted(analysis.get_methods_in_class("src/v3/types.ZodArray"))[0]
-
 callees = analysis.get_callees(
     source_class_name="src/v3/types.ZodArray",
-    source_method_declaration=source,
+    source_method_declaration="_parse",
 )
 for detail in callees["callee_details"]:
     print(detail["callee_signature"], detail["edge"]["provenance"])
+# src/v3/types.ZodType._processInputParams ('tsc',)
+# src/v3/helpers/parseUtil.addIssueToContext ('tsc',)
+# src/v3/helpers/parseUtil.ParseStatus.dirty ('tsc',)
+# (builtin).then ('import',)
+# (builtin).all ('import',)
+# (builtin).map ('import',)
+# src/v3/helpers/parseUtil.ParseStatus.mergeArray ('tsc',)
+# src/v3/types.ZodArray._parse.<anon@2302:38> ('defuse',)
+# src/v3/types.ZodArray._parse.<anon@2305:14> ('defuse',)
+# src/v3/types.ZodArray._parse.<anon@2310:49> ('defuse',)
 ```
 
 ### Get the call graph of a class
@@ -272,8 +300,14 @@ Get every call edge reachable from the methods of one class. To start from one m
 ```python
 edges = analysis.get_class_call_graph("src/v3/types.ZodArray")
 print(len(edges), "edges")
+# 936 edges
+
 for caller, callee in edges[:4]:
     print(caller, "->", callee)
+# src/v3/types.ZodArray._parse -> src/v3/types.ZodType._processInputParams
+# src/v3/types.ZodArray._parse -> src/v3/helpers/parseUtil.addIssueToContext
+# src/v3/types.ZodArray._parse -> src/v3/helpers/parseUtil.ParseStatus.dirty
+# src/v3/types.ZodArray._parse -> (builtin).then
 ```
 
 ### Compute reachability
@@ -285,12 +319,14 @@ import networkx as nx
 
 cg = analysis.get_call_graph()
 
-# Pick a source node and a target node from the graph itself
-source = sorted(n for n in cg.nodes if n.startswith("src/v3/types.ZodArray."))[0]
-target = sorted(n for n in cg.nodes if n.startswith("src/v3/ZodError.ZodError."))[0]
+source = "src/v3/types.ZodArray._parse"
+target = "src/v3/helpers/parseUtil.makeIssue"
 
-if nx.has_path(cg, source, target):
-    print(" -> ".join(nx.shortest_path(cg, source, target)))
+print(nx.has_path(cg, source, target))
+# True
+
+print(" -> ".join(nx.shortest_path(cg, source, target)))
+# src/v3/types.ZodArray._parse -> src/v3/helpers/parseUtil.addIssueToContext -> src/v3/helpers/parseUtil.makeIssue
 ```
 
 ### Find the call paths between two callables <Badge text="2.0" variant="caution" />
@@ -298,22 +334,20 @@ if nx.has_path(cg, source, target):
 `reaches()` and `call_paths_between()` take a callable name. A name matches a whole signature, or a dotted suffix of one. Each path is a list of hops, and each hop has a `frm` node and a `to` node.
 
 ```python
-methods = analysis.get_methods_in_class("src/v3/ZodError.ZodError")
-source = analysis.get_method("src/v3/ZodError.ZodError", sorted(methods)[0]).signature
-target = "src/v3/ZodError.quotelessJson"
+print(analysis.reaches("ZodArray._parse", "makeIssue"))
+# True
 
-print(analysis.reaches(source, target))
-
-result = analysis.call_paths_between(source, target)
+result = analysis.call_paths_between("ZodArray._parse", "makeIssue")
 for path in result.paths:
     nodes = [path.hops[0].frm.callable]
     nodes += [hop.to.callable for hop in path.hops]
     print(" -> ".join(nodes))
+# src/v3/types.ZodArray._parse -> src/v3/helpers/parseUtil.addIssueToContext -> src/v3/helpers/parseUtil.makeIssue
 ```
 
 ## Model objects: TSClass and TSCallable
 
-CLDK returns typed model objects, not plain strings. The run for this page did not record the field values of these objects for Zod. For the full field list of each model, read the [TypeScript API reference](/reference/python-api/typescript/).
+CLDK returns typed model objects, not plain strings. For the full field list of each model, read the [TypeScript API reference](/reference/python-api/typescript/).
 
 ### Inspect a TSClass
 
@@ -322,47 +356,76 @@ A `TSClass` holds the methods, the fields, the base classes, the implemented int
 ```python
 tsclass = analysis.get_class("src/v3/types.ZodArray")
 print(tsclass.name)
+# ZodArray
+
 print(tsclass.signature)
+# src/v3/types.ZodArray
+
 print(tsclass.base_classes)
+# ['src/v3/types.ZodType']
+
 print(tsclass.start_line, "to", tsclass.end_line)
+# 2236 to 2356
 ```
 
 ### Inspect a TSCallable
 
-A `TSCallable` represents a function, a method, a constructor, an accessor, or an arrow function. Its `kind` is one of `function`, `method`, `constructor`, `getter`, `setter`, `arrow`, and `function_expression`.
+A `TSCallable` represents a function, a method, a constructor, an accessor, or an arrow function. Its `kind` is one of `function`, `method`, `constructor`, `getter`, `setter`, `arrow`, and `function_expression`. `get_methods_in_class` returns the methods of a class, keyed by name.
 
 ```python
 methods = analysis.get_methods_in_class("src/v3/types.ZodArray")
-method = methods[sorted(methods)[0]]
+method = methods["nonempty"]
 
 print(method.kind, "->", method.return_type)
+# method -> ZodArray<T, "atleastone">
+
 print("Async:", method.is_async)
+# Async: False
+
 print("Complexity:", method.cyclomatic_complexity)
+# Complexity: 1
+
 print(method.code)
+# nonempty(message?: errorUtil.ErrMessage): ZodArray<T, "atleastone"> {
+#     return this.min(1, message) as any;
+#   }
 ```
 
 ### Read the class hierarchy
 
-Read the base classes of a class. Find the direct subclasses of a class. `get_sub_classes()` also accepts an interface signature. `get_nested_classes()` always returns `[]` on schema v2, because a class node has no bucket for nested types.
+`get_extended_classes()` returns the base classes of a class. `get_implemented_interfaces()` returns the interfaces that a class implements, and `ZodArray` implements none. `get_sub_classes()` finds the direct subclasses of a class, and it also accepts an interface signature. `get_nested_classes()` always returns `[]` for TypeScript, because the analysis records only methods and fields as the members of a class.
 
 ```python
 print(analysis.get_extended_classes("src/v3/types.ZodArray"))
+# ['src/v3/types.ZodType']
+
 print(analysis.get_implemented_interfaces("src/v3/types.ZodArray"))
-print(list(analysis.get_sub_classes("src/v3/types.ZodAny").keys()))
+# []
+
+subclasses = analysis.get_sub_classes("src/v3/types.ZodType")
+print(len(subclasses), sorted(subclasses)[:3])
+# 36 ['src/v3/types.ZodAny', 'src/v3/types.ZodArray', 'src/v3/types.ZodBigInt']
+
 print(analysis.get_nested_classes("src/v3/types.ZodArray"))
+# []
 ```
 
 ## Source positions <Badge text="2.0" variant="caution" />
 
 ### Locate a line
 
-`locate()` resolves a file path and a 1-based line number to the callable that encloses that line. The result also names the type that owns the callable, the module, and the innermost body node. If the line sits at module scope, `callable` is `None` and `diagnostics` holds a `module_scope` code.
+`locate()` resolves a file path and a 1-based line number to the callable that encloses that line. The result also names the type that owns the callable, the module, and the innermost body node. Line 176 of `src/v3/ZodError.ts` is in the function `quotelessJson`. If the line sits at module scope, `callable` is `None` and `diagnostics` holds a `module_scope` code.
 
-```python
-loc = analysis.locate("src/v3/ZodError.ts", 100)
-print(loc.callable)
+```python frame="none"
+loc = analysis.locate("src/v3/ZodError.ts", 176)
+print(loc.callable.signature)
+# src/v3/ZodError.quotelessJson
+
 print(loc.module.path)
+# src/v3/ZodError.ts
+
 print([d.code for d in loc.diagnostics])
+# []
 ```
 
 ### Read the source of a callable
@@ -371,6 +434,10 @@ print([d.code for d in loc.diagnostics])
 
 ```python
 print(analysis.get_source("src/v3/ZodError.quotelessJson"))
+# quotelessJson = (obj: any) => {
+#   const json = JSON.stringify(obj, null, 2);
+#   return json.replace(/"([^"]+)":/g, "$1:");
+# }
 ```
 
 ## Where to go next

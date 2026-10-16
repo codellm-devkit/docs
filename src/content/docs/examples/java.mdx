@@ -7,9 +7,34 @@ import { Tabs, TabItem, Steps, Aside, Badge, LinkCard, CardGrid } from "@astrojs
 
 These examples call the public methods of the CLDK Python SDK. Each snippet runs against a real codebase, the recurring sample [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) (`project_path="commons-cli"`). Each snippet shows one feature and the output that the SDK returns. To adapt an example, use your own project path.
 
+The outputs come from cldk 2.0.0 with codeanalyzer-java 3.3.3 and JDK 17 on Commons CLI 1.7.0. Java analysis includes test sources, and there is no switch to turn this off. So the counts on this page include the test classes in `src/test`.
+
+## Install and clone the sample
+
+Use Python 3.11 to 3.14. On Python 3.14, pip compiles `tree-sitter` from source, so you need a C compiler. Install CLDK with the `java` extra. Then clone Commons CLI at the 1.7.0 tag. Run Python from the directory that contains `commons-cli`.
+
+```bash
+pip install "cldk[java]"
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+```
+
+The `java` extra adds codeanalyzer-java, which carries the analyzer and its own Java runtime. Keep the quotes, because zsh reads the brackets as a pattern. For other Python versions and other ways to install, see [Installing CLDK](/installing/).
+
+If CLDK 1.x is installed, the `pip` command keeps it. Run `pip install -U "cldk[java]"` instead. If you analyzed `commons-cli` with CLDK 1.x, the cache from that run makes `CLDK.java()` raise an error that contains `predates schema v2`. To fix it, delete `commons-cli/.codeanalyzer`. The error message suggests `eager_analysis=True`, but `CLDK.java()` does not accept that keyword.
+
+Git can print two messages: a warning that `refs/tags/rel/commons-cli-1.7.0` is not a commit, and a note about a detached HEAD. The clone is correct, so you can ignore both messages.
+
+<Aside type="note" title="The call graph needs a JDK and Maven">
+The `symbol_table` level runs on the Java runtime of the `java` extra. From the `call_graph` level up, the analyzer compiles the project with Maven or Gradle. For Commons CLI, Maven needs a JDK 11 or later that has `javac`. Set `JAVA_HOME` to that JDK. If `JAVA_HOME` is not set, Maven uses the `java` command on your `PATH`. Put `mvn` on your `PATH`.
+
+To install a JDK and Maven, see the Java Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies). If Maven never ran on your computer, the first `call_graph` run downloads the Maven plugins and the libraries of the project. This step needs network access.
+
+If the JDK or Maven is missing, or if `JAVA_HOME` does not point to a JDK, the analysis logs a warning that starts with `codeanalyzer-java did not fully compute analysis_level=call_graph`. The call graph is then incomplete: 648 nodes and 1950 edges, not 652 and 1980. The cache keeps this result. If you ran the analysis before you installed the JDK and Maven, pass `eager=True` to `CLDK.java()` once.
+</Aside>
+
 ## Build the analysis
 
-Before you query a codebase, build a CLDK analysis object for your Java project. The `analysis_level` parameter controls how deeply the backend parses the code. `symbol_table`, the default, finds classes, methods, and fields. `call_graph` also builds caller and callee edges.
+Before you query a codebase, build a CLDK analysis object for your Java project. The `analysis_level` parameter controls how deeply the backend parses the code. `symbol_table`, the default, finds classes, methods, and fields. `call_graph` also builds caller and callee edges. The call-graph sections below build their own analysis object at the `call_graph` level.
 
 ```python
 from cldk import CLDK
@@ -20,33 +45,34 @@ analysis = CLDK.java(
     project_path="commons-cli",
     analysis_level=AnalysisLevel.symbol_table,
 )
-
-# Call graph included: all of the above plus caller/callee edges
-analysis_cg = CLDK.java(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-)
 ```
+
+The first run writes a cache to `commons-cli/.codeanalyzer/java/`. Later runs at the same analysis level or a lower one read the cache, and they do not look at the source files. If you edit the code, or if you install a JDK or Maven later, pass `eager=True` to `CLDK.java()` once.
 
 ## Symbol table: classes, methods, and fields
 
-After you build the analysis object, query the symbol table to list classes, methods, and fields by name.
+After you build the analysis object, query the symbol table to list classes, methods, and fields by name. The blocks in this section continue the setup block above.
 
 ### Get all classes
 
-List every class in the symbol table of the project.
+List every type in the project. The result also holds interfaces, enums, and records. Commons CLI has 73 classes and 2 interfaces.
 
 ```python
 classes = analysis.get_classes()
 print(len(classes))
-# 145
+# 75
 
-# All classes keyed by qualified name
-for name, jtype in classes.items():
-    print(name, "->", jtype)
-    # org.apache.commons.cli.Option -> <JType ...>
-    # org.apache.commons.cli.Options -> <JType ...>
-    # ...
+# The first three qualified names, in sorted order
+for name in sorted(classes)[:3]:
+    print(name, classes[name].kind)
+    # org.apache.commons.cli.AbstractParserTestCase class
+    # org.apache.commons.cli.AlreadySelectedException class
+    # org.apache.commons.cli.AlreadySelectedExceptionTest class
+
+# The types that come from the test sources
+tests = [name for name in classes if analysis.get_java_file(name).startswith("src/test/")]
+print(len(tests))
+# 44
 ```
 
 ### Get a single class
@@ -61,20 +87,21 @@ print(jtype.qualified_name, "is_interface:", jtype.is_interface, "is_abstract:",
 
 ### Get all methods in a class
 
-List every method declared on a class.
+List every method declared on a class. The keys are method signatures with fully qualified parameter types.
 
 ```python
 methods = analysis.get_methods_in_class("org.apache.commons.cli.Options")
 print(len(methods))
-# 29
+# 18
 
-for signature, method in methods.items():
-    print(method.declaration)
-    # public Options addOption(Option opt)
-    # public Options addOption(String opt, String longOpt, String description)
-    # public Option getOption(String opt)
-    # ...
+for signature in sorted(methods)[:3]:
+    print(signature)
+    # addOption(java.lang.String, boolean, java.lang.String)
+    # addOption(java.lang.String, java.lang.String)
+    # addOption(java.lang.String, java.lang.String, boolean, java.lang.String)
 ```
+
+The result does not include constructors. `get_constructors()` returns them, with keys such as `<init>()`. The result does include initializer blocks, with keys such as `<clinit>$0()` for a static initializer and `<instance-init>$0()` for an instance initializer.
 
 ### Get a single method and its source
 
@@ -87,23 +114,34 @@ method = analysis.get_method(
 )
 print(method.declaration)
 print(method.code)
-# public Options addOption(Option opt)
-# 
+# public Options addOption(final Option opt)
 # {
-#     String key = opt.getKey();
-#     if ((key == null) || (key.trim().length() == 0)) {
-#         throw new IllegalArgumentException("The key for option cannot be null or empty");
+#         final String key = opt.getKey();
+#         // add it to the long option list
+#         if (opt.hasLongOpt()) {
+#             longOpts.put(opt.getLongOpt(), opt);
+#         }
+#         // if the option is required add it to the required list
+#         if (opt.isRequired()) {
+#             if (requiredOpts.contains(key)) {
+#                 requiredOpts.remove(requiredOpts.indexOf(key));
+#             }
+#             requiredOpts.add(key);
+#         }
+#         shortOpts.put(key, opt);
+#         return this;
 #     }
-#     this.shortOpts.put(key, opt);
-#     this.longOpts.put(opt.getLongOpt(), opt);
-#     this.optionGroups.put(opt, opt);
-#     return this;
-# }
 ```
+
+<Aside type="caution" title="Copy the exact method signature">
+A signature names each parameter type in full, for example `addOption(org.apache.commons.cli.Option)`. The signature does not include type arguments. For example, `setType(final Class<?> type)` in `Option` has the key `setType(java.lang.Class)`. A type that the analyzer cannot find, for example a type from a missing dependency, keeps its short name. Copy each signature from the keys of `get_methods_in_class()`.
+
+The short form `addOption(Option)` matches nothing, and the call does not raise an error. `get_method()` returns `None`, so `method.declaration` raises `AttributeError`. `get_callers()` returns an empty dict, so `callers["caller_details"]` raises `KeyError`. Below the `call_graph` analysis level, `get_callers()` can also return an empty dict. If you get this `KeyError` with a correct signature, make sure that the analysis is at the `call_graph` level. At that level, the `KeyError` means that the method has no call edge in the project.
+</Aside>
 
 ### Get method parameters
 
-Get the list of parameters for a method, with their types and their location in the source. <Badge text="New in 2.0" variant="caution" /> In CLDK 1.5.0, `get_method_parameters` returns parameter names only, as strings.
+Get the list of parameters for a method, with their types and their location in the source.
 
 ```python
 params = analysis.get_method_parameters(
@@ -115,7 +153,7 @@ print(len(params))
 
 for param in params:
     print(param.name, param.type)
-    # opt Option
+    # opt org.apache.commons.cli.Option
 ```
 
 ### Get fields in a class
@@ -125,14 +163,13 @@ Get every field declaration on a class.
 ```python
 fields = analysis.get_fields("org.apache.commons.cli.Option")
 print(len(fields))
-# 8
+# 16
 
-for field in fields:
+for field in fields[:3]:
     print(field.name, "type:", field.type)
-    # longOpt type: String
-    # opt type: String
-    # description type: String
-    # ...
+    # EMPTY_ARRAY type: org.apache.commons.cli.Option[]
+    # serialVersionUID type: long
+    # UNINITIALIZED type: int
 ```
 
 ## Call graph: caller and callee relationships
@@ -141,9 +178,10 @@ To query caller and callee relationships, build the analysis at `call_graph` lev
 
 ### Get the call graph
 
-Get the full call graph as a `networkx.DiGraph`. Edges point from caller to callee. Weights and metadata live in the edge attributes.
+Get the full call graph as a `networkx.DiGraph`. Edges point from caller to callee. Each edge has the attributes `type`, `weight` and `calling_lines`, and `type` is always `CALL_DEP`. Each node key is the string `"<type fqn>.<signature>"`: the fully qualified name of the type, a dot, and the signature. All nodes belong to the project, so calls into the JDK, such as `Map.put()`, are not in the graph. A method or a constructor with no call edge in the project is not a node either.
 
 ```python
+from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.java(
@@ -152,19 +190,24 @@ analysis = CLDK.java(
 )
 
 cg = analysis.get_call_graph()
-print(cg.number_of_nodes(), "methods,", cg.number_of_edges(), "edges")
-# 421 methods, 638 edges
+print(cg.number_of_nodes(), "nodes,", cg.number_of_edges(), "edges")
+# 652 nodes, 1980 edges
 
-# Edge data includes call type and calling line numbers
-for source, target, data in cg.edges(data=True):
-    print(source, "->", target, "type:", data["type"], "lines:", data["calling_lines"])
-    # org.apache.commons.cli.Options.addOption -> org.apache.commons.cli.Option.getKey CALL_DEP lines: [68]
-    # ...
+# The edges out of one method, with the call type and the calling line numbers
+source = "org.apache.commons.cli.Options.addOption(org.apache.commons.cli.Option)"
+for _, target, data in cg.out_edges(source, data=True):
+    print(target, "type:", data["type"], "lines:", data["calling_lines"])
+    # org.apache.commons.cli.Option.getKey() type: CALL_DEP lines: [66]
+    # org.apache.commons.cli.Option.getLongOpt() type: CALL_DEP lines: [69]
+    # org.apache.commons.cli.Option.hasLongOpt() type: CALL_DEP lines: [68]
+    # org.apache.commons.cli.Option.isRequired() type: CALL_DEP lines: [72]
 ```
+
+The edge count depends on the JDK that compiles the project. JDK 11 and 17 give 1980 edges. JDK 21 and 25 give 1976 edges, because their `javac` compiles the call `shortOpts.toString()` in `Options.toString()` in a different way. The other outputs on this page are the same.
 
 ### Get all callers of a method
 
-Find every method that calls a target method. This query supports impact analysis: it shows which callers a change to the target affects.
+Find every method that calls a target method. This query supports impact analysis: it shows which callers a change to the target affects. This block continues the call-graph block above.
 
 ```python
 callers = analysis.get_callers(
@@ -172,18 +215,25 @@ callers = analysis.get_callers(
     "addOption(org.apache.commons.cli.Option)"
 )
 print(len(callers["caller_details"]))
-# 18
+# 100
 
+# Most callers are tests. Print only the callers in the main sources.
 for detail in callers["caller_details"]:
-    print(detail["caller_method"].klass, detail["caller_method"].method.signature)
-    # org.apache.commons.cli.Options org.apache.commons.cli.Options.addOption(String, boolean, String)
-    # org.apache.commons.cli.DefaultParser org.apache.commons.cli.DefaultParser.handleOption(...)
-    # ...
+    caller = detail["caller_method"]
+    if analysis.get_java_file(caller.klass).startswith("src/main/"):
+        print(caller.klass, caller.method.signature)
+    # org.apache.commons.cli.Options addOption(java.lang.String, java.lang.String, boolean, java.lang.String)
+    # org.apache.commons.cli.Options addOptionGroup(org.apache.commons.cli.OptionGroup)
+    # org.apache.commons.cli.Options addOptions(org.apache.commons.cli.Options)
+    # org.apache.commons.cli.Options addRequiredOption(java.lang.String, java.lang.String, boolean, java.lang.String)
+    # org.apache.commons.cli.PatternOptionBuilder parsePattern(java.lang.String)
 ```
+
+Of the 100 callers, 95 are in test classes.
 
 ### Get all callees of a method
 
-Find every method that a target method calls. This query supports dependency analysis: it shows the methods that a given method depends on.
+Find every method of the project that a target method calls. Calls into the JDK, such as `Map.put()`, are not in the result. This query supports dependency analysis: it shows the methods that a given method depends on. This block continues the call-graph block above.
 
 ```python
 callees = analysis.get_callees(
@@ -191,18 +241,19 @@ callees = analysis.get_callees(
     "addOption(org.apache.commons.cli.Option)"
 )
 print(len(callees["callee_details"]))
-# 2
+# 4
 
 for detail in callees["callee_details"]:
     print(detail["callee_method"].klass, detail["callee_method"].method.signature)
-    # org.apache.commons.cli.Option org.apache.commons.cli.Option.getKey()
-    # java.util.HashMap java.util.HashMap.put(Object, Object)
-    # ...
+    # org.apache.commons.cli.Option getKey()
+    # org.apache.commons.cli.Option getLongOpt()
+    # org.apache.commons.cli.Option hasLongOpt()
+    # org.apache.commons.cli.Option isRequired()
 ```
 
 ## Class relationships: inheritance and interfaces
 
-Query the inheritance hierarchy to understand class structure and polymorphism.
+Query the inheritance hierarchy to understand class structure and polymorphism. The blocks in this section continue the setup block above.
 
 ### Get subclasses
 
@@ -211,13 +262,15 @@ Get every class that directly extends or implements a target type. The result do
 ```python
 subclasses = analysis.get_sub_classes("java.io.Serializable")
 print(len(subclasses))
-# 15
+# 5
 
 for name, jtype in subclasses.items():
     print(name)
+    # org.apache.commons.cli.CommandLine
+    # org.apache.commons.cli.HelpFormatter.OptionComparator
     # org.apache.commons.cli.Option
+    # org.apache.commons.cli.OptionGroup
     # org.apache.commons.cli.Options
-    # ...
 ```
 
 ### Get extended classes (superclasses)
@@ -252,51 +305,66 @@ print(interfaces[0])
 
 ## Comments and documentation
 
-Extract every comment (line, block, and Javadoc) from the codebase to find the documentation and the intent.
+The analyzer attaches most comments to the declaration or the statement that they describe. The comment methods below return different sets of comments. The blocks in this section continue the setup block above.
 
 ### Get all comments
 
-Get every comment in the project, organized by file.
+`get_all_comments()` returns one list of comments for each file. Each list holds only the comments that the analyzer does not attach to a class, a method, a field, or a statement. The license header is an example.
 
 ```python
 comments = analysis.get_all_comments()
-print(len(comments), "files with comments")
-# 145 files with comments
+print(len(comments), "files")
+# 65 files
 
-for file_path, comment_list in comments.items():
-    print(f"{file_path}: {len(comment_list)} comments")
-    for comment in comment_list[:2]:
-        print("  ", comment.content[:60])
-    # src/main/java/org/apache/commons/cli/Option.java: 12 comments
-    #   The long representation of the option.
-    #   Specified in OptionBuilder.
+for comment in comments["src/main/java/org/apache/commons/cli/Option.java"]:
+    print(comment.start_line, comment.content.strip().splitlines()[0])
+    # 1 Licensed to the Apache Software Foundation (ASF) under one or more
+    # 1000 @formatter:on
 ```
+
+The other comments of `Option.java`, for example its class Javadoc, are on the declarations and statements that they describe.
 
 ### Get all docstrings
 
-Get the Javadoc documentation on classes and methods.
+`get_all_docstrings()` keeps only the Javadoc comments from the lists of `get_all_comments()`. So it does not return the Javadoc of classes and methods.
 
 ```python
 docstrings = analysis.get_all_docstrings()
 print(len(docstrings), "files with docstrings")
-# 78 files with docstrings
+# 5 files with docstrings
 
 for file_path, doc_list in docstrings.items():
-    print(f"{file_path}:")
-    for doc in doc_list[:1]:
-        print(doc.content)
-    # src/main/java/org/apache/commons/cli/Option.java:
-    #   /**
-    #    * Option class to store and manipulate a command line option.
-    #    */
+    print(file_path, len(doc_list))
+    # src/main/java/org/apache/commons/cli/CommandLine.java 1
+    # src/main/java/org/apache/commons/cli/CommandLineParser.java 2
+    # src/main/java/org/apache/commons/cli/Options.java 1
+    # src/main/java/org/apache/commons/cli/package-info.java 1
+    # src/test/java/org/apache/commons/cli/ValuesTest.java 1
+```
+
+On Commons CLI, these are six Javadoc comments that the analyzer does not attach to a declaration. For example, the two in `CommandLineParser.java` are above two commented-out `parse()` methods.
+
+### Get the Javadoc of a class or a method
+
+For the Javadoc of a class or a method, use `get_comments_in_a_class()` or `get_comments_in_a_method()`. Each returns the comment directly above the declaration.
+
+```python
+javadoc = analysis.get_comments_in_a_method(
+    "org.apache.commons.cli.Options",
+    "addOption(org.apache.commons.cli.Option)"
+)
+for comment in javadoc:
+    print(comment.is_javadoc, comment.content.strip().splitlines()[0])
+    # True * Adds an option instance
 ```
 
 ## Reachability: graph queries
 
-Use the call graph with `networkx` to answer reachability questions, such as whether execution can flow from one method to another.
+Use the call graph with `networkx` to answer reachability questions, such as whether one method can reach another.
 
 ```python
 import networkx as nx
+from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.java(
@@ -317,34 +385,33 @@ print(is_reachable)
 # All nodes reachable from a source
 source = "org.apache.commons.cli.DefaultParser.parse(org.apache.commons.cli.Options, java.lang.String[])"
 reachable_nodes = nx.descendants(cg, source)
-print(len(reachable_nodes), "methods reachable from parse()")
-# 67 methods reachable from parse()
+print(len(reachable_nodes), "nodes reachable from parse()")
+# 86 nodes reachable from parse()
 
-# Find all strongly connected components (cycles in call graph)
-cycles = list(nx.strongly_connected_components(cg))
-print(len(cycles), "strongly connected components")
-for cycle in cycles[:1]:
-    print(cycle)
-    # frozenset(['org.apache.commons.cli.DefaultParser.handleOption(...)', 
-    #            'org.apache.commons.cli.Options.getOption(String)'])
+# A strongly connected component of two or more methods is a call cycle
+cycles = [c for c in nx.strongly_connected_components(cg) if len(c) > 1]
+print(len(cycles), "cycles of two or more methods")
+# 0 cycles of two or more methods
 ```
 
-## Entrypoint methods
+## Entry point methods
 
-Find the public methods that are entrypoints into the application, for example servlet handlers, REST endpoints, and main methods.
+Find the methods that the analyzer marks as entry points. Here, an entry point is a method that a framework calls, for example a handler for a web request. The analyzer uses framework rulesets. For example, it marks a servlet `doGet()` method, a JAX-RS `@GET` method, and a Spring `@GetMapping` method. It does not mark a `main` method. This block continues the setup block above.
 
 ```python
 entry_methods = analysis.get_entry_point_methods()
 print(len(entry_methods), "classes with entry points")
-# 64 classes with entry points
+# 14 classes with entry points
 
-for class_name, methods in entry_methods.items():
-    for sig, method in methods.items():
-        print(class_name, sig)
-    # org.apache.commons.cli.DefaultParser parse(String[])
-    # org.apache.commons.cli.HelpFormatter printHelp(String)
-    # ...
+for class_name in sorted(entry_methods)[:3]:
+    for sig, method in entry_methods[class_name].items():
+        print(class_name, sig, method.entrypoint_frameworks)
+    # org.apache.commons.cli.AbstractParserTestCase setUp() ['spring']
+    # org.apache.commons.cli.ArgumentIsOptionTest setUp() ['spring']
+    # org.apache.commons.cli.BasicParserTest setUp() ['spring']
 ```
+
+On Commons CLI, all 14 classes are test classes. Commons CLI does not use Spring, but in each class the `spring` ruleset marks one JUnit setup method, with `@BeforeEach` or `@BeforeAll`.
 
 ## Where to go next
 
