@@ -1,56 +1,536 @@
 ---
 title: "TypeScript API"
-description: "Program analysis for TypeScript and related data models."
+description: "Program analysis for TypeScript and JavaScript projects, and the data models that it returns."
 ---
 
-`TypeScriptAnalysis` exposes a typed symbol table, classes, interfaces, enums,
-decorators, and a call graph through nearly the same API as
-[Java](/reference/python-api/java/) and [Python](/reference/python-api/python/).
-The symbol table and the call graph are stable, and CLDK 2.0 adds the dataflow
-graphs and framework entrypoint detection. The backend also analyzes JavaScript
-sources.
+`TypeScriptAnalysis` gives you the symbol table, the call graph, the dataflow
+graphs and the entrypoints of a TypeScript or JavaScript project.
+`CLDK.typescript(project_path=...)` returns it. Most method names are the same
+as on the [Java](/reference/python-api/java/) and
+[Python](/reference/python-api/python/) pages.
 
-## Overview
+## How it works
 
-`CLDK.typescript(project_path=...)` returns a `TypeScriptAnalysis` object backed
-by the [`codeanalyzer-ts`](/backends/codeanalyzer-ts/) backend, which parses and
-resolves a project in a single pass with **ts-morph** (the TypeScript compiler
-API). The same `TypeChecker` that builds the symbol table resolves call targets,
-so call-graph derivation reuses existing resolution.
+CLDK runs the analyzer [codeanalyzer-typescript](/backends/codeanalyzer-ts/) on
+your project directory. The command-line tool of the analyzer is `cants`, and
+`pip install cldk` installs it. CLDK reads the `analysis.json` file that `cants`
+writes, and answers each query from it.
+
+The analyzer builds its output level by level. Each
+[analysis level](#analysis-levels) adds to the level before it:
 
 ```mermaid
 flowchart LR
-    T[TypeScript project] --> A["CLDK.typescript(project_path)"]
-    A --> M[ts-morph / TypeChecker]
-    M --> S[Symbol table]
-    M --> CG["Call graph (tsc + RTA)"]
+    P[TypeScript or JavaScript project] --> A["CLDK.typescript(project_path)"]
+    A --> C["cants (codeanalyzer-typescript)"]
+    C --> S["Level 1: symbol table"]
+    S --> CG["Level 2: call graph (tsc, defuse and import edges)"]
+    CG --> D["Level 3: CFG, CDG and DDG"]
+    D --> SDG["Level 4: SDG"]
 ```
 
-**Project path only.** TypeScript analysis needs a project directory of valid
-TypeScript/TSX sources (there is no single-string `source_code` mode). Pass it as
-`project_path`:
+CFG, CDG and DDG are the control flow graph, the control dependence graph and
+the data dependence graph of each callable. SDG is the system dependence graph,
+which links these graphs across calls.
+
+Each call-graph edge records how the analyzer found it, in `provenance`:
+
+- `tsc`: the resolver of the TypeScript compiler found the call target.
+- `defuse`: the analyzer followed a function value from its definition to a
+  call. The code calls the value, or passes it as a callback to an external or
+  unresolved function, for example `keys.map((k) => ...)`. In the second case,
+  the edge goes from the enclosing callable to the callback.
+- `import`: the target is outside the project, for example
+  `(builtin).getTime` or `vitest/config.mergeConfig`.
+
+The analyzer reads `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` and
+`.cjs` files. A `.d.ts` file is a module with `is_declaration_file=True`. There
+is no single-file mode: always pass a project directory. A syntax error does
+not stop the analysis, and CLDK does not report it. Declarations near the error
+can be missing or wrong.
+
+## Before you start
+
+1. Install CLDK. It needs Python 3.11, 3.12, 3.13 or 3.14. It does not
+   install on Python 3.15 yet. On Python 3.14, pip compiles `tree-sitter`
+   from source, so you need a C compiler.
+
+   ```bash
+   pip install cldk
+   ```
+
+   You do not need Node.js for the samples on this page. For your own
+   project, install Node.js, which includes npm. The analyzer uses npm to
+   install the dependencies of the project.
+
+2. Clone the sample project, Zod 4.6.7:
+
+   ```bash
+   git clone --depth 1 --branch v4.6.7 https://github.com/colinhacks/zod.git
+   ```
+
+3. Run the samples on this page from the directory that contains `zod`.
+
+### What a run does to your project
+
+A local run does these things:
+
+- It writes the cache to `<project>/.codeanalyzer/typescript/`. On Zod at the
+  `call_graph` level, the cache is 18 MB. Add `.codeanalyzer/` to
+  `.gitignore`, or move the cache with `backend=CodeAnalyzerConfig(cache_dir=...)`.
+- If the project has a `package.json` and no `node_modules`, the analyzer
+  installs the dependencies, with install scripts turned off. It runs
+  `npm install --ignore-scripts`. With a `package-lock.json` file, it runs
+  `npm ci` instead. With a pnpm or yarn lockfile and that tool on your PATH,
+  it runs `pnpm install` or `yarn install`. The install needs network access
+  and creates `node_modules`.
+- If `node_modules` exists, the analyzer uses it. With `eager=True`, the
+  analyzer installs the dependencies again, with install scripts turned off.
+  `npm ci` deletes `node_modules` first, so the files that install scripts
+  made are gone. To get them back, run `npm ci` in the project.
+- If the install fails, the analysis continues with fewer resolved calls, and
+  CLDK shows no message. For example, the install fails without npm on your
+  PATH, and on `zod/packages/zod`.
+- It skips test files: files named `*.test.*` or `*.spec.*`, and every
+  directory named `test`, `tests`, `spec`, `__test__`, `__tests__` or
+  `__mocks__`. It also skips every directory named `node_modules`, `dist`,
+  `build`, `out`, `coverage`, `vendor`, `.next`, `.turbo` or `.cache`, for
+  example `src/build/`. You cannot include these files.
+
+## Analysis levels
+
+Pass `analysis_level` to `CLDK.typescript`. Use an `AnalysisLevel` member or
+its name as a string, for example `"call_graph"`. An unknown name raises
+`ValueError`. Each level also contains the levels above it in the table.
+
+| Level | `cants` flag | Adds | Methods that need it |
+| ----- | ------------ | ---- | -------------------- |
+| `symbol_table` (default) | `-a 1` | Modules, types, callables, fields, imports, exports, decorators, call sites, entrypoints and configuration files | All other methods |
+| `call_graph` | `-a 2` | Resolved call targets, the call graph, the external targets and the configuration reads | `get_call_graph`, `get_callers`, `get_callees`, `get_class_call_graph`, `get_calling_lines`, `get_external_symbols`, `get_synthesized_callables`, `callers_of`, `callees_of`, `reaches`, `call_paths_between`, `backward_cone`, `get_config_uses`, `get_config_readers`, `get_unresolved_config_reads` |
+| `program_dependency_graph` | `-a 3` | Control flow, control dependence and data dependence inside each callable | `get_cfg`, `get_cdg`, `get_ddg` |
+| `system_dependency_graph` | `-a 4` | Nodes for parameters, arguments and return values, and dependence across calls | `resolve_value`, `slice_backward`, `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` |
+
+If the analysis level is too low for a method, this happens:
+
+- The call-graph methods find no calls and raise no error. For example,
+  `callers_of` returns `[]` and `reaches` returns `False`. Read
+  `analysis.has_resolution_edges`: it is `False` below `call_graph`.
+  `get_call_sites`, `get_callsites_for` and `get_call_targets` still answer,
+  but no call target is resolved.
+- Below `call_graph`, `get_config_uses`, `get_config_readers` and
+  `get_unresolved_config_reads` return `[]` and raise no error. At
+  `call_graph`, a read whose key is in a variable, for example
+  `process.env[k]` after `const k = "PORT"`, is only in
+  `get_unresolved_config_reads`. `program_dependency_graph` resolves it.
+- Below `program_dependency_graph`, `get_cfg`, `get_cdg`, `get_ddg`, the
+  slices, `paths_between`, `flows_to_call` and `flows_to_argument` raise
+  `CodeanalyzerUsageException`. `resolve_value` and `taint` raise
+  `SelectorNotInGraph`.
+- At `program_dependency_graph`, the value-flow methods raise
+  `SelectorNotInGraph` ("value not in graph"), also for a real parameter.
+
+On Zod, the first run takes about 20 seconds. When `CLDK.typescript` reads the
+cache, it takes about one second.
+
+:::caution[The cache does not check the level or your changes]
+If `<project>/.codeanalyzer/typescript/analysis.json` exists, CLDK reuses it.
+It does not compare the analysis level or the source files with the cache.
+
+- If you ask for a higher `analysis_level` on a project that you analyzed
+  before, pass `eager=True` once. Without it, you get the old level and no
+  warning. The message of `CodeanalyzerUsageException` tells you to build
+  again with a higher level. That alone does not work. Add `eager=True`.
+- After you change the source code, pass `eager=True` once.
+- A run with `target_files` writes over the cache. Pass `eager=True` on the
+  next full run.
+- `eager=True` also installs the dependencies again. See
+  [What a run does to your project](#what-a-run-does-to-your-project).
+:::
+
+## Worked example
+
+The outputs come from cldk 2.0.0 and codeanalyzer-typescript 1.6.0 on Zod
+4.6.7. Run the three blocks in order, from the same directory.
+
+### Build the analysis
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.typescript(
-    project_path="/path/to/ts/project",
-    analysis_level=AnalysisLevel.call_graph,   # required for the call graph
+    project_path="zod/packages/zod",
+    analysis_level=AnalysisLevel.call_graph,
 )
 
-print(analysis.get_classes())      # -> dict[str, TSClass]
-graph = analysis.get_call_graph()  # -> networkx.DiGraph
+modules = analysis.get_symbol_table()
+classes = analysis.get_classes()
+print(len(modules), "modules,", len(classes), "classes")
+# 135 modules, 53 classes
+print(sorted(classes)[:3])
+# ['src/v3/ZodError.ZodError', 'src/v3/helpers/parseUtil.ParseStatus', 'src/v3/types.Class']
+
+parse = analysis.get_method("src/v3/types.ZodType", "parse")
+print(parse.signature, parse.start_line)
+# src/v3/types.ZodType.parse 223
+print(analysis.get_method_parameters("src/v3/types.ZodType", "parse"))
+# ['data', 'params']
 ```
 
-> **Entrypoint detection**
->
-> CLDK 2.0 answers framework entrypoints with `get_entrypoints()`,
-> `get_entrypoint_classes()`, and `get_entrypoint_coverage()`. The shipped rules
-> detect a framework only when the project declares it as a dependency. CLDK 1.x
-> had `get_entry_point_methods()` and `get_service_entry_point_methods()`, which
-> raised `NotImplementedError`, and CLDK 2.0 removes both. To analyze TypeScript
-> at scale through a shared Neo4j graph, see [Analysis at scale](/at-scale/).
+### Read the call graph
+
+This block continues the block above.
+
+```python
+graph = analysis.get_call_graph()
+print(graph.number_of_nodes(), "nodes,", graph.number_of_edges(), "edges")
+# 2261 nodes, 4629 edges
+
+target = "src/v3/helpers/parseUtil.addIssueToContext"
+print(graph.nodes[target])
+# {'id': 'can://zod/typescript/src/v3/helpers/parseUtil.ts/addIssueToContext', 'kind': 'callable'}
+caller = sorted(graph.predecessors(target))[0]
+print(caller, graph.edges[caller, target])
+# src/v3/types.ZodArray._parse {'type': 'CALL_DEP', 'weight': 4, 'provenance': ('tsc',)}
+
+print(len(analysis.callers_of("addIssueToContext")))
+# 28
+print(analysis.reaches("ZodString._parse", "addIssueToContext"))
+# True
+```
+
+### Ask a dataflow question
+
+Dataflow needs `system_dependency_graph`. The cache holds the `call_graph`
+analysis from the first block, so pass `eager=True`.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.typescript(
+    project_path="zod/packages/zod",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+    eager=True,  # rebuild: the cache holds the call_graph run from above
+)
+
+print(analysis.flows_to_call("ctx", "makeIssue", within="addIssueToContext"))
+# True
+
+result = analysis.taint(
+    sources=[("issueData", "addIssueToContext")],
+    sinks=[("params", "makeIssue")],
+)
+print(len(result.paths), result.complete)
+# 1 True
+for path in result.paths:
+    print(" -> ".join(h.to.name or h.to.kind for h in path.hops))
+# argument -> params
+```
+
+The parameter `issueData` flows into an argument of the `makeIssue(...)` call,
+and that argument reaches the parameter `params`. The argument hop has no name,
+so the example prints its `kind`. For more Zod samples, see the
+[TypeScript example](/examples/typescript/).
+
+## What to call for what
+
+| Question | Methods | Lowest level |
+| -------- | ------- | ------------ |
+| What does the project contain? | [`get_symbol_table`](#typescriptanalysisget_symbol_table), [`get_modules`](#typescriptanalysisget_modules), [`get_typescript_module`](#typescriptanalysisget_typescript_module), [`get_typescript_file`](#typescriptanalysisget_typescript_file), [`get_application_view`](#typescriptanalysisget_application_view), [`get_call_graph_json`](#typescriptanalysisget_call_graph_json) | `symbol_table` |
+| Which types are there? | [`get_classes`](#typescriptanalysisget_classes), [`get_class`](#typescriptanalysisget_class), [`get_classes_by_criteria`](#typescriptanalysisget_classes_by_criteria), [`get_interfaces`](#typescriptanalysisget_interfaces), [`get_enums`](#typescriptanalysisget_enums), [`get_enum_members`](#typescriptanalysisget_enum_members), [`get_type_aliases`](#typescriptanalysisget_type_aliases) | `symbol_table` |
+| How are the types related? | [`get_class_hierarchy`](#typescriptanalysisget_class_hierarchy), [`get_sub_classes`](#typescriptanalysisget_sub_classes), [`get_extended_classes`](#typescriptanalysisget_extended_classes), [`get_implemented_interfaces`](#typescriptanalysisget_implemented_interfaces), [`get_nested_classes`](#typescriptanalysisget_nested_classes) (always `[]`) | `symbol_table` |
+| What does a type or a module declare? | [`get_functions`](#typescriptanalysisget_functions), [`get_methods`](#typescriptanalysisget_methods), [`get_methods_in_class`](#typescriptanalysisget_methods_in_class), [`get_method`](#typescriptanalysisget_method), [`get_method_parameters`](#typescriptanalysisget_method_parameters), [`get_constructors`](#typescriptanalysisget_constructors), [`get_fields`](#typescriptanalysisget_fields), [`get_interface_properties`](#typescriptanalysisget_interface_properties), [`get_variables`](#typescriptanalysisget_variables), [`get_imports`](#typescriptanalysisget_imports), [`get_exports`](#typescriptanalysisget_exports) | `symbol_table` |
+| Which decorators are used? | [`get_decorators`](#typescriptanalysisget_decorators), [`get_class_decorators`](#typescriptanalysisget_class_decorators), [`get_methods_with_decorators`](#typescriptanalysisget_methods_with_decorators), [`get_classes_with_decorators`](#typescriptanalysisget_classes_with_decorators), [`get_decorated_callables`](#typescriptanalysisget_decorated_callables) | `symbol_table` |
+| What are all the callables and their bodies? | [`get_callables_overview`](#typescriptanalysisget_callables_overview), [`get_method_bodies`](#typescriptanalysisget_method_bodies) | `symbol_table` |
+| Where is this code, and what is its text? | [`locate`](#typescriptanalysislocate), [`locate_many`](#typescriptanalysislocate_many), [`resolve_callable`](#typescriptanalysisresolve_callable), [`get_source`](#typescriptanalysisget_source), [`describe`](#typescriptanalysisdescribe) | `symbol_table` |
+| Which calls does a callable make? | [`get_call_sites`](#typescriptanalysisget_call_sites), [`get_callsites_for`](#typescriptanalysisget_callsites_for), [`get_call_targets`](#typescriptanalysisget_call_targets) | `symbol_table` (call targets resolved from `call_graph`) |
+| Who calls what? | [`get_call_graph`](#typescriptanalysisget_call_graph), [`get_callers`](#typescriptanalysisget_callers), [`get_callees`](#typescriptanalysisget_callees), [`get_class_call_graph`](#typescriptanalysisget_class_call_graph), [`get_calling_lines`](#typescriptanalysisget_calling_lines), [`get_external_symbols`](#typescriptanalysisget_external_symbols), [`get_synthesized_callables`](#typescriptanalysisget_synthesized_callables), [`callers_of`](#typescriptanalysiscallers_of), [`callees_of`](#typescriptanalysiscallees_of), [`reaches`](#typescriptanalysisreaches), [`call_paths_between`](#typescriptanalysiscall_paths_between), [`backward_cone`](#typescriptanalysisbackward_cone) | `call_graph` |
+| What happens inside a callable? | [`get_cfg`](#typescriptanalysisget_cfg), [`get_cdg`](#typescriptanalysisget_cdg), [`get_ddg`](#typescriptanalysisget_ddg) | `program_dependency_graph` |
+| Where does a value go? | [`resolve_value`](#typescriptanalysisresolve_value), [`slice_backward`](#typescriptanalysisslice_backward), [`slice_forward`](#typescriptanalysisslice_forward), [`paths_between`](#typescriptanalysispaths_between), [`flows_to_call`](#typescriptanalysisflows_to_call), [`flows_to_argument`](#typescriptanalysisflows_to_argument), [`taint`](#typescriptanalysistaint) | `system_dependency_graph` |
+| What can code outside the project call? | [`get_entrypoints`](#typescriptanalysisget_entrypoints), [`get_entrypoint_classes`](#typescriptanalysisget_entrypoint_classes), [`get_entrypoint_coverage`](#typescriptanalysisget_entrypoint_coverage) | `symbol_table` |
+| What do the configuration files say? | [`get_artifacts`](#typescriptanalysisget_artifacts), [`get_dependencies`](#typescriptanalysisget_dependencies), [`get_config_keys`](#typescriptanalysisget_config_keys) | `symbol_table` |
+| Which code reads the configuration? | [`get_config_uses`](#typescriptanalysisget_config_uses), [`get_config_readers`](#typescriptanalysisget_config_readers), [`get_unresolved_config_reads`](#typescriptanalysisget_unresolved_config_reads) | `call_graph` |
+
+`get_artifacts`, `get_dependencies`, `get_config_keys`, `get_config_uses` and
+`get_unresolved_config_reads` return the models that the Python analysis also
+uses: [`PyArtifact`](/reference/python-api/python/#pyartifact),
+[`PyDependency`](/reference/python-api/python/#pydependency),
+[`PyConfigKey`](/reference/python-api/python/#pyconfigkey),
+[`PyConfigUseEdge`](/reference/python-api/python/#pyconfiguseedge) and
+[`PyConfigRead`](/reference/python-api/python/#pyconfigread). The Python page
+documents them. `get_config_readers` returns
+[`TSCallableOverview`](#tscallableoverview) objects.
+
+On TypeScript, `get_call_graph()`, `get_symbol_table()` and `get_classes()`
+take no arguments. The Python options `roots=`, `depth=`, `paths=` and
+`module=` do not exist here.
+
+### Names and keys
+
+Many methods in the generated reference do not say which names they take. On
+Zod, the keys look like this:
+
+| Key | Format | Example |
+| --- | ------ | ------- |
+| Module key | The file path from `project_path`, with the extension | `"src/v3/types.ts"` |
+| Type or function signature | The module key without the extension, a dot and the name | `"src/v3/types.ZodType"`, `"src/v3/ZodError.quotelessJson"` |
+| Method signature | The type signature, a dot and the method name | `"src/v3/types.ZodType.parse"` |
+| Anonymous callable | `<anon@line:column>` in place of the name | `"src/compile.<anon@18:35>"` |
+| External target | The module, a dot and the name | `"(builtin).getTime"`, `"vitest/config.mergeConfig"` |
+
+Some methods take these keys in a special way:
+
+- `get_method`, `get_method_parameters`, `get_callers` and `get_callees` take
+  a type signature and the short method name:
+  `get_method("src/v3/types.ZodType", "parse")`. If you give the full method
+  signature as the second argument, `get_method` returns `None`. For a
+  function, give only its signature to `get_callers` or `get_callees`:
+  `get_callers("src/v3/helpers/parseUtil.addIssueToContext")`.
+- `get_class_call_graph` takes the full method signature as its second
+  argument, for example `"src/v3/types.ZodString._parse"`. A short name
+  returns `[]`.
+- `get_typescript_module` needs the exact module key. `"./src/v3/types.ts"`
+  returns `None`.
+- `get_classes_by_criteria(inclusions=[...], exclusions=[...])` matches parts
+  of the class signature. With no `inclusions`, it returns `{}`.
+- Decorator names have no `@`: `get_methods_with_decorators(["Get"])`. The
+  name `"@Get"` matches nothing.
+- The name-based methods take a short name or the last parts of a signature,
+  for example `"addIssueToContext"` or `"ZodString._parse"`. These methods
+  include `resolve_callable`, `callers_of`, `reaches`, `get_cfg`, the slices
+  and `taint`. A name that matches more than one callable raises
+  `AmbiguousName`. A value is a parameter name and its callable:
+  `slice_forward("obj", within="quotelessJson")`.
+- The nodes of `get_call_graph()` are callable signatures, module keys for
+  the top-level code of a module, for example `"vitest.config.ts"`, and
+  external targets.
+- `get_call_graph_json()` returns all of the analysis as JSON, not only the
+  call graph. On Zod at `call_graph`, the text has more than 10 million
+  characters. For the call graph, use `get_call_graph()`.
+
+## Entrypoints
+
+`get_entrypoints()` returns the callables that code outside the project can
+call. Three kinds of rules find them:
+
+- **Framework rules**, for example for NestJS and commander. If your source
+  imports the package of a framework, the analyzer uses the rules of that
+  framework. `package.json` does not have to declare the package.
+- **Heuristic rules**. They apply to every project and find shapes such as
+  `app.get("/users/:id", handler)` and `process.on("SIGINT", handler)`. Only
+  these rules find Express routes. Their `confidence` is `"heuristic"`, and
+  some of their results are wrong.
+- **Manifest rules**: the `bin` and `main` entries of `package.json`.
+
+On Zod, the three entrypoints come from heuristic rules:
+
+```python
+from cldk import CLDK
+
+analysis = CLDK.typescript(project_path="zod/packages/zod")
+
+for overview in analysis.get_entrypoints():
+    print(overview.signature)
+# src/v3/benchmarks/index.<anon@56:22>
+# src/v3/types.ZodArray._parse.<anon@2302:38>
+# src/v3/types.ZodTuple.items
+print(analysis.get_entrypoint_coverage().frameworks_detected)
+# []
+
+items = analysis.get_method("src/v3/types.ZodTuple", "items")
+for ep in items.entrypoints:
+    print(ep.framework, ep.confidence, ep.rule, ep.evidence)
+# heuristic heuristic heuristic.http-verb-call Promise.all
+```
+
+The first result is a `process.on("SIGINT", ...)` handler in a benchmark
+script. The other two are wrong: the heuristic read `Promise.all(...)` as an
+HTTP route with the verb `all`.
+
+`get_entrypoints()` returns `TSCallableOverview` objects. They have no
+`framework` or `confidence` field. To see why a callable is an entrypoint, read
+`entrypoints` on its `TSCallable`, as the example does. A nested callable, for
+example the second result, is in `inner_callables` of the callable that
+contains it. Before you trust an empty list, call `get_entrypoint_coverage()`.
+
+## Read source text
+
+To read the text of a callable, use `TSCallable.code`,
+`get_method_bodies([...])` or `get_source(<callable signature>)`. Do not slice
+`TSModule.source` with `span.bytes` yourself. `bytes` are UTF-8 byte offsets,
+but `source` is a Python `str`. The slice is wrong after the first non-ASCII
+character in the file. On Zod, 80 of the 135 modules contain non-ASCII text.
+Span columns count UTF-16 code units, so they also differ from Python string
+positions after a character such as an emoji.
+
+On the local backend, `get_source` and `describe` have the same problem for a
+statement or a call site. For example, on Zod, `locate("src/v3/types.ts", 669)`
+finds the call `timeRegexSource(args)`, but `get_source` of its `node_id`
+returns `'meRegexSource(args)}$'`. Read the callable that contains the call
+instead: pass `callable.signature` of the `locate` result to `get_source`.
+
+## Choose a backend
+
+The type of the `backend=` object selects the backend. Import the backend
+configuration classes from `cldk.analysis.commons.backend_config`. The
+[Core page](/reference/python-api/core/#backend-configuration) documents them.
+
+|  | Local (default) | Neo4j |
+| --- | --------------- | ----- |
+| Select it with | No `backend=`, or `backend=CodeAnalyzerConfig(cache_dir=...)` | `backend=Neo4jConnectionConfig(...)` |
+| Install | `pip install cldk` | `pip install "cldk[neo4j]"` and a Neo4j server |
+| Who runs the analyzer | CLDK, in the `CLDK.typescript` call | You, once, with `cants --emit neo4j` |
+| `project_path` | Required | Optional |
+| Analysis level | The `analysis_level` that you pass | Always `system_dependency_graph` |
+
+`TSCodeAnalyzerConfig` also selects the local backend. Its `tsc_only` flag
+does nothing. `tsc_only=True` gives a `DeprecationWarning`.
+
+### Use a Neo4j graph
+
+1. Install the Neo4j driver:
+
+   ```bash
+   pip install "cldk[neo4j]"
+   ```
+
+2. Put the password of your Neo4j server in the `NEO4J_PASSWORD` environment
+   variable. Then load the graph of your project into Neo4j. `cants` also
+   writes its cache to `my-app/.codeanalyzer/`.
+
+   ```bash
+   export NEO4J_PASSWORD="<your password>"
+   cants -i my-app --emit neo4j --neo4j-uri bolt://localhost:7687 --app-name my-app
+   ```
+
+   The graph always has all four levels. `cants` refuses `-a 2` or higher
+   together with `--emit neo4j`.
+
+3. Connect to the graph. Run the code in the same shell as step 2, so that
+   `NEO4J_PASSWORD` is set.
+
+   ```python
+   import logging
+   import os
+
+   from cldk import CLDK
+   from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+
+   logging.getLogger("neo4j").setLevel(logging.ERROR)  # hide driver warnings
+
+   analysis = CLDK.typescript(
+       backend=Neo4jConnectionConfig(
+           uri="bolt://localhost:7687",
+           username="neo4j",
+           password=os.environ["NEO4J_PASSWORD"],
+           application_name="my-app",
+       ),
+   )
+   print(len(analysis.get_classes()))
+   ```
+
+   Without the `logging` line, the neo4j driver prints warnings about
+   relationship types that the graph does not have. They do not stop the
+   analysis.
+
+`application_name` must be the same as `--app-name`. If you do not give it,
+CLDK uses the name of the `project_path` directory. The backend is read-only.
+It refuses a graph from codeanalyzer-typescript before 1.5.2 with
+`GraphSchemaMismatch`. For a shared graph of many projects, see
+[Analysis at scale](/at-scale/).
+
+The graph does not keep all the data. These answers are different from the
+local backend:
+
+- `get_imports`: `alias` is `None`, and the line and column fields are `-1`.
+- `get_enum_members`: `value` is `None`.
+- `comments` and `type_parameters` are empty on types and callables, and
+  `body` is empty on callables.
+- `locate`: at module scope, `source` is `''`, with a
+  `module_source_unavailable` diagnostic. The columns and `bytes` of `span`
+  are `0`.
+- `get_source` of a statement or a call site raises `NotImplementedError`.
+- `param_in` and `param_out` of the application view are empty.
+
+:::caution[Some merged declarations stop the Neo4j backend]
+In cldk 2.0.0, the TypeScript Neo4j backend cannot read a graph with some
+kinds of declaration merging. In declaration merging, two or more
+declarations share one name. These kinds stop the backend:
+
+- An interface with a method has the same name as a function, a `const` or a
+  class.
+- A namespace with a function has the same name as a class, an enum, a
+  function or an interface.
+- Two interfaces or two namespaces have the same name, and the second one
+  declares a method or a function.
+
+Other kinds can also stop it. `CLDK.typescript` then raises
+`ValueError: child id is not minted under its parent`. Zod has such
+declarations, so use the local backend for Zod.
+:::
+
+## Errors you can see
+
+Import the CLDK exceptions from `cldk.utils.exceptions`.
+[Results and errors](/reference/python-api/results/#exceptions) documents
+them. `SelectorNotInGraph` and `AmbiguousName` are subclasses of `ValueError`.
+
+| Exception | When it happens | What to do |
+| --------- | --------------- | ---------- |
+| `CldkInitializationException` | `project_path` does not exist or is not a directory. | Correct the path. A relative path starts at the current directory. |
+| `TypeError` | You pass an option by position, for example `CLDK.typescript("zod/packages/zod", "call_graph")` or `slice_backward("obj", "quotelessJson")`. You use an unknown keyword, for example `neo4j_config`. You call `CLDK.typescript()` with no `project_path` and no Neo4j backend. | Pass the options by keyword: `analysis_level="call_graph"`, `within="quotelessJson"`. Pass `project_path`. For a Neo4j graph, pass `backend=Neo4jConnectionConfig(...)`, not `neo4j_config`. |
+| `ValueError` | `analysis_level` is not a level name, for example `"callgraph"`. Or a bound is out of range, for example `depth=0` or `page_size=0`. | Use `symbol_table`, `call_graph`, `program_dependency_graph` or `system_dependency_graph`. Give a bound of 1 or more. |
+| `pydantic.ValidationError` ("validation errors for TSAnalysis") | The cache comes from cldk 1.x. | Pass `eager=True` once, or delete `<project>/.codeanalyzer`. |
+| `CodeanalyzerUsageException` | You call a dataflow method on an analysis below `program_dependency_graph`. | Build the analysis again at a higher level, with `eager=True`. |
+| `SelectorNotInGraph` | A name matches nothing. A value-flow method also raises it below `system_dependency_graph`. | Copy the name from the symbol table. For value flow, build at `system_dependency_graph` with `eager=True`. |
+| `AmbiguousName` | A name matches more than one callable. For example, `"_parse"` matches 38 callables on Zod. | Give more of the signature, for example `"ZodString._parse"`, or pass `in_class=` or `in_module=`. `candidates` on the exception lists the matches. |
+| `KeyError` | `get_source` gets an id that names nothing. | Pass a signature, or an id that CLDK returned. |
+| `GraphSchemaMismatch` | Neo4j: no graph has the `application_name`, or the graph is from codeanalyzer-typescript before 1.5.2. In both cases, the message says that the graph is too old. | Check `application_name` first. If it is correct, load the graph again with `cants --emit neo4j`. |
+| `CodeanalyzerExecutionException` | Neo4j: the `neo4j` driver is not installed, or you give no `application_name` and no `project_path`. Local: the analyzer fails. The message shows the command as a Python list and the exit status, not the output of the analyzer. | Run `pip install "cldk[neo4j]"`. Pass `application_name`. If the analyzer fails, copy the items of the list from the message, without the brackets, quotes and commas. Run the result in a terminal to see the output of the analyzer. |
+| `neo4j.exceptions.ServiceUnavailable` | Neo4j: CLDK cannot connect to the server. | Make sure that the server runs and that `uri` is correct. |
+| `neo4j.exceptions.AuthError` | Neo4j: the username or the password is wrong. | Pass the `username` and the `password` of your Neo4j server. |
+| `NotImplementedError` | Neo4j: `get_source` of a statement or a call site. | Read the callable that contains it, or use the local backend. |
+| `ValueError` ("child id is not minted under its parent") | Neo4j: the graph has a kind of declaration merging that the backend cannot read. See [Use a Neo4j graph](#use-a-neo4j-graph). | Use the local backend. |
+
+## Removed in CLDK 2.0
+
+CLDK 1.x had `get_entry_point_methods()` and
+`get_service_entry_point_methods()`. Both raised `NotImplementedError`, and
+CLDK 2.0 removes them. Use `get_entrypoints()` and `get_entrypoint_classes()`.
+
+## API reference
+
+<!-- Remove each item when the SDK docstring is fixed. -->
+:::caution[Errors in the generated reference]
+The reference below comes from the cldk 2.0.0 docstrings. These statements in
+it are wrong:
+
+- The `TypeScriptAnalysis` description says that `neo4j_config` selects the
+  Neo4j backend. That keyword raises `TypeError`. Pass
+  `backend=Neo4jConnectionConfig(...)`.
+- The `slice_backward` example reads `s.truncated`. `Slice` has no
+  `truncated`, so the line raises `AttributeError`. Read `s.complete`.
+- The `taint` example joins `h.to.name`. On an argument hop, `to.name` is
+  `None`, so the join raises `TypeError`. Use `h.to.name or h.to.kind`.
+- `get_call_graph` lists the node kinds `class`, `interface`, `enum`,
+  `type_alias` and `namespace`, and says that a class is the callee of
+  `new X()`. The only kinds are `callable`, `module` and `external`, and
+  `new X()` points at `X.constructor`.
+- `paths_between` and `taint` say that the provenance of every hop is
+  `["reaching-defs"]`. Only data hops have it. Control, argument, return and
+  summary hops have an empty `prov`.
+- `get_synthesized_callables` says that the keys are `<host>:<line:col>`
+  signatures. The keys are older ids, for example
+  `can://zod/typescript/src/compile.ts@18:35`. The `id` of each value is the
+  callable that replaced the old id.
+- `TSSpan` says that `bytes` are offsets into the `source` of the module. They
+  are UTF-8 byte offsets, so `source[b0:b1]` is wrong after a non-ASCII
+  character. Use `code` or `get_source`.
+- `get_source` says that you can get the exact text of a statement or a call
+  site from `locate`. On the local backend, the text is shifted after a
+  non-ASCII character. Read the callable that contains it.
+:::
 
 <!-- CLDK:API:START -->
 

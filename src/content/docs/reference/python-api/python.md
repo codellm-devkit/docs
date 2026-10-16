@@ -3,44 +3,396 @@ title: "Python API"
 description: "Program analysis for Python and related data models."
 ---
 
-`PythonAnalysis` gives you a typed symbol table, classes and methods, and a call
-graph, through nearly the same API as [Java](/reference/python-api/java/). [cocoa](/cocoa/) uses these calls for
-Python code-context queries.
+`PythonAnalysis` is the analysis object for a Python project. It gives you a typed
+symbol table, a call graph, dataflow inside and across functions, taint queries,
+framework entrypoints and project artifacts. Most method names are the same as on
+[Java](/reference/python-api/java/) and [TypeScript](/reference/python-api/typescript/).
 
-## Overview
+The outputs on this page come from cldk 2.0.0 (codeanalyzer-python 1.5.3) on Flask 3.1.3.
 
-`CLDK.python(project_path=...)` returns a `PythonAnalysis` object backed by
-the `codeanalyzer-python` backend, which has two parts:
+## Before you start
 
-- **Jedi**: symbol resolution, type inference, and the level-1 call graph.
-- **The defuse linker**: at level 2, it adds call edges through local def-use
-  chains. Each edge records its resolver in `prov`, which is `jedi` or `defuse`.
+1. Install CLDK. cldk 2.0.0 needs Python 3.11, 3.12, 3.13 or 3.14. It does not install
+   on Python 3.15, because `ray`, a dependency of codeanalyzer-python, has no Python 3.15
+   wheel. On Python 3.14, pip compiles `tree-sitter` from source, so you need a C
+   compiler. Python analysis needs no extra.
+
+   ```bash
+   pip install cldk
+   ```
+
+2. If you use an activated virtual environment, `uv run` or `poetry run`, set
+   `SYSTEM_PYTHON` to the base interpreter of the virtual environment. Without it,
+   `CLDK.python(...)` can raise
+   `RuntimeError: Could not find a suitable base Python interpreter`.
+
+   In an activated virtual environment on macOS and Linux:
+
+   ```bash
+   export SYSTEM_PYTHON="$(python -c 'import sys; print(sys._base_executable)')"
+   ```
+
+   In an activated virtual environment on Windows PowerShell:
+
+   ```powershell
+   $env:SYSTEM_PYTHON = (python -c "import sys; print(sys._base_executable)")
+   ```
+
+   If you use `uv run` and do not activate the virtual environment, get the interpreter
+   from uv. On macOS and Linux, run this command in the directory of your uv project:
+
+   ```bash
+   export SYSTEM_PYTHON="$(uv run python -c 'import sys; print(sys._base_executable)')"
+   ```
+
+   If you use `poetry run`, get the interpreter from Poetry. On macOS and Linux, run this
+   command in the directory of your Poetry project:
+
+   ```bash
+   export SYSTEM_PYTHON="$(poetry run python -c 'import sys; print(sys._base_executable)')"
+   ```
+
+3. Clone the sample project. If Git prints a warning that ends with `is not a commit!`,
+   ignore it. The clone is correct.
+
+   ```bash
+   git clone --depth 1 --branch 3.1.3 https://github.com/pallets/flask.git
+   ```
+
+4. Run your Python code from the directory that contains `flask`.
+
+The first run makes a virtual environment under `flask/.codeanalyzer/python/` and
+installs Flask and its requirements into it. This step needs network access and takes
+about 20 seconds on Flask. Later runs reuse the cache in that directory. On Flask, a
+later run at `call_graph` takes about 1 to 2 seconds. The analyzer builds the call graph
+and the dataflow again on each run, so a later run at `system_dependency_graph` takes
+about twice as long. Add `.codeanalyzer/` to your `.gitignore`.
+
+Python analysis skips test directories, so the `tests` directory of Flask is not in the
+results. The next run picks up your source edits. For other ways to install CLDK, see
+[Installing CLDK](/installing/).
+
+## How it works
+
+`CLDK.python(project_path=...)` runs codeanalyzer-python in your Python process. When
+the analysis is complete, it returns a `PythonAnalysis` object. If a file does not
+parse, the analyzer logs an `ERROR`, skips the file and continues. The `analysis_level`
+argument selects how far the analyzer goes. Each analysis level includes the levels
+below it.
+
+| Analysis level | Analyzer flag | What codeanalyzer-python adds | Methods that need it |
+| --- | --- | --- | --- |
+| `symbol_table` (default) | `-a 1` | Modules, classes, callables, fields and imports. Call edges from Jedi. Entrypoints, artifacts, dependencies and configuration keys. | The symbol-table, entrypoint and artifact methods |
+| `call_graph` | `-a 2` | Call edges from the def-use linker, which finds calls that Jedi misses. Configuration reads. | `get_call_graph`, `get_callers`, `get_callees`, `get_class_call_graph`, `callers_of`, `callees_of`, `reaches`, `call_paths_between`, `backward_cone`, `get_config_uses`, `get_config_readers`, `get_unresolved_config_reads` |
+| `program_dependency_graph` | `-a 3` | The control-flow graph (CFG), the control-dependence graph (CDG) and the data-dependence graph (DDG) of each callable, from the `ast` module of the standard library | `get_cfg`, `get_cdg`, `get_ddg` |
+| `system_dependency_graph` | `-a 4` | Dependence across calls. Scalpel finds the names that can refer to the same object. | `resolve_value`, `slice_backward`, `slice_forward`, `flows_to_call`, `flows_to_argument`, `paths_between`, `taint` |
+
+Jedi is a Python library that finds what a name refers to. The def-use linker is part
+of codeanalyzer-python. Scalpel is a Python static-analysis library.
 
 ```mermaid
 flowchart LR
     P[Python project] --> A["CLDK.python(project_path)"]
-    A --> J[Jedi]
-    A --> Q["defuse linker (level 2)"]
-    J --> S[Symbol table]
-    J --> CG[Call graph]
-    Q --> CG
+    A --> L1["Level 1: Jedi"]
+    A --> L2["Level 2: def-use linker"]
+    A --> L3["Level 3: ast dataflow"]
+    A --> L4["Level 4: dataflow with Scalpel"]
+    L1 --> ST[Symbol table]
+    L1 --> CG[Call graph]
+    L2 --> CG
+    L3 --> PDG["CFG, CDG and DDG of each callable"]
+    L4 --> SDG["Dependence across calls"]
 ```
 
-**Project path only.** Python analysis always needs a project directory of valid
-Python sources. Pass it as `project_path`:
+Pass an `AnalysisLevel` member or its name as a string, for example
+`analysis_level="call_graph"`. An unknown name raises `ValueError`. In cldk 1.x, the
+Python analyzer always ran at level 1. In 2.0, it runs at the analysis level that you
+ask for. If you change `analysis_level`, the next run rebuilds the cache.
+
+If the analysis level is too low for a method, this is what occurs:
+
+- Below `call_graph`, the call-graph methods do not raise. They return only the edges
+  from Jedi. On Flask, `symbol_table` gives 818 edges and `call_graph` gives 1199. At
+  `symbol_table`, `callers_of("Flask.full_dispatch_request")` returns `[]`.
+- Below `call_graph`, `get_config_uses`, `get_config_readers` and
+  `get_unresolved_config_reads` do not raise. They return empty lists. On Flask,
+  `get_unresolved_config_reads()` returns an empty list at `symbol_table` and 5 reads at
+  `call_graph`.
+- Below `program_dependency_graph`, `get_cfg`, `get_cdg`, `get_ddg`, the two slices,
+  `flows_to_call`, `flows_to_argument` and `paths_between` raise
+  `CodeanalyzerUsageException`. `resolve_value` and `taint` raise `SelectorNotInGraph`.
+- At `program_dependency_graph`, the methods that take a value name raise
+  `SelectorNotInGraph` for a real parameter, for example
+  `1 of 1 value not in graph: 'environ'`. Ask for `system_dependency_graph`.
+
+The methods that take a value name accept only a parameter, a global or a closure
+capture. A local variable name raises `SelectorNotInGraph`, even at
+`system_dependency_graph`. For example,
+`resolve_value("rv", within="Flask.full_dispatch_request")` raises it.
+
+:::caution[Value flow across calls]
+cldk 2.0.0 pins codeanalyzer-python 1.5.3. If a function passes a parameter or a
+module-level name straight into a call, 1.5.3 does not follow the value into the called
+function
+([codeanalyzer-python#220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)).
+On Flask, `flows_to_call("id", "get_post", within="blog.update")` returns `False`,
+although `update` calls `get_post(id)`.
+
+codeanalyzer-python 1.5.4 fixes this call and returns `True` for it. Some calls still
+stop the value on 1.5.4. For example, 1.5.4 does not follow the module-level name
+`PREFIX` into `sanitize(PREFIX)`. It also does not follow `q` into the second call of
+`sanitize(p) + sanitize(q)`. So on both versions, a cross-call `False` from
+`flows_to_call` or `flows_to_argument` is not evidence of no flow. An empty
+`paths_between` result and an `exhausted` pair from `taint` are not evidence either.
+
+To use 1.5.4, install it after cldk:
+
+```bash
+pip install "codeanalyzer-python==1.5.4"
+```
+
+pip then prints an `ERROR` line that says that cldk 2.0.0 requires 1.5.3. The install
+still completes. `uv add` refuses this conflict.
+[python-sdk#413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the
+update of the pin. For more, see
+[What the pinned Python backend does not link](/guides/system-dependence/#what-the-pinned-python-backend-does-not-link).
+:::
+
+### The call graph
+
+Each node of `get_call_graph()` is a callable in the project or a call target outside
+it. The graph names a project callable by its signature, for example
+`src.flask.app.Flask.wsgi_app`. It names an outside target by an external id, for
+example `can://flask/@external/sys/exc_info`. After `can://`, the external id has the
+name of the project directory.
+
+Nodes have no attributes. Each edge has three attributes: `type` (always `"CALL_DEP"`),
+`weight` and `provenance`. `provenance` is a tuple of the resolvers that found the
+call: `("jedi",)`, `("defuse",)` or `("defuse", "jedi")`. The Neo4j backend names the
+nodes in the same way, and gives each edge the same three attributes.
+
+The analyzer installs Flask into its virtual environment. So Jedi names some calls inside
+`src/flask` by the import name of the installed package, and these calls end at an
+external id. For example, the call from `locate_app` to `find_app_by_string` ends at
+`can://flask/@external/flask.cli/find_app_by_string`. So
+`callers_of("find_app_by_string")` returns `[]`. If a caller query returns nothing,
+look for the edges that end at an external id with the same name:
+
+```python
+from cldk import CLDK
+
+analysis = CLDK.python(project_path="flask", analysis_level="call_graph")
+cg = analysis.get_call_graph()
+print(sorted(u for u, v in cg.edges if v.endswith("/find_app_by_string")))
+# ['src.flask.cli.locate_app']
+```
+
+`get_class_call_graph` is not limited to the class. It lists every call edge that a
+depth-first walk reaches from the methods of the class, or from one method. On Flask,
+`get_class_call_graph("src.flask.app.Flask", "full_dispatch_request")` returns 114
+edges. In 44 of them, the caller is outside `Flask`. For a bounded part of the graph,
+use `get_call_graph` with `roots=` and `depth=`. For example,
+`roots=["src.flask.app.Flask.full_dispatch_request"]` with `depth=1` gives 10 nodes and
+9 edges.
+
+## Names
+
+Names are dotted paths from `project_path`, not import names. The file
+`src/flask/app.py` gives the class `src.flask.app.Flask`, not `flask.app.Flask`.
+Symbol-table keys are file paths relative to `project_path`, for example
+`src/flask/app.py`. In `get_class`, `get_method`, `get_callers` and `get_callees`, an
+import name finds nothing, and no error occurs. Copy names from `get_classes()`, or use
+`resolve_callable(name)`.
+
+`resolve_callable`, `callers_of`, `callees_of`, `reaches`, `call_paths_between`,
+`backward_cone`, `get_cfg`, `get_cdg` and `get_ddg` take a short name or a dotted
+suffix, for example `"Flask.wsgi_app"`. The `within=`, `src_within=` and `dst_within=`
+arguments take the same names. If an import name is a suffix of the dotted path, these
+methods find the callable. For example, `"flask.app.Flask.wsgi_app"` finds
+`src.flask.app.Flask.wsgi_app`. An import name that is not a suffix raises
+`SelectorNotInGraph`, for example `"flask.Flask.wsgi_app"`.
+
+- If a name matches more than one callable, the method raises `AmbiguousName`. To
+  narrow it, give more of the dotted path, for example `"Flask.dispatch_request"`.
+- `resolve_callable`, `callers_of` and `callees_of` also take `in_class=` and
+  `in_module=`. `get_cfg`, `get_cdg` and `get_ddg` take only `in_class=`. The other
+  methods take neither. If the `AmbiguousName` message names a keyword that the method
+  does not take, that keyword raises `TypeError`.
+- If a name matches nothing, the method raises `SelectorNotInGraph`.
+- Pass the options after the name as keywords. A positional option raises `TypeError`.
+
+`get_call_graph(roots=...)` takes full signatures, for example
+`roots=["src.flask.app.Flask.wsgi_app"]`. A short name raises `SelectorNotInGraph`.
+
+`get_callers`, `get_callees` and `get_method` take a scope and a short method name. For
+a method, the scope is the class name from `get_classes()`. For a module-level function,
+the scope is the bare module name (`PyModule.module_name`), for example `"helpers"` for
+`src/flask/helpers.py`.
+
+Any other scope finds nothing and raises no error. For example, an empty string, a
+dotted module path and an import name all make `get_callers` return
+`{'caller_details': []}`. Bare module names are not unique: in Flask, five modules are
+named `__init__`. For a module-level function, use `callers_of` with `in_module=`, for
+example `callers_of("url_for", in_module="src/flask/helpers.py")`.
+
+## Worked example
+
+This example analyzes Flask at the `call_graph` analysis level. The blocks after the
+first one continue it.
+
+### Get the symbol table
 
 ```python
 from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
 )
+
+modules = analysis.get_symbol_table()   # file path -> PyModule
+print(len(modules))                     # 35
+print("src/flask/app.py" in modules)    # True
 ```
 
-To tune the in-process backend, pass a `PyCodeAnalyzerConfig` as `backend=`. It
-adds `cache_dir` and `use_ray`, which runs the analysis on parallel workers:
+### List the classes
+
+```python
+classes = analysis.get_classes()        # dotted name -> PyClass
+print(len(classes))                     # 46
+print(sorted(classes)[:2])
+# ['src.flask.app.Flask', 'src.flask.blueprints.Blueprint']
+print(analysis.get_class("flask.app.Flask"))   # None: an import name is not a key
+```
+
+### Build the call graph
+
+```python
+from collections import Counter
+
+cg = analysis.get_call_graph()          # networkx.DiGraph, caller -> callee
+print(cg.number_of_edges())             # 1199
+print(Counter(d["provenance"] for _, _, d in cg.edges(data=True)))
+# Counter({('jedi',): 811, ('defuse',): 381, ('defuse', 'jedi'): 7})
+print(cg.edges["src.flask.app.Flask.wsgi_app", "src.flask.app.Flask.full_dispatch_request"])
+# {'type': 'CALL_DEP', 'weight': 1, 'provenance': ('defuse',)}
+```
+
+From one fresh run to the next, Jedi can give a call to a library method, such as
+`read`, a different external id. So the node count can change by one (786 or 787 on
+Flask), and this example prints the edge count.
+
+### Find who calls a method
+
+`get_callers` takes the class name and the short method name:
+
+```python
+print(analysis.get_callers("src.flask.app.Flask", "full_dispatch_request"))
+# {'target_method': 'src.flask.app.Flask.full_dispatch_request',
+#  'caller_details': [{'caller_signature': 'src.flask.app.Flask.wsgi_app',
+#                      'edge': {'type': 'CALL_DEP', 'weight': 1, 'provenance': ('defuse',)}}]}
+print(analysis.get_callers("flask.app.Flask", "full_dispatch_request"))
+# {'caller_details': []}
+```
+
+The second call uses the import name, so it finds nothing. It raises no error. A
+`get_callers` result has no call-site locations. `callers_of` takes a name, returns
+`SliceNode` objects and raises on a miss:
+
+```python
+from cldk.utils.exceptions import SelectorNotInGraph
+
+callers = analysis.callers_of("Flask.full_dispatch_request")
+print([node.callable for node in callers])   # ['src.flask.app.Flask.wsgi_app']
+
+try:
+    analysis.callers_of("Flask.full_dispach_request")   # a typo in the name
+except SelectorNotInGraph as err:
+    print(err)   # 1 of 1 callable not in graph: 'Flask.full_dispach_request'
+```
+
+For the line and column of each call, use `get_callsites_for`:
+
+```python
+sites = analysis.get_callsites_for(["src.flask.app.Flask.wsgi_app"])
+for site in sites["src.flask.app.Flask.wsgi_app"][:2]:
+    print(site.method_name, site.start_line, site.start_column)
+# request_context 1506 14
+# push 1510 16
+```
+
+### Slice a value
+
+The slice methods need `system_dependency_graph`. This block builds a new analysis
+at that analysis level. The first run at a new analysis level rebuilds the cache and
+takes longer.
+
+```python
+from cldk import CLDK
+
+dataflow = CLDK.python(
+    project_path="flask",
+    analysis_level="system_dependency_graph",
+)
+
+sl = dataflow.slice_forward("check_author", within="blog.get_post")
+print(sl.total, sl.complete)                  # 9 True
+nodes = [n for n in dataflow.describe(sl.nodes) if n.source]   # nodes with source text
+for node in sorted(nodes, key=lambda n: n.line):
+    print(node.line, node.source)
+# 54 check_author and post["author_id"] != g.user["id"]
+# 55 abort(403)
+# 57 return post
+# 90 post = get_post(id)
+# 121 get_post(id)
+```
+
+`check_author` is a parameter of `get_post` in the Flask tutorial
+(`examples/tutorial/flaskr/blog.py`). It controls the branch on line 54. The branch
+decides whether `get_post` calls `abort(403)` or returns `post`. Lines 90 and 121 are in
+`update` and `delete`, which call `get_post`.
+
+The slice stops at 5 hops, the default `depth`. `complete` reports only the `max_nodes`
+cap, so it is `True` here. With `depth=None`, this slice has 189 nodes in 11 callables
+of the tutorial. Both slices are the same on codeanalyzer-python 1.5.4.
+
+On 1.5.3, a slice can stop at a call (see the caution in [How it works](#how-it-works)).
+For example, `slice_forward("id", within="blog.update")` has 38 nodes on 1.5.3 and 57
+on 1.5.4, because `update` passes `id` straight to `get_post`.
+
+## What to call for what
+
+| Task | Methods | Minimum analysis level |
+| --- | --- | --- |
+| List the modules, classes and methods | [`get_symbol_table`](#pythonanalysisget_symbol_table), [`get_classes`](#pythonanalysisget_classes), [`get_methods_in_class`](#pythonanalysisget_methods_in_class) | `symbol_table` |
+| Get one class or one method | [`get_class`](#pythonanalysisget_class), [`get_method`](#pythonanalysisget_method) | `symbol_table` |
+| Turn a name into one callable | [`resolve_callable`](#pythonanalysisresolve_callable) | `symbol_table` |
+| Find the callable at a file and line | [`locate`](#pythonanalysislocate), [`locate_many`](#pythonanalysislocate_many) | `symbol_table` |
+| Read source text | [`get_source`](#pythonanalysisget_source), [`get_method_bodies`](#pythonanalysisget_method_bodies), [`describe`](#pythonanalysisdescribe) | `symbol_table` |
+| Find call sites, with line and column | [`get_callsites_for`](#pythonanalysisget_callsites_for) | `symbol_table` |
+| Find framework entrypoints | [`get_entrypoints`](#pythonanalysisget_entrypoints), [`get_entrypoint_classes`](#pythonanalysisget_entrypoint_classes), [`get_entrypoint_coverage`](#pythonanalysisget_entrypoint_coverage) | `symbol_table` |
+| List artifacts, dependencies and configuration keys | [`get_artifacts`](#pythonanalysisget_artifacts), [`get_dependencies`](#pythonanalysisget_dependencies), [`get_config_keys`](#pythonanalysisget_config_keys) | `symbol_table` |
+| Get the call graph, or the part that a callable reaches | [`get_call_graph`](#pythonanalysisget_call_graph) | `call_graph` |
+| Find who calls a callable, and what it calls | [`callers_of`](#pythonanalysiscallers_of), [`callees_of`](#pythonanalysiscallees_of) | `call_graph` |
+| Check whether one callable reaches another, and how | [`reaches`](#pythonanalysisreaches), [`call_paths_between`](#pythonanalysiscall_paths_between) | `call_graph` |
+| Find every callable that can reach a callable | [`backward_cone`](#pythonanalysisbackward_cone) | `call_graph` |
+| Find code that reads configuration | [`get_config_uses`](#pythonanalysisget_config_uses), [`get_config_readers`](#pythonanalysisget_config_readers), [`get_unresolved_config_reads`](#pythonanalysisget_unresolved_config_reads) | `call_graph` |
+| Read the control flow, control dependence or data dependence of one callable | [`get_cfg`](#pythonanalysisget_cfg), [`get_cdg`](#pythonanalysisget_cdg), [`get_ddg`](#pythonanalysisget_ddg) | `program_dependency_graph` |
+| Find the value that a name refers to in a callable | [`resolve_value`](#pythonanalysisresolve_value) | `system_dependency_graph` |
+| Slice a value | [`slice_backward`](#pythonanalysisslice_backward), [`slice_forward`](#pythonanalysisslice_forward) | `system_dependency_graph` |
+| Check whether a value reaches a call | [`flows_to_call`](#pythonanalysisflows_to_call), [`flows_to_argument`](#pythonanalysisflows_to_argument) | `system_dependency_graph` |
+| Show how a value reaches another value | [`paths_between`](#pythonanalysispaths_between) | `system_dependency_graph` |
+| Check many sources against many sinks | [`taint`](#pythonanalysistaint) | `system_dependency_graph` |
+
+For the result types of the 2.0 methods (`SliceNode`, `Slice`, `EdgePage`, `FlowPaths`
+and `TaintResult`), see [Results and errors](/reference/python-api/results/).
+
+## Configure the backend
+
+### The local backend
+
+To tune the local backend, pass a `PyCodeAnalyzerConfig` as `backend=`:
 
 ```python
 from cldk import CLDK
@@ -48,69 +400,141 @@ from cldk.analysis import AnalysisLevel
 from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
 
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
     backend=PyCodeAnalyzerConfig(use_ray=True),
 )
 ```
 
-**Analysis levels.** The `analysis_level` argument controls how much CLDK computes. `AnalysisLevel.symbol_table`, the default, populates classes, methods, and fields. `AnalysisLevel.call_graph` adds the call graph that `get_call_graph`, `get_callers`, and `get_callees` need. CLDK 2.0 adds `AnalysisLevel.program_dependency_graph` for dataflow inside each callable, and `AnalysisLevel.system_dependency_graph` for dataflow across call boundaries. See [Dataflow graphs](/guides/dataflow/).
+[`PyCodeAnalyzerConfig`](/reference/python-api/core/#pycodeanalyzerconfig) has two
+fields:
 
-## Worked example
+- `cache_dir` (default `None`) moves the cache. By default, the cache is in
+  `<project>/.codeanalyzer`. Python analysis writes to the `python` directory in it.
+- `use_ray` (default `False`) builds the symbol table of each file on Ray workers. This
+  helps on large projects. The later stages of the analysis run in one process. Ray
+  starts a local instance, and it can log a `WARNING` about token authentication. The
+  analysis still completes.
 
-Using a generic package, `my_pkg`, as the project under analysis.
+To rebuild the cache, pass `eager=True` to `CLDK.python`.
 
-### Get the symbol table
+### A graph in Neo4j
 
-```python
-# Every file -> its PyModule (classes, functions, imports).
-symbol_table = analysis.get_symbol_table()
-print(len(analysis.get_classes()), "classes")
-# 12 classes
+The Neo4j backend reads a graph that codeanalyzer-python wrote to Neo4j. It does not
+analyze code. First, install the Neo4j driver:
+
+```bash
+pip install "cldk[neo4j]"
 ```
 
-`get_symbol_table()` returns `Dict[str, PyModule]` keyed by file path. For a flat
-`Dict[str, PyClass]` keyed by qualified name, call `get_classes()`.
+Write the graph with `canpy`, the command-line tool of codeanalyzer-python. cldk
+installs it. Put the password in the `NEO4J_PASSWORD` environment variable. If you use
+an activated virtual environment, `uv run` or `poetry run`, set `SYSTEM_PYTHON` for
+`canpy` as well.
 
-### Build a call graph
-
-```python
-# Requires analysis_level=AnalysisLevel.call_graph (set during construction).
-cg = analysis.get_call_graph()      # networkx.DiGraph, caller -> callee
-print(cg)                           # DiGraph with N nodes / M edges
+```bash
+export NEO4J_PASSWORD="<your password>"
+canpy --input flask --emit neo4j --neo4j-uri bolt://localhost:7687 --app-name flask
 ```
 
-The graph is a standard `networkx.DiGraph`, so you can traverse it with networkx
-directly. Node identity is backend- and version-dependent, so inspect one node
-once to learn its shape before matching on metadata:
+On Flask, the push can take up to about 2 minutes. The push can print a Neo4j warning that
+the property `content_hash` does not exist. This warning is not an error, and the push
+completes.
+
+Then attach to the graph with a
+[`Neo4jConnectionConfig`](/reference/python-api/core/#neo4jconnectionconfig):
 
 ```python
-node, attrs = next(iter(cg.nodes(data=True)))
-print(node, attrs)                  # learn the node id + attribute keys
-```
+from cldk import CLDK
+from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
 
-### Find who calls a method
-
-```python
-callers = analysis.get_callers(
-    target_class_name="my_pkg.models.User",
-    target_method_declaration="save",
+analysis = CLDK.python(
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="<your password>",
+        application_name="flask",
+    ),
 )
-# -> dict of caller signatures + call-site locations
+print(len(analysis.get_classes()))      # 46
 ```
 
-For module-level functions, pass an empty string or the module name as
-`target_class_name`. Use `get_callees(...)` for the reverse direction (what a
-method calls), and `get_class_call_graph(...)` for a class-scoped slice.
+- `canpy --emit neo4j` always analyzes at full depth, so `analysis_level` has no effect
+  on this backend.
+- `project_path` is optional. If you give it, `application_name` defaults to the name of
+  its directory. If you give neither `project_path` nor `application_name`,
+  `CLDK.python` raises `CodeanalyzerExecutionException`.
+- The graph must come from codeanalyzer-python 1.5.0 or later. When you attach, an
+  empty database, an older graph or a wrong `application_name` raises
+  `GraphSchemaMismatch`.
+- `get_call_graph(roots=...)`, `reaches` and `backward_cone` need Neo4j 5.9 or later.
+- On this backend, `describe()` gives no source text for a node inside a callable. Its
+  `source` is `None`. So with this backend, the slice in the worked example prints
+  `9 True` and no source lines.
+- On Flask, the classes, callers, slices and entrypoints from Neo4j match the local
+  backend.
 
-See the [common tasks](/guides/common-tasks/) guide for more snippets, the
-[concepts](/guides/concepts/) page for how the pieces fit together, and the
-[cocoa](/cocoa/), the Code Context Agent plugin, for exposing these calls to an agent.
+## Errors you will see
+
+Import the CLDK exceptions from `cldk.utils.exceptions`. `AmbiguousName` and
+`SelectorNotInGraph` are subclasses of `ValueError`. The Neo4j driver raises its own
+exceptions from `neo4j.exceptions`.
+
+| Exception | When it occurs | What to do |
+| --- | --- | --- |
+| `RuntimeError` | You use an activated virtual environment, `uv run` or `poetry run`, and you did not set `SYSTEM_PYTHON`. | Set `SYSTEM_PYTHON`. See [Before you start](#before-you-start). |
+| [`CldkInitializationException`](/reference/python-api/results/#cldkinitializationexception) | `project_path` does not exist, or it is not a directory. | Check the path. A relative path starts at the directory that you run Python from. |
+| `ValueError` | `project_path` is missing, or `analysis_level` is not a known name. | Give `project_path`. Use a level name from [How it works](#how-it-works). |
+| `TypeError` | You pass an option by position, or you pass an unknown keyword, for example `eager_analysis=True`. | Pass each option as a keyword. Use the keyword names from the reference below. To rebuild the cache, pass `eager=True`. |
+| [`AmbiguousName`](/reference/python-api/results/#ambiguousname) | A name matches more than one callable or value. The message lists the matches. | Give more of the dotted path. See [Names](#names). |
+| [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph) | A name matches nothing. A local variable name, or a value name below `system_dependency_graph`, also raises it. | Check the spelling. Copy the name from `get_classes()`. For a value name, ask for `system_dependency_graph`. Use a parameter, a global or a closure capture. |
+| [`CodeanalyzerUsageException`](/reference/python-api/results/#codeanalyzerusageexception) | A method that needs control flow or dataflow runs below `program_dependency_graph`. | Ask for the analysis level that the method needs. See [How it works](#how-it-works). |
+| [`GraphSchemaMismatch`](/reference/python-api/results/#graphschemamismatch) | The Neo4j database is empty, its graph is older than codeanalyzer-python 1.5.0, or it has no graph for your `application_name`. | Write the graph again with `canpy`. Use the same name for `--app-name` and `application_name`. |
+| [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception) | You attach to Neo4j with neither `project_path` nor `application_name`. | Pass `application_name`. |
+| `ServiceUnavailable` | No Neo4j server answers at `uri`. | Start the Neo4j server. Check the host and the port in `uri`. |
+| `AuthError` | The Neo4j server refuses the `username` or the `password`. | Check `username` and `password`. |
+
+## Where to go next
+
+- [Python examples](/examples/python/) has more runnable snippets on Flask.
+- [Call graphs](/guides/call-graphs/) explains what Jedi and the def-use linker find,
+  and what they miss.
+- [Dataflow inside one function](/guides/dataflow/#the-api) explains the CFG, the CDG
+  and the DDG.
+- [System dependence](/guides/system-dependence/) explains slices across calls.
+- [Taint analysis](/guides/taint/) explains sources, sinks and sanitizers.
+- [Core concepts](/guides/concepts/) shows how the parts fit together.
+- [codeanalyzer-python](/backends/codeanalyzer-python/) describes the backend.
+
+<!-- Remove each item when the SDK docstring is fixed. -->
+:::caution[Errors in the generated reference]
+The reference below comes from the SDK docstrings of cldk 2.0.0. It has these known
+errors:
+
+- The `get_ddg` and `slice_backward` examples read `page.has_more` and `sl.truncated`. The `slice_backward` text and the `max_nodes` row of `backward_cone` also name `truncated`. Neither attribute exists, so the examples raise `AttributeError`. Use `not page.complete` in place of `page.has_more`, and `not sl.complete` in place of `sl.truncated`. To get the next page, pass `cursor=page.next_cursor`.
+- The `taint` example joins `h.to.name`. The name is `None` on a statement hop, so the join raises `TypeError`. Join `h.to.kind` instead.
+- `get_callers` and `get_callees` say that an empty string or a module name selects a module-level function. An empty string and a dotted module path find nothing. Pass the bare module name, for example `"helpers"`.
+- `get_callers`, `get_callees` and `get_class_call_graph` say that the method name can be a signature. A full signature finds nothing, and `get_class_call_graph` returns `[]`. Pass the short name, for example `"full_dispatch_request"`.
+- `get_callers` and `get_callees` say that the result has call-site locations. It has none. Use `get_callsites_for`.
+- `get_class_call_graph` says that it leaves out the rest of the project graph. It follows calls out of the class. See [The call graph](#the-call-graph).
+- The module text and `get_call_graph` say that the call graph comes from Jedi and PyCG, and the module text names Tree-sitter. codeanalyzer-python 1.5.3 uses neither PyCG nor Tree-sitter. Its call edges come from Jedi and the def-use linker. In `PythonAnalysis`, only `is_parsable` and `get_raw_ast` use Tree-sitter. For the Tree-sitter helpers, see [Tree-sitter utilities](/reference/python-api/treesitter/).
+- The `PythonAnalysis` text says that the analysis runs lazily, and it names `eager_analysis=True`. `CLDK.python` runs the analysis before it returns, and it raises `TypeError` for `eager_analysis=True`. Pass `eager=True`.
+- A note says that, unlike the Java facade, Python analysis has no `source_code` mode. In cldk 2.0, no facade has one. The note also says that Python analysis always needs a project directory. The Neo4j backend needs none.
+- `get_call_graph` says that nodes carry callable metadata and edges carry call-site data. Nodes have no attributes. Read `type`, `weight` and `provenance` from the edges.
+- `get_classes_by_criteria` says that `None` or empty `inclusions` applies no filter. It returns `{}`. Pass `inclusions`, for example `["flask"]`.
+- `get_python_module` says that it accepts an absolute path. It returns `None` for one. Pass the path relative to `project_path`.
+- `callers_of` and `get_method` name `get_all_callers` and `get_all_methods_in_application`. `PythonAnalysis` has neither. Call `get_callers` and `get_methods`.
+:::
 
 ## API reference
 
 The full generated reference for the Python analysis API and data models
 follows.
+
+Many examples in the entries use names from other projects, for example
+`PaymentPortal.invoice_transaction`. Flask does not have these names. Before you
+run an example on Flask, replace each name with a Flask name, for example
+`Flask.make_response`. See [Names](#names).
 
 <!-- CLDK:API:START -->
 

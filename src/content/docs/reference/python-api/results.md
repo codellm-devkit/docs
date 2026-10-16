@@ -3,6 +3,383 @@ title: "Results and errors"
 description: "The result models that the query methods return, the default bounds, and the exceptions."
 ---
 
+The query methods of `JavaAnalysis`, `PythonAnalysis` and `TypeScriptAnalysis` return
+the result models on this page. The three languages use the same models. This page
+also lists the default bounds and the errors that a call can raise.
+
+The outputs on this page come from cldk 2.0.0 on Flask 3.1.3 and Commons CLI 1.7.0.
+One table also shows a result on Zod 4.6.7. To run the samples, clone the two
+projects. Then run the samples from the directory that holds the clones.
+
+```bash
+git clone --depth 1 --branch 3.1.3 https://github.com/pallets/flask.git
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+```
+
+:::note[Before you run the samples]
+- The samples build the analysis at the `system_dependency_graph`
+  [analysis level](/reference/python-api/core/#choose-an-analysis-level). The first run
+  builds the analysis and writes the cache. The next runs read the cache.
+- The first run on each sample project can take several minutes, and it prints nothing
+  while it runs.
+- The first Python run makes a virtual environment under `flask/.codeanalyzer/python/`
+  and installs Flask into it. So it needs network access.
+- The Java samples need `pip install "cldk[java]"`, a JDK 11 or later in `JAVA_HOME`,
+  and Maven on `PATH`.
+- If `CLDK.python()` raises `RuntimeError: Could not find a suitable base Python
+  interpreter`, set `SYSTEM_PYTHON` before the run. On macOS and Linux, run
+  `export SYSTEM_PYTHON="$(python -c 'import sys; print(sys._base_executable)')"`.
+  In Windows PowerShell, run
+  `$env:SYSTEM_PYTHON = (python -c "import sys; print(sys._base_executable)")`.
+  For `uv run` and `poetry run`, see [Install](/reference/python-api/core/#install).
+:::
+
+## Bounded results
+
+Some answers are too large to return in one piece. So `get_cfg`, `get_cdg`, `get_ddg`,
+the slice methods, the path methods and `taint` return a bounded result. If a bounded
+result holds the whole answer, its `complete` field is `True`.
+
+| Result | Returned by | When `complete` is `True` |
+| --- | --- | --- |
+| [`EdgePage`](#edgepage) | `get_cfg`, `get_cdg`, `get_ddg` | This page is the last page, and `next_cursor` is `None`. |
+| [`Slice`](#slice) | `slice_forward`, `slice_backward`, `backward_cone` | `max_nodes` did not cut the set, and `total` is equal to `len(nodes)`. |
+| [`FlowPaths`](#flowpaths) | `paths_between`, `call_paths_between` | `max_paths` did not cut the list. |
+| [`TaintResult`](#taintresult) | `taint` | `max_paths` did not cut a list, and `unresolved` is empty. |
+
+A bounded result also acts as its list of items: the edges, the nodes or the paths.
+You can loop over it with `for item in result`, count the items with `len(result)`, and
+read the first item with `result[0]`. When the result has no items, `bool(result)` is
+`False`.
+
+### Read all pages of an edge set
+
+`total` is the size of the whole edge set. One page holds `page_size` edges or fewer. If
+`complete` is `False`, pass `next_cursor` back as `cursor=` to get the next page.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="flask",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+
+page = analysis.get_ddg("Flask.make_response", page_size=200)
+print(page.total, len(page), page.complete)   # 637 200 False
+
+edges = list(page)
+while not page.complete:
+    page = analysis.get_ddg(
+        "Flask.make_response", page_size=200, cursor=page.next_cursor
+    )
+    edges.extend(page)
+print(len(edges))                             # 637
+```
+
+With the default `page_size` of 10000, these 637 edges fit in one page. Pass a cursor
+back to the same method, for the same callable. A cursor from a different method or
+callable raises `ValueError`.
+
+### Read a slice
+
+A `Slice` is a set of positions. `total` is the size of the whole set, and `nodes` holds
+`max_nodes` positions or fewer. This block continues the previous one:
+
+```python
+sl = analysis.slice_forward("rv", within="Flask.make_response")
+print(sl.total, len(sl), sl.complete)   # 40 40 True
+print(sl.root.kind, sl.root.name)       # parameter rv
+
+capped = analysis.slice_forward("rv", within="Flask.make_response", max_nodes=10)
+print(capped.total, len(capped), capped.complete)   # 40 10 False
+```
+
+`complete` is about `max_nodes` only. A stop at the `depth` limit does not change
+`complete`. The slice methods stop after 5 hops by default. To remove the hop limit,
+pass `depth=None`.
+
+`root` is the start position of the slice. If a slice has more than one start position,
+`root` raises `ValueError`, and you must read `roots`. A `backward_cone` call with two
+or more sinks returns such a slice.
+
+### Default values of the bounds
+
+If you do not pass a bound, the methods use these values from
+`cldk.analysis.commons.bounds`:
+
+| Constant | Value | Parameter | Methods |
+| --- | --- | --- | --- |
+| `DEFAULT_PAGE_SIZE` | `10000` | `page_size` | `get_cfg`, `get_cdg`, `get_ddg` |
+| `DEFAULT_MAX_NODES` | `10000` | `max_nodes` | `slice_forward`, `slice_backward`, `backward_cone` |
+| `DEFAULT_DEPTH` | `5` | `depth` | `slice_forward`, `slice_backward`, `backward_cone` |
+| `DEFAULT_MAX_PATHS` | `10` | `max_paths` | `paths_between`, `call_paths_between`, `taint` |
+
+These methods also take `depth`, but they have no hop limit by default (`depth=None`):
+`reaches`, `flows_to_call`, `flows_to_argument`, `paths_between`, `call_paths_between`
+and `taint`. In `taint`, `max_paths` applies to each pair, not to the whole call.
+
+## Result types
+
+This table lists each result model, the methods that return it, and the fields to read
+first. All three languages return these models.
+
+| Model | Returned by | Read first |
+| --- | --- | --- |
+| [`LocateResult`](#locateresult) | `locate`, and `locate_many` in a list | `callable`, `body`, `source`, `diagnostics` |
+| [`CallableRef`](#callableref) | `LocateResult.callable` | `signature`, `name`, `class_signature` |
+| [`TypeRef`](#typeref) | `LocateResult.type` | `signature`, `name` |
+| [`ModuleRef`](#moduleref) | `LocateResult.module` | `path`, `module_name` |
+| [`BodyRef`](#bodyref) | `LocateResult.body` | `kind`, `span` |
+| [`Span`](#span) | `LocateResult.span`, `BodyRef.span` | `start` and `end` as `(line, column)` |
+| [`Diagnostic`](#diagnostic) | The `diagnostics` lists, and `TaintResult.unresolved` | `code`, `message` |
+| [`SliceNode`](#slicenode) | `resolve_callable`, `resolve_value`, and in a list `callers_of`, `callees_of`, `describe` | `callable`, `kind`, `name`, `file`, `line` |
+| [`Slice`](#slice) | `slice_forward`, `slice_backward`, `backward_cone` | `nodes`, `total`, `complete`, `root` |
+| [`EdgePage`](#edgepage) | `get_cfg`, `get_cdg`, `get_ddg` | `edges`, `total`, `next_cursor`, `complete` |
+| [`FlowPaths`](#flowpaths) | `paths_between`, `call_paths_between` | `paths`, `complete` |
+| [`FlowPath`](#flowpath) | The items of `FlowPaths` and `TaintResult` | `hops`, `weakest` |
+| [`PathHop`](#pathhop) | The items of `FlowPath.hops` | `frm`, `to`, `via`, `var`, `prov` |
+| [`TaintResult`](#taintresult) | `taint` | `paths`, `exhausted`, `unresolved`, `complete` |
+| [`EntrypointCoverage`](#entrypointcoverage) | `get_entrypoint_coverage` | `frameworks_detected`, `unresolved`, `errors`, `diagnostics` |
+
+The nodes of a slice or a path have no source text (`source` is `None`). To get the
+text of the body nodes, for example `statement`, `call` and `branch` nodes, pass the
+nodes to `describe`. The [ports](/guides/system-dependence/#the-four-ports-of-a-call)
+of a callable or a call have no text, so `describe` leaves their `source` as `None`.
+The ports are the `parameter`, `global`, `capture` and `argument` nodes, and the
+`return` nodes whose `ref` holds `formal_out` or `actual_out`. Only Python has `global`
+and `capture` nodes. The root of the slice sample above is a `parameter` node.
+
+### What the `locate` fields hold
+
+The fields of a `LocateResult` hold different values in each language. This table
+shows one `locate` result for each language, at the `system_dependency_graph` analysis
+level:
+
+- Python: `locate("src/flask/app.py", 939)` on Flask 3.1.3.
+- Java: `locate("src/main/java/org/apache/commons/cli/DefaultParser.java", 548)` on
+  Commons CLI 1.7.0.
+- TypeScript: `locate("src/v3/helpers/parseUtil.ts", 73)` on Zod 4.6.7, with
+  `project_path="zod/packages/zod"`.
+
+| Field | Python | Java | TypeScript |
+| --- | --- | --- | --- |
+| `callable.signature` | `src.flask.app.Flask.finalize_request` | `handleToken(java.lang.String)` | `src/v3/helpers/parseUtil.addIssueToContext` |
+| `callable.class_signature` | `src.flask.app.Flask` | `org.apache.commons.cli.DefaultParser` | `None` |
+| `type.signature` | `src.flask.app.Flask` | `org.apache.commons.cli.DefaultParser` | `type` is `None` |
+| `module.module_name` | `app` | `org.apache.commons.cli` | `None` |
+| `span.start`, `span.end` | `(922, 4)`, `(951, 23)` | `(543, 5)`, `(561, 5)` | `(72, 1)`, `(86, 2)` |
+| `body.kind`, `body.span.start` | `call`, `(939, 19)` | `statement`, `(548, 13)` | `call`, `(73, 23)` |
+
+Lines start at 1 in all three languages. Columns start at 0 on Python, and at 1 on
+Java and TypeScript. The `Span` and `LocateResult` references below say that columns
+start at 0. On Java and TypeScript, this is not correct. With the local backend, use
+`span.bytes` to cut the text of a span out of the file. In all three languages,
+`data[start:end]` is the text, where `data` holds the bytes of the file.
+
+### Java: make the callable key
+
+On Python and TypeScript, `CallableRef.signature` is the full key that
+`get_method_bodies` takes. On Java, `signature` holds only the member signature, and
+`class_signature` holds the type. To make the Java key, join the two with a dot:
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+
+hit = analysis.locate("src/main/java/org/apache/commons/cli/DefaultParser.java", 548)
+ref = hit.callable
+print(ref.signature)         # handleToken(java.lang.String)
+print(ref.class_signature)   # org.apache.commons.cli.DefaultParser
+
+print(len(analysis.get_method_bodies([ref.signature])))   # 0
+key = f"{ref.class_signature}.{ref.signature}"
+print(len(analysis.get_method_bodies([key])))             # 1
+```
+
+With the member signature alone, `get_method_bodies` returns an empty result and shows
+no error. The `LocateResult` reference below says that `callable.signature` is the key
+for `get_method_bodies`. On Java, this is not correct.
+
+## Read a taint result
+
+`taint()` searches from each source to each sink in one call. For each pair, the result
+holds one of three answers.
+
+| You see | It means |
+| --- | --- |
+| A path in `paths` that joins the pair | The graph holds a flow from the source to the sink. `weakest` tells you how certain the path is. |
+| The pair in `exhausted` | The search went to the end of the graph and found no path. |
+| The pair in neither list | There is no answer for the pair. You passed `depth`, or `unresolved` names the pair. |
+
+`complete` is one flag for the whole call. If `complete` is `False`, read `unresolved`
+to find the cause. If `unresolved` is empty, `max_paths` cut the paths of a pair. Even
+when `complete` is `True`, a pair in `exhausted` does not prove that the program has no
+flow. The next section tells you why.
+
+This sample tests one source against two sinks:
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+
+result = analysis.taint(
+    sources=[("token", "DefaultParser.handleToken")],
+    sinks=[
+        ("token", "DefaultParser.handleLongOption"),
+        ("width", "HelpFormatter.setWidth"),
+    ],
+)
+print(len(result.paths))     # 1
+print(result.exhausted)      # [('token', 'width')]
+print(result.complete)       # True
+print(result.unresolved)     # []
+
+path = result.paths[0]
+print(path.hops[-1].to.callable)
+# org.apache.commons.cli.DefaultParser.handleLongOption(java.lang.String)
+print(path.weakest.via, path.weakest.prov)   # data ['ssa']
+```
+
+The path joins `token` in `handleToken` to `token` in `handleLongOption`. The second
+pair is in `exhausted`, because no path in the graph joins `token` to `width`.
+
+### `exhausted` describes the graph, not the program
+
+A pair in `exhausted` tells you that the graph holds no path for it. It does not prove
+that the program has no flow. Know these limits:
+
+- If you pass `depth`, `exhausted` is always empty.
+- In cldk 2.0.0, no backend adds an `unresolved_dispatch` diagnostic. The only code
+  that can be in `unresolved` is `degenerate_pair`. It marks a pair whose source and
+  sink are the same position, and CLDK skips that pair. So a flow through a call that
+  the analyzer did not resolve can put its pair in `exhausted`, with `complete` set to
+  `True`. The `TaintResult` and `Diagnostic` references below name both codes, but only
+  `degenerate_pair` occurs.
+- On Python, a pair can be in `exhausted` although the program has a flow. For example,
+  on line 939 of `src/flask/app.py`, `finalize_request` passes `rv` to `make_response`.
+  But
+  `taint(sources=[("rv", "Flask.finalize_request")], sinks=[("rv", "Flask.make_response")])`
+  puts this pair in `exhausted`, with `complete` set to `True`. The result is the same on
+  codeanalyzer-python 1.5.3, which cldk 2.0.0 pins, and on 1.5.4. Version 1.5.4 fixes a
+  defect of 1.5.3 that stops some value flow at a call
+  ([codeanalyzer-python#220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)),
+  but it does not link this flow. For the flows that 1.5.4 links, and for the install
+  steps, see
+  [What the pinned Python backend does not link](/guides/system-dependence/#what-the-pinned-python-backend-does-not-link).
+
+For the sanitizers and a longer example, see [Taint analysis](/guides/taint/).
+
+## Errors you can see
+
+CLDK raises six exceptions of its own. Import them from `cldk.utils.exceptions`:
+
+```python
+from cldk.utils.exceptions import (
+    AmbiguousName,
+    CldkInitializationException,
+    CodeanalyzerExecutionException,
+    CodeanalyzerUsageException,
+    GraphSchemaMismatch,
+    SelectorNotInGraph,
+)
+```
+
+| Exception | Base class | When CLDK raises it | What to do |
+| --- | --- | --- | --- |
+| [`CldkInitializationException`](#cldkinitializationexception) | `Exception` | `project_path` does not exist or is not a directory, or `CLDK.java()` gets no `project_path`. The 1.x call `CLDK(language=...).analysis(source_code=...)` also raises it, because cldk 2.0 has no `source_code` mode. | Pass the path of an existing project directory. For one string of code, use the [tree-sitter utilities](/reference/python-api/treesitter/). |
+| [`CodeanalyzerUsageException`](#codeanalyzerusageexception) | `Exception` | A dataflow method, for example `get_cfg`, runs on an analysis below `program_dependency_graph`. On Java, a dataflow method also raises it for an implicit constructor, for example `BasicParser.<init>()`, because it has no body. | Build the analysis again at `system_dependency_graph`, as the message says. On TypeScript, also pass `eager=True` once, or the old analysis level comes back. An implicit constructor has no dataflow, so use a callable that the source declares. |
+| [`CodeanalyzerExecutionException`](#codeanalyzerexecutionexception) | `Exception` | The analyzer or a backend fails. [Causes of `CodeanalyzerExecutionException`](#causes-of-codeanalyzerexecutionexception) lists the causes. | Read the message. Then find the cause in that list. |
+| [`SelectorNotInGraph`](#selectornotingraph) | `ValueError` | A name, a path, or a value of `paths=`, `module=` or `roots=` matches nothing in the analysis. Below `system_dependency_graph`, Python and TypeScript also raise it for a correct value name. | Copy the name from the analysis, for example from `get_classes()`. If the name is correct, check the [analysis level](#errors-from-a-low-analysis-level). `missing` lists the values that matched nothing. |
+| [`AmbiguousName`](#ambiguousname) | `ValueError` | A name matches more than one callable or value. | Use one name from `candidates`. `resolve_callable`, `callers_of` and `callees_of` also take `in_class=` and `in_module=`. `get_cfg`, `get_cdg` and `get_ddg` take only `in_class=`, although the message also names `in_module=`. For a method that takes `within=`, pass a longer `within=`. |
+| [`GraphSchemaMismatch`](#graphschemamismatch) | `RuntimeError` | A Neo4j backend connects to a graph that it cannot read. For example, the database is empty, an old analyzer emitted the graph, or `application_name` is wrong. | Make sure that `application_name` is correct. Then emit the graph again with codeanalyzer-python 1.5.0 or later, codeanalyzer-java 3.2.0 or later, or codeanalyzer-typescript 1.5.2 or later. |
+
+`SelectorNotInGraph` and `AmbiguousName` carry the names as data. This sample reads them:
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.utils.exceptions import AmbiguousName, SelectorNotInGraph
+
+analysis = CLDK.python(
+    project_path="flask",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+
+try:
+    analysis.resolve_callable("make_response")
+except AmbiguousName as e:
+    print(e.candidates)
+# ['src.flask.app.Flask.make_response', 'src.flask.helpers.make_response']
+
+try:
+    analysis.get_symbol_table(paths=["src/flask/nope.py"])
+except SelectorNotInGraph as e:
+    print(e.kind, e.missing, e.requested)
+# paths ['src/flask/nope.py'] 1
+```
+
+### Causes of `CodeanalyzerExecutionException`
+
+| Cause | What to do |
+| --- | --- |
+| You call `CLDK.java()`, and the `java` extra is not installed. | Run `pip install "cldk[java]"`. |
+| You pass a [`Neo4jConnectionConfig`](/reference/python-api/core/#neo4jconnectionconfig), and the `neo4j` driver is not installed. | Run `pip install "cldk[neo4j]"`. |
+| The `Neo4jConnectionConfig` has no `application_name`, and you pass no `project_path`. | Pass `application_name`. If you pass `project_path`, `application_name` defaults to the name of the project directory. |
+| `<project>/.codeanalyzer` holds a Java cache from cldk 1.5.0. | Pass `eager=True` once, or delete the `.codeanalyzer` directory. The message names `eager_analysis=True`, but `CLDK.java()` has no such keyword. |
+| You pass `target_files=` to `CLDK.java()`. codeanalyzer-java 3.3.3 rejects it, and the message shows only the `java` command line. | Leave out `target_files=`. |
+| On Java, a value method, for example `slice_forward` or `taint`, runs on a `program_dependency_graph` analysis. | Build the analysis at `system_dependency_graph`. See [Errors from a low analysis level](#errors-from-a-low-analysis-level). |
+| You call a Java CRUD method, for example `get_all_crud_operations()`. | cldk 2.0.0 has no replacement for these methods. |
+
+### Errors from a low analysis level
+
+Some errors come from an analysis level that is too low:
+
+- Below `program_dependency_graph`, the dataflow methods, for example `get_cfg` and
+  `slice_forward`, raise `CodeanalyzerUsageException`. On Python and TypeScript,
+  `resolve_value` and `taint` raise `SelectorNotInGraph` instead.
+- At `program_dependency_graph`, on Python and TypeScript, the methods that take a value
+  name raise `SelectorNotInGraph`, even for a correct name. An example message is
+  `1 of 1 value not in graph: 'rv'`. On Java, `slice_forward`, `flows_to_call`,
+  `flows_to_argument`, `paths_between` and `taint` raise
+  `CodeanalyzerExecutionException`, and `slice_backward` returns an empty slice. The
+  Java message names codeanalyzer-java 3.0.3, but the cause is the analysis level.
+
+For these methods, build the analysis at `system_dependency_graph`.
+
+### Standard Python errors
+
+Some mistakes raise a standard Python error. `SelectorNotInGraph` and `AmbiguousName`
+are subclasses of `ValueError`, so an `except ValueError` block also catches them.
+
+| Error | Examples | What to do |
+| --- | --- | --- |
+| `ValueError` | An unknown `analysis_level` name. `page_size=0` or `depth=0`. A `cursor` from a different method or callable, or a string that is not a cursor. `root` on a slice with more than one root. `CLDK.python()` with no `project_path`. | Use a level name from the message. Pass a bound of 1 or more. Pass the `next_cursor` from the same method and callable. Read `roots` instead of `root`. Pass `project_path`. |
+| `TypeError` | A keyword-only option given by position, for example `slice_forward("rv", "Flask.make_response")`. One string for `paths=`, `roots=`, `sources=` or `sinks=`, where the method takes a list. `CLDK.typescript()` with no `project_path`. | Give the option by keyword, for example `within="Flask.make_response"`. Pass a list, for example `paths=["src/flask/app.py"]`. For `sources=` and `sinks=`, pass a list of `(name, within)` pairs. Pass `project_path`. |
+| `KeyError` | `get_source()` with a node id that names nothing. On Java, `get_java_compilation_unit()` with a path that the analysis does not hold. | Pass a `node_id` or a callable `ref` from a result. Copy the path from `get_symbol_table()`. |
+| `neo4j.exceptions.ServiceUnavailable` | No Neo4j server answers at the `uri` of `Neo4jConnectionConfig`. | Start the Neo4j server, or correct the `uri`. |
+
+## API reference
+
+The reference below comes from the docstrings of cldk 2.0.0.
+
+:::note[About the docstrings below]
+Some docstrings below hold design notes for the SDK maintainers, for example labels such
+as E5 or D7 and measurements on other applications. You do not need these notes to use
+the API. The sections above contain the facts that you need.
+:::
+
 <!-- CLDK:API:START -->
 
 <!-- AUTO-GENERATED by scripts/gen_api_docs.py, do not edit by hand. -->

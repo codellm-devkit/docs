@@ -3,108 +3,504 @@ title: "Java API"
 description: "Program analysis for Java and related data models."
 ---
 
-Java is the most complete CLDK analysis. `JavaAnalysis` gives you a typed symbol
-table, a call graph, subclass and interface queries, and comments.
-[COCOA](/cocoa/) builds on these calls.
+`CLDK.java()` returns a `JavaAnalysis` object for a Java project. It gives you the
+symbol table, the call graph, the class hierarchy and the comments. CLDK 2.0 adds
+control flow and data flow inside each method, slices, value flow across calls,
+taint, entrypoint overviews and coverage, and the project artifacts. The analysis
+level that you ask for decides which of these you get.
 
-## Overview
-
-`CLDK.java(project_path=...)` returns a `JavaAnalysis` object backed by the
-[codeanalyzer-java](/backends/codeanalyzer-java/) backend, which uses WALA. It
-builds the symbol table, the call graph, the subclass and interface
-relationships, and the comments. In CLDK 2.0 the backend is the optional extra
-`cldk[java]`, and its wheel carries the jar and its own JVM. Caching is on by
-default under `<project>/.codeanalyzer`.
+The analyzer is [codeanalyzer-java](/backends/codeanalyzer-java/). It parses the
+source with JavaParser for the symbol table and the declared call edges. These edges
+come from the source alone, so they need no build. The analyzer also computes the
+control flow and data flow inside each method, and the parameter edges across calls,
+from the source. It runs WALA on the compiled classes to add the RTA (rapid type
+analysis) call edges and, at `system_dependency_graph`, the alias-aware (points-to)
+data dependence.
 
 ```mermaid
 flowchart LR
     P[Java project] --> A["CLDK.java(project_path)"]
-    A --> S[Symbol table]
-    A --> CG[Call graph]
-    A --> H[Subclasses & interfaces]
-    A --> CM[Comments]
+    A --> S["symbol_table: classes, methods, fields"]
+    S --> CG["call_graph: adds who calls whom"]
+    CG --> PDG["program_dependency_graph: adds flow inside a method"]
+    PDG --> SDG["system_dependency_graph: adds flow across calls, taint"]
 ```
 
-**Analysis levels.** `analysis_level` controls how much CLDK computes.
-`AnalysisLevel.symbol_table`, the default, populates classes, methods, and
-fields. `AnalysisLevel.call_graph` adds the call graph that `get_call_graph`,
-`get_callers`, and `get_callees` need. CLDK 2.0 adds
-`AnalysisLevel.program_dependency_graph` and
-`AnalysisLevel.system_dependency_graph` for dataflow. See
-[Dataflow graphs](/guides/dataflow/). If you need call relationships, set the
-level when you build the analysis:
+## Before you start
 
-```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
+### Install the Java extra
 
-analysis = CLDK.java(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-)
+```bash
+pip install "cldk[java]"
 ```
 
-To run against a read-only Neo4j backend instead of the in-process backend, pass
-a `Neo4jConnectionConfig` as `backend=`:
+CLDK runs on Python 3.11 to 3.14. For details, see
+[Supported Python versions](/installing/#supported-python-versions). The `java`
+extra installs codeanalyzer-java 3.3.3, which carries the analyzer and its own Java
+runtime. Keep the quotes, because zsh reads the brackets as a file pattern. For the
+[Neo4j backend](#neo4j-backend), install `"cldk[java,neo4j]"`. For uv and Poetry,
+see [Installing CLDK](/installing/).
 
-```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+If you install `cldk` without the extra, `CLDK.java()` raises
+`CodeanalyzerExecutionException` and tells you to install `"cldk[java]"`.
 
-analysis = CLDK.java(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-    backend=Neo4jConnectionConfig(
-        uri="bolt://localhost:7687",
-        username="neo4j",
-        password="password",
-        database="neo4j",
-        application_name="commons-cli",
-    ),
-)
+### Install a JDK and Maven for `call_graph` and up
+
+The `symbol_table` level runs on the bundled Java runtime and needs nothing else.
+From `call_graph` up, the analyzer compiles the project. For that, it needs:
+
+- a JDK 11 or later with `javac`
+- Maven or Gradle on `PATH`, or a wrapper (`mvnw`, `gradlew`) in the project
+
+Maven uses the JDK in `JAVA_HOME`. If `JAVA_HOME` is not set, Maven uses the
+`java` command on `PATH`. If `JAVA_HOME` points to a Java runtime without
+`javac`, the build fails, even with a JDK on `PATH`.
+
+The build writes its output into the project directory, for example `target/`.
+
+If the JDK or the build tool is missing, the analysis still succeeds. But the call
+graph keeps only the declared call edges, and CLDK logs a warning. Without Maven,
+the warning is:
+
+```text
+codeanalyzer-java did not fully compute analysis_level=call_graph: RTA call graph unavailable (NullPointerException: null); emitting declared edges only
 ```
+
+If Maven is available but the JDK is missing, the warning names
+`RuntimeException: No application classes found.` instead. In both cases, the cause
+is the missing tool. The warning names the analysis level that you ask for. At
+`system_dependency_graph`, a second warning names
+`L4 semantic ddg unavailable (WALA build failed)`. On Commons CLI, the call graph
+then has 648 nodes and 1950 edges. The full call graph has 652 nodes and 1980
+edges with JDK 17, or 1976 edges with JDK 21 or 25.
+
+`analysis.backend.analyzer_diagnostics` holds the same messages. An empty list there
+means that the analyzer reported no problem. `None` means that CLDK has no record of
+what the analyzer reported, for example for an `analysis.json` that you copied into
+the cache. In that case, CLDK logs a warning that starts with
+`codeanalyzer-java recorded no degradation verdict`.
+
+To install the tools, see
+[Language-specific dependencies](/installing/#language-specific-dependencies). After
+you install them, pass `eager=True` once, because the cache keeps the reduced
+analysis.
+
+### Get the sample project
+
+The examples use Apache Commons CLI 1.7.0:
+
+```bash
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+```
+
+Git can print
+`warning: refs/tags/rel/commons-cli-1.7.0 4c85f63010410c883ff8167f7ed9dde20641855e is not a commit!`
+and a note about a detached HEAD. You can ignore both.
+
+Run Python from the directory that contains `commons-cli`. A relative
+`project_path` starts at the current directory.
+
+### Test sources are part of the analysis
+
+Java analysis includes the test sources under `src/test/`, and you cannot turn this
+off. Python and TypeScript analysis skip tests. On Commons CLI, 44 of the 75 types
+come from `src/test/`. The [worked example](#build-the-analysis) shows how to find
+them.
+
+## Analysis levels
+
+Pass `analysis_level` as an [`AnalysisLevel`](/reference/python-api/core/#analysislevel)
+member, or as its name in a string, for example `"call_graph"`. The default is
+`symbol_table`. An unknown name raises `ValueError`.
+
+| Level | Analyzer flag | Adds | Methods that need it |
+| --- | --- | --- | --- |
+| `symbol_table` (default) | `-a 1` | classes, methods, fields, imports, comments, artifacts | the symbol-table methods |
+| `call_graph` | `-a 2` | the call graph | `get_call_graph`, `get_callers`, `get_callees`, `callers_of`, `callees_of`, `reaches`, `backward_cone`, `call_paths_between`, `get_class_call_graph`, `get_calling_lines` |
+| `program_dependency_graph` | `-a 3` | control flow, control dependence and data dependence inside each method | `get_cfg`, `get_cdg`, `get_ddg` |
+| `system_dependency_graph` | `-a 4` | dependence across calls | `slice_backward`, `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` |
+
+In CLDK 1.5.0, Java analysis stopped at level 2 (`call_graph`). CLDK 2.0 passes each
+level to the analyzer, so levels 3 and 4 work.
+
+:::caution[Below `call_graph`, the call graph is empty]
+At the default `symbol_table` level, the call-graph methods do not raise.
+`get_call_graph()` has 0 nodes, `get_callers()` returns `{}`, `callers_of()` returns
+`[]` and `reaches()` returns `False`. Ask for `call_graph` or deeper before you use
+them. The exception is `using_symbol_table=True` on `get_callers`, `get_callees` and
+`get_class_call_graph`. It reads the call sites from the symbol table, so it answers
+at `symbol_table`.
+:::
+
+Below `program_dependency_graph`, the methods for control flow and data flow raise
+`CodeanalyzerUsageException`. At `program_dependency_graph`, `get_cfg`, `get_cdg` and
+`get_ddg` answer. But `slice_forward`, `paths_between`, `flows_to_call`,
+`flows_to_argument` and `taint` raise `CodeanalyzerExecutionException`, and
+`slice_backward` returns an empty slice. For these six methods, ask for
+`system_dependency_graph`.
+
+At `system_dependency_graph`, `get_ddg` also returns the edges to and from the call
+arguments, the call results, the parameters and the return value. On Commons CLI,
+`get_ddg` for `OptionBuilder.create(java.lang.String)` returns 26 edges, against 10
+at `program_dependency_graph`.
+
+For the ideas behind the levels, see [Call graphs](/guides/call-graphs/),
+[Dataflow inside one function](/guides/dataflow/),
+[System dependence](/guides/system-dependence/) and
+[Taint analysis](/guides/taint/).
+
+## Names of classes and methods
+
+The `JavaAnalysis` methods take class and method names in a fixed form. A name in
+another form often returns an empty result and no error. Copy names from the
+analysis, or resolve them first.
+
+| Name | Form | Example |
+| --- | --- | --- |
+| Class | fully qualified, with nested classes joined by `.` | `org.apache.commons.cli.Option.Builder` |
+| Method | signature with fully qualified parameter types | `create(java.lang.String)`, not `create(String)` |
+| Constructor | `<init>` with the parameter types | `<init>(java.lang.String, java.lang.String)` |
+| Call-graph node | `"<type fqn>.<signature>"`, where fqn is the fully qualified name of the type | `org.apache.commons.cli.OptionBuilder.create(java.lang.String)` |
+
+`get_methods_in_class()` leaves out constructors. Use `get_constructors()` for them.
+
+[`resolve_callable`](#javaanalysisresolve_callable) finds the method for a partial
+name, for example `"withLongOpt"` or `"OptionBuilder.create(java.lang.String)"`. It
+returns a [`SliceNode`](/reference/python-api/results/#slicenode), and its
+`callable` field holds the full node name. It does not expand short parameter types
+such as `create(String)`. If no method matches the name, it raises
+`SelectorNotInGraph`. If more than one method matches, it raises `AmbiguousName`.
 
 ## Worked example
 
-Using [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) as the
-sample project.
+The outputs come from cldk 2.0.0 and codeanalyzer-java 3.3.3 on Commons CLI 1.7.0,
+with JDK 17 and Maven 3.9. With JDK 21 or 25, the call graph has 1976 edges, not
+1980.
 
-### Get the symbol table
-
-```python
-# Every file -> its compilation unit (classes, methods, fields).
-symbol_table = analysis.get_symbol_table()
-print(len(analysis.get_classes()), "classes")
-# 23 classes
-```
-
-### Build a call graph
+### Build the analysis
 
 ```python
-import networkx as nx
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
 
-cg = analysis.get_call_graph()      # networkx.DiGraph, caller -> callee
-print(cg)                           # DiGraph with N nodes / M edges
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+classes = analysis.get_classes()
+tests = [name for name in classes if analysis.get_java_file(name).startswith("src/test/")]
+print(len(analysis.get_symbol_table()), "files")  # 65 files
+print(len(classes), "types,", len(tests), "from src/test")  # 75 types, 44 from src/test
 ```
+
+The first run builds the project with Maven, so it takes the most time. On Commons
+CLI, it takes about one to two minutes, and the analyzer prints nothing while it
+runs. Later runs read the cache and take a few seconds. `get_classes()` returns all
+declared types: classes, interfaces and nested classes, from main and test code.
+
+### Read the call graph
+
+This block continues the previous one.
+
+```python
+cg = analysis.get_call_graph()
+print(cg)  # DiGraph with 652 nodes and 1980 edges
+
+key = "org.apache.commons.cli.OptionBuilder.create(java.lang.String)"
+detail = cg.nodes[key]["method_detail"]
+print(detail.klass)  # org.apache.commons.cli.OptionBuilder
+print(detail.method_declaration)
+# public static Option create(final String opt) throws IllegalArgumentException
+```
+
+`get_call_graph()` returns a `networkx.DiGraph`. Each node is a
+`"<type fqn>.<signature>"` string. Its `method_detail` attribute is a
+[`JMethodDetail`](#jmethoddetail) with the class, the [`JCallable`](#jcallable) and
+the declaration. Each edge goes from the caller to the callee.
 
 ### Find who calls a method
+
+This block continues the previous one.
 
 ```python
 callers = analysis.get_callers(
     target_class_name="org.apache.commons.cli.OptionBuilder",
-    target_method_declaration="create(String)",
+    target_method_declaration="create(java.lang.String)",
 )
-# -> dict of caller method signatures + call-site locations
+print(len(callers["caller_details"]))  # 16
+for caller in callers["caller_details"][:3]:
+    method = caller["caller_method"]
+    print(method.klass, method.method.signature, caller["calling_lines"])
+# org.apache.commons.cli.OptionBuilder create() [79]
+# org.apache.commons.cli.OptionBuilder create(char) [90]
+# org.apache.commons.cli.AbstractParserTestCase testMissingRequiredGroup() [347, 348, 353]
+
+for node in analysis.callers_of("create(java.lang.String)", in_class="OptionBuilder")[:2]:
+    print(node.callable, node.line)
+# org.apache.commons.cli.OptionBuilder.create() 73
+# org.apache.commons.cli.OptionBuilder.create(char) 89
 ```
 
-See the [common tasks](/guides/common-tasks/) guide for more snippets, and the
-[cocoa](/cocoa/), the Code Context Agent plugin, for exposing these calls to an agent.
+`get_callers()` returns a dictionary with two keys:
+
+- `target_method`: the `JMethodDetail` of the method that you asked about
+- `caller_details`: one entry for each caller, with `caller_method` (a
+  `JMethodDetail`) and `calling_lines` (the lines of the calls, in the file of the
+  caller)
+
+If the name is not a call-graph node, `get_callers()` returns `{}` and raises no
+error. [`get_callees()`](#javaanalysisget_callees) has the same shape, with the keys
+`source_method` and `callee_details`. Each entry in `callee_details` has
+`callee_method` and `calling_lines`.
+
+The 2.0 method [`callers_of()`](#javaanalysiscallers_of) returns
+[`SliceNode`](/reference/python-api/results/#slicenode) objects. In each object,
+`line` is the first line of the calling method, not the line of the call. For
+example, `create()` starts at line 73 and calls `create(java.lang.String)` at line
+79. If no method matches the name, `callers_of()` raises `SelectorNotInGraph`. If
+more than one method matches, it raises `AmbiguousName`.
+
+### Follow a value across calls
+
+This block makes a new analysis at `system_dependency_graph`. The cache holds a lower
+level, so CLDK runs the analyzer again. On Commons CLI, this run takes about one
+minute or longer.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+create = "org.apache.commons.cli.OptionBuilder.create(java.lang.String)"
+option_init = "org.apache.commons.cli.Option.<init>(java.lang.String, java.lang.String)"
+
+result = analysis.taint(sources=[("opt", create)], sinks=[("option", option_init)])
+print(result.complete, len(result.paths))  # True 1
+for hop in result.paths[0].hops:
+    print(hop.via, "->", hop.to.kind, hop.to.name)
+# data -> statement None
+# data -> argument None
+# argument -> parameter option
+```
+
+The path starts at the parameter `opt` of `create(java.lang.String)`. It goes to the
+statement `option = new Option(opt, description)`, then to the argument of that
+constructor call. It ends at the constructor parameter `option`. On this path, the
+statement and the argument have no name, so `hop.to.name` is `None` for them. For the
+fields of the result, see [`TaintResult`](/reference/python-api/results/#taintresult).
+
+For more Commons CLI snippets, see [Java examples](/examples/java/).
+
+## What you can ask
+
+Each method links to its entry in the [API reference](#api-reference). The last
+column gives the lowest analysis level at which the methods answer.
+
+| Family | Methods | Lowest level |
+| --- | --- | --- |
+| Symbol table | [`get_symbol_table`](#javaanalysisget_symbol_table), [`get_compilation_units`](#javaanalysisget_compilation_units), [`get_java_compilation_unit`](#javaanalysisget_java_compilation_unit), [`get_java_file`](#javaanalysisget_java_file), [`get_application_view`](#javaanalysisget_application_view), [`get_classes`](#javaanalysisget_classes), [`get_class`](#javaanalysisget_class), [`get_classes_by_criteria`](#javaanalysisget_classes_by_criteria), [`get_interfaces`](#javaanalysisget_interfaces), [`get_enums`](#javaanalysisget_enums), [`get_enum_members`](#javaanalysisget_enum_members), [`get_records`](#javaanalysisget_records), [`get_nested_classes`](#javaanalysisget_nested_classes), [`get_methods`](#javaanalysisget_methods), [`get_methods_in_class`](#javaanalysisget_methods_in_class), [`get_constructors`](#javaanalysisget_constructors), [`get_method`](#javaanalysisget_method), [`get_method_parameters`](#javaanalysisget_method_parameters), [`get_fields`](#javaanalysisget_fields), [`get_imports`](#javaanalysisget_imports), [`get_variables`](#javaanalysisget_variables) | `symbol_table` |
+| Class hierarchy | [`get_class_hierarchy`](#javaanalysisget_class_hierarchy), [`get_sub_classes`](#javaanalysisget_sub_classes), [`get_extended_classes`](#javaanalysisget_extended_classes), [`get_implemented_interfaces`](#javaanalysisget_implemented_interfaces) | `symbol_table` |
+| Addressing | [`locate`](#javaanalysislocate), [`locate_many`](#javaanalysislocate_many), [`resolve_callable`](#javaanalysisresolve_callable), [`resolve_value`](#javaanalysisresolve_value), [`get_source`](#javaanalysisget_source), [`describe`](#javaanalysisdescribe) | `symbol_table` |
+| Bulk reads | [`get_callables_overview`](#javaanalysisget_callables_overview), [`get_method_bodies`](#javaanalysisget_method_bodies), [`get_callsites_for`](#javaanalysisget_callsites_for), [`get_call_targets`](#javaanalysisget_call_targets), [`get_decorated_callables`](#javaanalysisget_decorated_callables), [`get_methods_with_annotations`](#javaanalysisget_methods_with_annotations) | `symbol_table` |
+| Entrypoints and tests | [`get_entrypoints`](#javaanalysisget_entrypoints), [`get_entrypoint_classes`](#javaanalysisget_entrypoint_classes), [`get_entrypoint_coverage`](#javaanalysisget_entrypoint_coverage), [`get_entry_point_methods`](#javaanalysisget_entry_point_methods), [`get_entry_point_classes`](#javaanalysisget_entry_point_classes), [`get_test_methods`](#javaanalysisget_test_methods) | `symbol_table` |
+| Comments | [`get_comments_in_a_class`](#javaanalysisget_comments_in_a_class), [`get_comments_in_a_method`](#javaanalysisget_comments_in_a_method), [`get_comment_in_file`](#javaanalysisget_comment_in_file), [`get_all_comments`](#javaanalysisget_all_comments), [`get_all_docstrings`](#javaanalysisget_all_docstrings) | `symbol_table` |
+| Artifacts and configuration | [`get_artifacts`](#javaanalysisget_artifacts), [`get_dependencies`](#javaanalysisget_dependencies), [`get_config_keys`](#javaanalysisget_config_keys), [`get_config_uses`](#javaanalysisget_config_uses), [`get_unresolved_config_reads`](#javaanalysisget_unresolved_config_reads), [`get_config_readers`](#javaanalysisget_config_readers) | `symbol_table` |
+| View dispatches | [`get_view_dispatches`](#javaanalysisget_view_dispatches), [`get_view_dispatchers`](#javaanalysisget_view_dispatchers), [`get_unresolved_view_dispatches`](#javaanalysisget_unresolved_view_dispatches) | `symbol_table` |
+| Parse a source string | [`is_parsable`](#javaanalysisis_parsable), [`get_raw_ast`](#javaanalysisget_raw_ast) | any level |
+| Call graph | [`get_call_graph`](#javaanalysisget_call_graph), [`get_call_graph_json`](#javaanalysisget_call_graph_json), [`get_callers`](#javaanalysisget_callers), [`get_callees`](#javaanalysisget_callees), [`get_class_call_graph`](#javaanalysisget_class_call_graph), [`get_calling_lines`](#javaanalysisget_calling_lines), [`callers_of`](#javaanalysiscallers_of), [`callees_of`](#javaanalysiscallees_of), [`reaches`](#javaanalysisreaches), [`backward_cone`](#javaanalysisbackward_cone), [`call_paths_between`](#javaanalysiscall_paths_between) | `call_graph` |
+| Graphs inside one method | [`get_cfg`](#javaanalysisget_cfg), [`get_cdg`](#javaanalysisget_cdg), [`get_ddg`](#javaanalysisget_ddg) | `program_dependency_graph` |
+| Slices, value flow and taint | [`slice_backward`](#javaanalysisslice_backward), [`slice_forward`](#javaanalysisslice_forward), [`paths_between`](#javaanalysispaths_between), [`flows_to_call`](#javaanalysisflows_to_call), [`flows_to_argument`](#javaanalysisflows_to_argument), [`taint`](#javaanalysistaint) | `system_dependency_graph` |
+| External symbols | [`get_external_symbols`](#javaanalysisget_external_symbols) | Neo4j backend only |
+
+`get_artifacts`, `get_dependencies`, `get_config_keys`, `get_config_uses` and
+`get_unresolved_config_reads` return models from the Python API, not Java models.
+Their entries are on the Python page:
+[`PyArtifact`](/reference/python-api/python/#pyartifact),
+[`PyDependency`](/reference/python-api/python/#pydependency),
+[`PyConfigKey`](/reference/python-api/python/#pyconfigkey),
+[`PyConfigUseEdge`](/reference/python-api/python/#pyconfiguseedge) and
+[`PyConfigRead`](/reference/python-api/python/#pyconfigread).
+[`get_config_readers`](#javaanalysisget_config_readers) returns
+[`JCallableOverview`](#jcallableoverview) objects.
+
+## What Java refuses
+
+These methods raise an exception instead of a misleading empty result.
+
+| Method | When | Exception |
+| --- | --- | --- |
+| `get_all_crud_operations`, `get_all_create_operations`, `get_all_read_operations`, `get_all_update_operations`, `get_all_delete_operations` | Always. codeanalyzer-java 3.0.1 and later emit no CRUD data ([codeanalyzer-java#187](https://github.com/codellm-devkit/codeanalyzer-java/issues/187)). | `CodeanalyzerExecutionException` |
+| `get_service_entry_point_classes`, `get_service_entry_point_methods`, `remove_all_comments` | Always. CLDK 2.0 does not implement them. | `NotImplementedError` |
+| `CLDK.java(..., target_files=[...])` | Always. codeanalyzer-java 3.3.3 analyzes only whole projects. The message shows only the command line. | `CodeanalyzerExecutionException` |
+| `get_cfg`, `get_cdg`, `get_ddg`, `slice_backward`, `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` | Below `program_dependency_graph`. | `CodeanalyzerUsageException` |
+| `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` | At `program_dependency_graph`. | `CodeanalyzerExecutionException` |
+| `get_external_symbols` | On the local backend. | `CodeanalyzerExecutionException` |
+| `get_all_comments`, `get_comment_in_file`, `get_unresolved_view_dispatches` | On the Neo4j backend. | `CodeanalyzerExecutionException` |
+| `get_view_dispatches`, `get_view_dispatchers`, `get_unresolved_view_dispatches` | The cache or the Neo4j graph comes from codeanalyzer-java older than 3.3.0. | `CodeanalyzerExecutionException` |
+| `get_config_uses`, `get_unresolved_config_reads`, `get_config_readers` | The cache comes from codeanalyzer-java older than 3.1.0. | `CodeanalyzerExecutionException` |
+| `get_symbol_table(paths=...)`, `get_classes(module=...)`, `get_call_graph(roots=..., depth=...)` | Always. Only `PythonAnalysis` has these keywords. | `TypeError` |
+
+Instead of `target_files`, analyze the whole project. Then filter the results by
+file with `get_java_file()`. If a method raises because the cache is too old, pass
+`eager=True` once. If the Neo4j graph is too old, write the graph again with `canjv`.
+
+The SDK [agent API reference](https://github.com/codellm-devkit/python-sdk/blob/v2.0.0/docs/agent-api-reference.md)
+gives the reasons in more detail.
+
+## Cache
+
+CLDK caches the analysis in `<project>/.codeanalyzer/java/`, in the files
+`analysis.json` and `analyzer_diagnostics.json`. Add `.codeanalyzer/` to your
+`.gitignore`.
+
+- CLDK reuses the cache and does not check the source files. After you edit the
+  code, pass `eager=True` once.
+- If the cache holds a lower level than you ask for, CLDK runs the analyzer again.
+- To keep the cache outside the project, pass
+  `backend=CodeAnalyzerConfig(cache_dir=...)`. CLDK then writes to
+  `<cache_dir>/java/`.
+- A cache from cldk 1.5.0 raises `CodeanalyzerExecutionException`. The message tells
+  you to pass `eager_analysis=True`, but `CLDK.java()` has no such keyword. Pass
+  `eager=True`, or delete `<project>/.codeanalyzer`.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
+
+# Analyze again, for example after you edit the code.
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+    eager=True,
+)
+
+# Keep the cache in cldk-cache/java/, outside the project directory.
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+    backend=CodeAnalyzerConfig(cache_dir="cldk-cache"),
+)
+```
+
+## Neo4j backend
+
+The Neo4j backend reads a graph that codeanalyzer-java wrote into a Neo4j database.
+CLDK does not write to the database. Before you connect, make sure that you have:
+
+1. The neo4j driver: `pip install "cldk[java,neo4j]"`.
+2. A running Neo4j server.
+3. A graph from codeanalyzer-java 3.2.0 or later. When you connect to an empty
+   database or to an older graph, CLDK raises `GraphSchemaMismatch`.
+
+To write the graph, run `canjv`, which comes with the `java` extra. Like the
+`call_graph` level, it builds the project, so it needs a JDK and Maven. Run it from
+the directory that contains `commons-cli`:
+
+```bash
+canjv -i commons-cli --emit neo4j --app-name commons-cli \
+  --neo4j-uri bolt://localhost:7687 --neo4j-user neo4j --neo4j-password password
+```
+
+When the command succeeds, it prints only a warning about
+`sun.reflect.Reflection.getCallerClass`. You can ignore it. Then pass a
+[`Neo4jConnectionConfig`](/reference/python-api/core/#neo4jconnectionconfig) as
+`backend=`:
+
+```python
+import logging
+
+from cldk import CLDK
+from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+
+logging.getLogger("neo4j").setLevel(logging.ERROR)  # hide the driver notifications
+
+analysis = CLDK.java(
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="password",
+        application_name="commons-cli",
+    ),
+)
+print(len(analysis.get_classes()), "types")  # 75 types
+print(analysis.get_call_graph())  # DiGraph with 652 nodes and 1980 edges
+```
+
+- `application_name` must match `--app-name`. The default of `--app-name` is the name
+  of the input directory. A wrong name raises `GraphSchemaMismatch`, and the message
+  blames the analyzer version.
+- The graph always holds all four analysis levels, so this backend ignores
+  `analysis_level`.
+- `project_path` is optional. If you give it, the directory must exist, and its name
+  becomes the default `application_name`.
+- Without the `logging` line, the driver prints several
+  `Received notification from DBMS server` warnings. They do not change the results.
+- The outputs come from a Neo4j 2026.07.1 server and a graph that `canjv` wrote
+  with JDK 17. With JDK 21 or 25, the call graph has 1976 edges, not 1980.
+
+To put many projects in one database, see
+[Multi-lingual, multi-project analysis at scale](/at-scale/).
+
+<!-- Remove each item when the SDK docstring is fixed. -->
+
+:::caution[Errors in the generated reference]
+The reference below comes from the docstrings of cldk 2.0.0. These entries are wrong:
+
+- `get_callers`, `get_callees`, `get_method`: the examples use short parameter types,
+  such as `"getUser(String)"`. These match nothing. Write fully qualified types, for
+  example `"create(java.lang.String)"`. The example `"process())"` also has an extra
+  `)`.
+- `get_callers`, `get_callees`: the result has no file field. See
+  [Find who calls a method](#find-who-calls-a-method) for the real keys.
+- `get_methods_in_class`, `get_constructors`: `get_methods_in_class` leaves out
+  constructors. Use `get_constructors`. A constructor key is `<init>(...)`, not the
+  name of the class.
+- `get_class_call_graph`: it returns only the direct calls, not all reachable edges.
+  Use `networkx.descendants` on `get_call_graph()`.
+- `get_call_graph_json`: it returns only the call-graph edges, not the full analysis.
+  Use `get_application_view().model_dump_json()`.
+- `get_java_compilation_unit`, `get_comment_in_file`: an absolute path or an unknown
+  path raises `KeyError` or `CodeanalyzerExecutionException`. Pass the relative path
+  from `get_java_file()`.
+- `get_comment_in_file`, `get_all_comments`, `get_all_docstrings`: on the local
+  backend, they return only the comments that the analyzer attaches to no code
+  element. Examples are the license header and a comment in an empty method body. For
+  javadoc, use `get_comments_in_a_class` and `get_comments_in_a_method`. On the Neo4j
+  backend, `get_all_docstrings` returns the javadoc of the declarations, and the other
+  two raise `CodeanalyzerExecutionException`.
+- The reference lists CRUD operation detection as a capability. It is not available:
+  `get_all_crud_operations` and the four other CRUD methods always raise. See
+  [What Java refuses](#what-java-refuses).
+- `remove_all_comments` always raises `NotImplementedError`. Pass the text of a
+  `.java` file to
+  [`TreesitterJava.remove_all_comments`](/reference/python-api/treesitter/#treesitterjavaremove_all_comments).
+- `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`: the
+  reference says that Java cannot answer. They answer at `system_dependency_graph`.
+- `get_entrypoint_coverage`, `get_config_uses`, `get_unresolved_config_reads`,
+  `get_config_readers`: the reference says that Java has no data. codeanalyzer-java
+  3.3.3 supplies it.
+- `taint`: the example `" -> ".join(h.to.name for h in path.hops)` raises `TypeError`,
+  because `name` is `None` on some hops, for example statement, branch and argument
+  hops. Print `h.to.kind` instead.
+- `JClassOverview.qualified_name` mentions `get_all_classes`. `JavaAnalysis` has no
+  such method. Use `get_classes`.
+- `is_parsable`: it returns `True` for some code with a syntax error, for example a
+  missing semicolon. Check `get_raw_ast(code).root_node.has_error` instead.
+:::
 
 ## API reference
 
 The full generated reference for the Java analysis API and data models
 follows.
+
+Some entries name internal design notes, for example J-1, J-5 and leg 3b, and the
+benchmark projects daytrader8 and ThingsBoard. You can ignore these names. J-1 means
+the call-graph node key. For its form, see
+[Names of classes and methods](#names-of-classes-and-methods).
 
 <!-- CLDK:API:START -->
 
