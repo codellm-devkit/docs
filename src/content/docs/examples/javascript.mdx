@@ -8,33 +8,30 @@ import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, Badge } from "@astrojs
 CLDK has no separate JavaScript factory: call `CLDK.typescript(project_path=...)` on the JavaScript project. The TypeScript backend reads `.js`, `.jsx`, `.mjs`, and `.cjs` files as first-class input, with or without a `tsconfig.json`. These examples analyze a plain JavaScript project called `my_app`, the recurring sample on this page. It has a `package.json`, no `tsconfig.json`, and five source files: `src/index.js`, `src/lib/greeter.js`, `src/util.mjs`, `src/legacy.cjs`, and `src/App.jsx`.
 
 <Aside type="note" title="Project-based analysis">
-JavaScript analysis is project-based. `project_path` must point at the project root. The backend finds JavaScript files without a `tsconfig.json`, and it forces `allowJs` on when one exists.
+JavaScript analysis is project-based. `project_path` must point at the project directory. The backend does not need a `tsconfig.json` to find JavaScript files. If a `tsconfig.json` exists, the backend forces `allowJs` on.
 </Aside>
 
 <Aside type="caution" title="Every section needs CLDK 2.0">
-The stable PyPI release, CLDK 1.5.0, pins codeanalyzer-typescript 0.4.3, and that backend discovers only `.ts`, `.tsx`, `.mts`, and `.cts` sources. JavaScript discovery needs codeanalyzer-typescript 1.1.0 or later, and the `javascript` id namespace needs 1.2.0 or later. Install the pre-release with `pip install --pre cldk`. CLDK 2.0.0rc7 pins codeanalyzer-typescript 1.6.0, and every expected output on this page is real output from that pair. The sections marked <Badge text="2.0" variant="caution" /> also use methods that exist only in CLDK 2.0.
+This page needs CLDK 2.0 or later: `pip install -U cldk`. CLDK 1.5.0 pins codeanalyzer-typescript 0.4.3, which reads only `.ts`, `.tsx`, `.mts`, and `.cts` files. The outputs on this page come from cldk 2.0.0 with codeanalyzer-typescript 1.6.0. The sections marked <Badge text="2.0" variant="caution" /> also use methods that are new in CLDK 2.0.
+
+If you analyzed `my_app` or `mixed_app` with CLDK 1.x, the cache from that run makes `CLDK.typescript` raise a `ValidationError` for `TSAnalysis`. To fix it, delete the `.codeanalyzer` directory of that project. You can also pass `eager=True` to `CLDK.typescript` once.
 </Aside>
 
-## Set up the analysis
+## Create the sample project
 
-Build a CLDK analysis object for your JavaScript project with the TypeScript factory. By default it extracts the symbol table: modules, classes, functions, and imports. For call-graph queries, add `analysis_level=AnalysisLevel.call_graph`.
+Make a directory `my_app` with these six files. `src/index.js` calls into two other files and into `console.log`. `src/lib/greeter.js` exports the class `Greeter` with a constructor and a `greet` method.
 
-```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-
-# Symbol table only (default)
-analysis = CLDK.typescript(project_path="my_app")
-
-# Symbol table + call graph (required for callers/callees)
-analysis = CLDK.typescript(
-    project_path="my_app",
-    analysis_level=AnalysisLevel.call_graph,
-)
+<Tabs>
+  <TabItem label="package.json">
+```json
+{
+  "name": "my_app",
+  "version": "1.0.0",
+  "type": "module"
+}
 ```
-
-The call-graph examples depend on `src/index.js`, which calls into two other files and into `console.log`. `src/lib/greeter.js` exports the class `Greeter` with a constructor and a `greet` method.
-
+  </TabItem>
+  <TabItem label="src/index.js">
 ```js
 import { Greeter } from "./lib/greeter.js";
 import { slug } from "./util.mjs";
@@ -44,9 +41,61 @@ export function main() {
 }
 main();
 ```
+  </TabItem>
+  <TabItem label="src/lib/greeter.js">
+```js
+export class Greeter {
+  constructor(name) { this.name = name; }
+
+  greet() { return `hello ${this.name}`; }
+}
+```
+  </TabItem>
+  <TabItem label="src/util.mjs">
+```js
+/** Turn a title into a URL slug. */
+export function slug(s) {
+  return s.toLowerCase().replace(/\s+/g, "-");
+}
+```
+  </TabItem>
+  <TabItem label="src/legacy.cjs">
+```js
+function add(a, b) {
+  return a + b;
+}
+module.exports = { add };
+```
+  </TabItem>
+  <TabItem label="src/App.jsx">
+```jsx
+export function App({ name }) {
+  return <h1>Hello, {name}</h1>;
+}
+```
+  </TabItem>
+</Tabs>
+
+## Set up the analysis
+
+Build a CLDK analysis object for your JavaScript project with the TypeScript factory. Run Python from the directory that contains `my_app`. The default analysis level extracts the symbol table: modules, classes, functions, and imports. The `call_graph` level adds the caller and callee edges. Every example on this page uses the `call_graph` level.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.typescript(
+    project_path="my_app",
+    analysis_level=AnalysisLevel.call_graph,
+)
+```
+
+The other code blocks on this page continue this block.
 
 <Aside type="tip" title="Backend configuration">
-Backend configuration lives in a `CodeAnalyzerConfig` that you pass as `backend=`. `cache_dir` controls where the backend stores its analysis cache. The default is `<project>/.codeanalyzer/typescript/`. The backend looks for `tsconfig.json`, then any `tsconfig*.json`, then `jsconfig.json`. Without one, it compiles with `target: ES2022`, `module: ESNext`, `moduleResolution: Bundler`, `jsx: Preserve`, `allowJs: true`, and `strict: false`. If you need `paths` or `baseUrl` for module resolution, add a `jsconfig.json`.
+Backend configuration lives in a `CodeAnalyzerConfig` that you pass as `backend=`. `cache_dir` sets the root directory of the analysis cache, and the TypeScript backend writes into its `typescript` subdirectory. The default root is `<project>/.codeanalyzer`.
+
+This example writes the cache to `cldk_cache/typescript/` in the current directory.
 
 ```python
 from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
@@ -54,9 +103,11 @@ from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
 analysis = CLDK.typescript(
     project_path="my_app",
     analysis_level=AnalysisLevel.call_graph,
-    backend=CodeAnalyzerConfig(cache_dir="/tmp/my_app_cache"),
+    backend=CodeAnalyzerConfig(cache_dir="cldk_cache"),
 )
 ```
+
+At the top of the project directory, the backend looks for `tsconfig.json`, then any `tsconfig*.json`, then `jsconfig.json`. Without one, it compiles with `target: ES2022`, `module: ESNext`, `moduleResolution: Bundler`, `jsx: Preserve`, `allowJs: true`, and `strict: false`. If you need `paths` or `baseUrl` for module resolution, add a `jsconfig.json`.
 </Aside>
 
 ## Symbol table: modules, classes, functions
@@ -127,7 +178,7 @@ for signature, fn in functions.items():
 
 ### List all imports
 
-Get imports for every module. `resolved_module` names the symbol-table key that an import resolves to. Only `src/index.js` has imports in the sample.
+Get imports for every module. `resolved_module` names the project file that an import resolves to. Only `src/index.js` has imports in the sample, and each one resolves to a symbol-table key.
 
 ```python
 imports = analysis.get_imports()
@@ -141,28 +192,20 @@ for file_path, import_list in imports.items():
 ## Call graph: callers and callees
 
 <Aside type="caution" title="Always set analysis_level">
-All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table, and the call graph has 0 nodes and 0 edges. The SDK reuses a cached `analysis.json` from any level. If a symbol-table run already filled the cache directory, add `eager=True` to regenerate it.
+All call-graph operations need `analysis_level=AnalysisLevel.call_graph`. The default level builds only the symbol table, and the call graph has 0 nodes and 0 edges. The SDK reuses a cached `analysis.json` from any level. If a symbol-table run already filled the cache, add `eager=True` once to run the analysis again.
 </Aside>
 
 ### Build a call graph
 
-The call graph is a `networkx.DiGraph`. Its nodes are the endpoints of call edges, and each node carries a `kind` attribute. A module node is the caller of its top-level code. An external node is a library or builtin target. `eager=True` forces a fresh backend run, because the setup step filled the default cache at the symbol-table level.
+The call graph is a `networkx.DiGraph`. Its nodes are the endpoints of call edges, and each node carries a `kind` attribute. A module node is the caller of its top-level code. An external node is a library or builtin target.
 
 ```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-
-analysis = CLDK.typescript(
-    project_path="my_app",
-    analysis_level=AnalysisLevel.call_graph,
-    eager=True,
-)
-
 cg = analysis.get_call_graph()
 print(f"{cg.number_of_nodes()} nodes, {cg.number_of_edges()} edges")
+# 6 nodes, 5 edges
+
 for node in sorted(cg.nodes):
     print(f"{cg.nodes[node]['kind']}: {node}")
-# 6 nodes, 5 edges
 # external: (builtin).log
 # module: src/index.js
 # callable: src/index.main
@@ -232,18 +275,72 @@ print("Source:", loc.source)
 
 The backend runs the same pipeline on JavaScript as on TypeScript. These points are where the result differs.
 
-- **Type facets are weak.** The TypeScript checker infers types from untyped JavaScript, so many facets read `any`. For `src/util.slug`, the parameter `s` and the return type both read `any`. The backend keeps JSDoc blocks as comments with `is_docstring` set to `True`, but it has no JSDoc type support of its own.
+- **Type facets are weak.** The TypeScript checker infers types from untyped JavaScript, so many facets read `any`. For `src/util.slug`, the parameter `s` and the return type both read `any`. If you add JSDoc type tags, for example `@param {string} s`, the checker uses them. The backend keeps each JSDoc block as a comment with `is_docstring` set to `True`.
 - **Destructured parameters surface as raw text.** The parameter of `App({ name })` in `src/App.jsx` has the name `'{ name }'`.
 - **The backend does not model dynamic patterns.** The backend README describes the analysis as sound-leaning and over-approximate. Its recorded unsoundness covers dynamic `eval` and `Function`, reflection and monkey patches, dynamic property names, and npm-internal global effects.
 - **The backend reads no embedded-script formats.** Discovery reads only the eight TypeScript and JavaScript extensions. It does not analyze the script inside `.vue`, `.svelte`, or other single-file components.
 - **`is_tsx` stays `False` on `.jsx`.** The backend finds `.jsx` files, but the flag marks TSX files only.
 - **The backend skips tests.** The SDK always passes `--skip-tests`, and there is no SDK argument to include tests. The backend excludes the `test`, `tests`, `spec`, `__tests__`, `__test__`, and `__mocks__` directories at any depth. It also excludes files named `*.test.js` or `*.spec.js`, with the same rule for the other seven extensions. The directory walk skips `node_modules`, `.git`, `.codeanalyzer`, `dist`, `build`, `out`, `coverage`, `.next`, `.turbo`, `.cache`, and `vendor`.
-- **The backend needs npm for library targets.** If the project has a `package.json` and no `node_modules`, the backend installs dependencies first. It runs `npm ci --ignore-scripts` when a `package-lock.json` exists, and `npm install --ignore-scripts` when no lockfile exists. A `pnpm-lock.yaml` or a `yarn.lock` selects pnpm or yarn instead. The SDK does not pass `--no-build`. If the install fails, for example because `npm` is not on `PATH`, the backend continues with partial types and records a note.
-- **Entrypoint rules need a present framework.** The shipped rules detect a framework when first-party source imports its package or when `package.json` declares it as a dependency. For `my_app`, `get_entrypoint_coverage()` <Badge text="2.0" variant="caution" /> reports `frameworks_detected: []`.
+- **The backend needs npm for library targets.** If the project has a `package.json` and no `node_modules`, the backend installs dependencies first. If a `package-lock.json` exists, it runs `npm ci --ignore-scripts`. If no lockfile exists, it runs `npm install --ignore-scripts`. If pnpm or yarn is installed, a `pnpm-lock.yaml` or a `yarn.lock` selects that tool instead. The SDK has no option to skip this install.
+- **A failed install does not stop the analysis.** If the install fails, for example because `npm` is not on `PATH`, the backend continues with partial types and records a note.
+- **Entrypoint rules need a present framework.** If first-party source imports a framework package, or if `package.json` declares it as a dependency, the shipped rules detect that framework. For `my_app`, `get_entrypoint_coverage()` <Badge text="2.0" variant="caution" /> reports `frameworks_detected: []`.
 
 ## Mixed projects
 
-A project can hold TypeScript and JavaScript files together. This example analyzes `mixed_app`. Its `tsconfig.json` has `include: ["src/**/*.ts"]`. Its sources are `src/index.ts`, `src/legacy.js` outside that include, and `src/helper.ts` beside a compiled `src/helper.js`. Two discovery rules decide what the symbol table holds.
+A project can hold TypeScript and JavaScript files together. This example analyzes `mixed_app`. Its `tsconfig.json` has `include: ["src/**/*.ts"]`. Its sources are `src/index.ts`, `src/legacy.js` outside that include, and `src/helper.ts` beside a compiled `src/helper.js`. Make a directory `mixed_app` next to `my_app`, with these five files.
+
+<Tabs>
+  <TabItem label="tsconfig.json">
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true
+  },
+  "include": ["src/**/*.ts"]
+}
+```
+  </TabItem>
+  <TabItem label="src/index.ts">
+```ts
+import { helper } from "./helper";
+import { legacyAdd } from "./legacy.js";
+
+export function run(): number {
+  return legacyAdd(helper(), 1);
+}
+```
+  </TabItem>
+  <TabItem label="src/legacy.js">
+```js
+export function legacyAdd(a, b) {
+  return a + b;
+}
+
+export function unreferenced() {
+  return 0;
+}
+```
+  </TabItem>
+  <TabItem label="src/helper.ts">
+```ts
+export function helper(): number {
+  return 41;
+}
+```
+  </TabItem>
+  <TabItem label="src/helper.js">
+```js
+export function helper() {
+    return 41;
+}
+```
+  </TabItem>
+</Tabs>
+
+Two discovery rules decide what the symbol table holds.
 
 - **Discovery ignores tsconfig `include`.** The backend analyzes `src/legacy.js` under the `javascript` namespace. The call from `src/index.run` to `src/legacy.legacyAdd` resolves across languages. The function `unreferenced` in `src/legacy.js`, which no TypeScript file imports, is also in the symbol table.
 - **The backend skips a compiled sibling.** A `.js` file with the same prefix as a real (non-declaration) `.ts`, `.tsx`, `.mts`, or `.cts` file counts as compiled output. The backend skips it, so `src/helper.js` is absent from the symbol table. The import `./helper` in `src/index.ts` resolves to `src/helper.ts`. A `.d.ts` file beside an analyzed `.js` file is not a module, but the checker still reads it.
@@ -257,8 +354,10 @@ analysis = CLDK.typescript(
 symbol_table = analysis.get_symbol_table()
 print(list(symbol_table))
 # ['src/helper.ts', 'src/index.ts', 'src/legacy.js']
+
 print(symbol_table["src/legacy.js"].id)
 # can://mixed_app/javascript/src/legacy.js
+
 print("src/helper.js" in symbol_table)
 # False
 

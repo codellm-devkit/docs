@@ -5,23 +5,27 @@ description: "Level 4 joins the per-function dependence graphs into one graph, w
 
 import { Aside, Badge, Steps, LinkCard, CardGrid } from "@astrojs/starlight/components";
 
-<p><Badge text="New in 2.0" variant="caution" /> <Badge text="Release candidate" variant="note" /></p>
+<p><Badge text="New in 2.0" variant="caution" /></p>
 
 Level 3 gives you one dependence graph for each function. This page answers the question that such a graph cannot answer: where does a value go after the caller hands it to a callee?
 
 <Aside type="caution" title="These methods need CLDK 2.0">
-Level 4 and every method on this page arrive in CLDK 2.0. Version 2.0 is a release candidate today, so `pip install cldk` gives you 1.5.0 instead. To get the pre-release, run:
+Level 4 and every method on this page arrive in CLDK 2.0. If you have CLDK 1.x, upgrade it:
 
 ```bash frame="none"
-pip install --pre cldk
+pip install -U cldk
 ```
+
+CLDK 2.0 installs the Java analyzer only with the `java` extra. If you analyze Java code, run `pip install -U "cldk[java]"` instead.
+
+CLDK 2.0.0 cannot read the cache that CLDK 1.x wrote for a Java or TypeScript project. Java stops with an error that contains `predates schema v2`, and TypeScript stops with a `ValidationError`. If you see either error, pass `eager=True` once, or delete `<project>/.codeanalyzer`. The Java error suggests `eager_analysis=True`, but `CLDK.java()` does not accept that keyword.
 </Aside>
 
 ## Where a dependence graph stops
 
 A program dependence graph (PDG) holds one function. Its nodes are the statements of that function. A control edge says that one statement decides whether another statement runs. A data edge runs from the statement that writes a value to the statement that reads it. A data edge is what people mean by dataflow inside one function.
 
-Here is the fixture that the rest of this page uses.
+Here is the fixture that the rest of this page uses. Save it as `queries.py` in a project directory named `queries`. The outputs on this page come from cldk 2.0.0. Python runs use codeanalyzer-python 1.5.3, the version that cldk 2.0.0 pins. TypeScript runs use codeanalyzer-typescript 1.6.0.
 
 ```python
 # queries.py
@@ -36,7 +40,7 @@ def build_query(user_input, limit):              # line 5
     return f"SELECT ... '{name}' LIMIT {limit}"  # line 9
 ```
 
-`get_ddg("build_query")` returns the data edges of `build_query` alone. Each node id joins the callable name, the line and the column, as [Dataflow graphs](/guides/dataflow/) explains. The call on line 6 is one node, `build_query@6:4`. Four of the seventeen real edges matter here:
+`get_ddg("build_query")` returns the data edges of `build_query` alone. Each node id joins the callable name, the line and the column, as [Dataflow inside one function](/guides/dataflow/) explains. The call on line 6 is one node, `build_query@6:4`. Four of the seventeen real edges matter here:
 
 | From | To | `var` | `prov` |
 | --- | --- | --- | --- |
@@ -65,7 +69,9 @@ graph LR
   n94 -->|"&lt;return&gt; (reaching-defs)"| fo0
 ```
 
-The forward slice agrees. `slice_forward("user_input", within="build_query")` returns 7 nodes from the root `build_query@formal_in:0`. All seven belong to `build_query`: lines 6, 7, 8 and 9, the parameter vertex on line 5, and two return vertices on line 5.
+On codeanalyzer-python 1.5.3, the forward slice stops at the same place. `slice_forward("user_input", within="build_query")` returns 7 nodes from the root `build_query@formal_in:0`. All seven belong to `build_query`: lines 6, 7, 8 and 9, the parameter node on line 5, and two return nodes on line 5.
+
+That is a defect of 1.5.3, not a limit of level 4. On codeanalyzer-python 1.5.4, the same slice returns 14 nodes, and 4 of them belong to `sanitize`. [What the pinned Python backend does not link](#what-the-pinned-python-backend-does-not-link) explains the difference.
 
 ## The four ports of a call
 
@@ -94,7 +100,7 @@ At the call site the backend makes one `actual_in` and one `actual_out` for each
 | `build_query@6:4/actual_out:0` | `sanitize@formal_out:0`, the `<return>` | it reaches `build_query@6:4` with `var=<return>`, `prov=['reaching-defs']` |
 | `build_query@6:4/actual_out:1` | `sanitize@formal_out:1`, the parameter `raw` | it reaches `build_query@6:4` with `var=raw`, `prov=['reaching-defs']` |
 
-So the name that the caller uses stays on the edge, and the name that the callee uses for the port stays on the vertex. Read the vertex and the edge together to get both names.
+So the edge into `actual_in:0` carries the name that the caller uses, and the vertex carries the name of the callee port. Read the vertex and the edge together to get both names. The edges out of the `actual_out` vertices carry the callee names, `<return>` and `raw`.
 
 ```mermaid
 graph LR
@@ -124,7 +130,9 @@ graph LR
   ain0 -.->|"SUMMARY"| aout1
 ```
 
-Every edge in that figure is an edge of the real graph. The two solid edges out of the `actual_out` vertices are the ones that put the answer back into the caller.
+Every edge in that figure is an edge of the real graph on codeanalyzer-python 1.5.3. The two solid edges out of the `actual_out` vertices are the ones that put the answer back into the caller.
+
+On codeanalyzer-python 1.5.4, the edge into `6:4/actual_in:0` starts at `build_query@formal_in:0`, not at `build_query@entry`. The 1.5.3 edge is the defect that [What the pinned Python backend does not link](#what-the-pinned-python-backend-does-not-link) describes.
 
 ## Parameter edges and summary edges
 
@@ -140,7 +148,7 @@ A summary edge is a shortcut across a callee. It records one fact: a value that 
 
 `build_query` carries two summary pairs, and both start at `6:4/actual_in:0`. One ends at `6:4/actual_out:0`, the result of `sanitize`. The other ends at `6:4/actual_out:1`, the object that `raw` refers to. `sanitize` itself carries no summary pair, because it calls nothing that the backend resolved.
 
-The shortcut earns its place in the next section. Without it, a walk must descend into `sanitize` every time it meets a call to `sanitize`. With it, the walk reads the answer at the call site and stays in the caller.
+The shortcut earns its place in the next section. Without it, a walk must descend into `sanitize` every time it meets a call to `sanitize`. With it, a walk can read the answer at the call site and stay in the caller.
 
 `PY_PARAM_IN` and `PY_PARAM_OUT` carry a `var` property and no `prov` property, and `PY_SUMMARY` carries neither property. A parameter edge comes from the call structure, so no dataflow solver produced it and there is nothing to record about its certainty.
 
@@ -150,7 +158,7 @@ The backend builds all of this at level 4. The help text for `-a 4` reads `+inte
 
 A slice is the set of statements that can affect a value, or the set of statements that the value can affect. Mark Weiser introduced the idea in 1981. Ferrante, Ottenstein and Warren gave the PDG its control-dependence edges in 1987, which made a slice one graph traversal inside a function.
 
-One walk over every edge of the SDG is not correct. Such a walk can enter `sanitize` from one call site and leave `sanitize` at a different call site. The route that comes back is a route that no run of the program takes. Horwitz, Reps and Binkley answer this with two passes. CLDK uses their traversal for a backward slice.
+One walk over every edge of the SDG is not precise. Such a walk can enter `sanitize` from one call site and leave `sanitize` at a different call site. The route that comes back is a route that no run of the program takes. Horwitz, Reps and Binkley answer this with two passes.
 
 The node you ask about is the criterion. Both passes start from it.
 
@@ -163,6 +171,14 @@ The node you ask about is the criterion. Both passes start from it.
 Phase 1 walks up. Phase 2 walks down. Neither phase does both, so a walk can never leave a callee through a call site that it did not enter. Program analysis calls that property context sensitivity, and it is the whole reason for the two passes.
 
 The `SUMMARY` edges are what let phase 1 cross a call without a descent into the callee. The summary edge and the two-phase traversal are one design, not two.
+
+<Aside type="caution" title="CLDK 2.0.0 walks in one pass">
+CLDK 2.0.0 does not use the two-phase traversal. Its slices, `flows_to_call`, `flows_to_argument`, `paths_between` and `taint` follow data, control, `PARAM_IN`, `PARAM_OUT` and `SUMMARY` edges in one pass. So a result can hold a route that enters a callee from one call site and leaves it at another.
+
+For example, let `a(p)` and `b(q)` both call `ident(x)`, and let only `b` store the result in a variable and pass it to `sink(v)`. On codeanalyzer-typescript 1.6.0, `paths_between("p", "v", src_within="a", dst_within="sink")` returns one path, and `taint(sources=[("p", "a")], sinks=[("v", "sink")])` returns it in `paths`. No run of the program takes that path. The path enters `ident` from `a`, and its `return` hop goes back to `b`.
+
+So treat a path through a shared callee as a candidate, not as a proof. Check that each `return` hop goes back to the caller that the path came from. For a hop with `via == "return"`, `hop.to.callable` names the callable that the hop goes back to.
+</Aside>
 
 The papers behind this page:
 
@@ -177,12 +193,28 @@ CLDK does not ask you to walk the graph. Four methods answer the questions that 
 
 | Method | Returns | Question |
 | --- | --- | --- |
-| `flows_to_call(src, callee, *, within)` <Badge text="2.0" variant="caution" /> | `bool` | Does this value reach a call to that callee? |
-| `flows_to_argument(src, callee, arg, *, within)` <Badge text="2.0" variant="caution" /> | `bool` | Does it reach that argument of that callee? |
-| `paths_between(src, dst, *, src_within, dst_within)` <Badge text="2.0" variant="caution" /> | `FlowPaths` | Which routes join these two values? |
-| `taint(sources, sinks, ...)` <Badge text="2.0" variant="caution" /> | `TaintResult` | Which of many sources reach which of many sinks? |
+| `flows_to_call(src, callee, *, within, depth=None)` <Badge text="2.0" variant="caution" /> | `bool` | Does this value reach a call to that callee? |
+| `flows_to_argument(src, callee, arg, *, within, depth=None)` <Badge text="2.0" variant="caution" /> | `bool` | Does it reach that argument of that callee? |
+| `paths_between(src, dst, *, src_within, dst_within, depth=None, max_paths=10)` <Badge text="2.0" variant="caution" /> | `FlowPaths` | Which routes join these two values? |
+| `taint(sources, sinks, sanitizers=(), *, depth=None, max_paths=10)` <Badge text="2.0" variant="caution" /> | `TaintResult` | Which of many sources reach which of many sinks? |
 
-Build the analysis at level 4 first. The examples below run the TypeScript backend over the same two functions, where the names are `buildQuery`, `sanitize`, `userInput` and `raw`.
+The examples below run the TypeScript backend over the same two functions. There, the names are `buildQuery`, `sanitize`, `userInput` and `raw`. Save this file as `src/queries.ts` in a project directory named `queries-ts`:
+
+```typescript title="queries-ts/src/queries.ts"
+export function sanitize(raw: string): string {
+  return raw.trim();
+}
+
+export function buildQuery(userInput: string, limit: number): string {
+  const name = sanitize(userInput);
+  if (limit > 100) {
+    limit = 100;
+  }
+  return `SELECT * FROM users WHERE name = '${name}' LIMIT ${limit}`;
+}
+```
+
+Then build the analysis at level 4:
 
 ```python
 from cldk import CLDK
@@ -194,10 +226,10 @@ ts = CLDK.typescript(
 )
 ```
 
-The cheap question is the boolean one.
+The cheap question is the boolean one. This block and the next one continue with `ts`.
 
 ```python
-ts.flows_to_call("userInput", "sanitize", within="buildQuery")
+print(ts.flows_to_call("userInput", "sanitize", within="buildQuery"))
 # True
 ```
 
@@ -209,7 +241,7 @@ flows = ts.paths_between(
     src_within="buildQuery",
     dst_within="sanitize",
 )
-len(flows.paths)   # 1
+print(len(flows.paths))   # 1
 ```
 
 That one path has two hops, and the second hop crosses the boundary:
@@ -221,27 +253,32 @@ That one path has two hops, and the second hop crosses the boundary:
 
 The first hop is a data edge inside `buildQuery`. The reaching-definitions analysis produced it, and `prov` says so. That analysis walks the control-flow graph and collects every definition of a name that is still live at the use. The second hop is a parameter edge, which comes from the call structure, so its `prov` list is empty.
 
-The slice carries the same link. `slice_forward("userInput", within="buildQuery").total` is 11, and `get_ddg("buildQuery").total` is 11. The Python forward slice over the same two functions holds 7 nodes, all of them inside `build_query`.
+The slice carries the same link. `slice_forward("userInput", within="buildQuery").total` is 11, and `get_ddg("buildQuery").total` is 11. On codeanalyzer-python 1.5.3, the Python forward slice over the same two functions holds 7 nodes, all of them inside `build_query`. On 1.5.4, it holds 14.
 
 ### Callable reachability is a different question
 
 `reaches` takes two callable names. It never takes the name of a value.
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
 py = CLDK.python(
     project_path="queries",
     analysis_level=AnalysisLevel.system_dependency_graph,
 )
 
-py.reaches("build_query", "sanitize")
+print(py.reaches("build_query", "sanitize"))
 # True
 ```
 
-`call_paths_between` answers the same question with the route attached. It returns a `FlowPaths`, so read the hops off it.
+If `CLDK.python(...)` stops with `RuntimeError: Could not find a suitable base Python interpreter`, set `SYSTEM_PYTHON` as the Python Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies) shows.
+
+`call_paths_between` answers the same question with the route attached. It returns a `FlowPaths`, so read the hops off it. The next two blocks continue with `py`.
 
 ```python
 routes = py.call_paths_between("build_query", "sanitize")
-[[hop.to.callable for hop in path.hops] for path in routes.paths]
+print([[hop.to.callable for hop in path.hops] for path in routes.paths])
 # [['queries.sanitize']]
 ```
 
@@ -257,41 +294,64 @@ Callable reachability asks whether one function can call another, through any nu
 ## What the pinned Python backend does not link
 
 <Aside type="caution" title="A Python refutation is not evidence of absence">
-This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. The rest of this section describes the behavior of the pinned 1.5.2 backend, which is what the pre-release installs today.
+CLDK 2.0.0 pins codeanalyzer-python 1.5.3. That version has a defect that stops some value flow at a call ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). codeanalyzer-python 1.5.4 fixes it, and [python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the change of the cldk pin to 1.5.4.
 
-At CLDK 2.0.0rc7 with codeanalyzer-python 1.5.2, the SDK does not link a value across a call. Add one more function to the fixture, so that a caller of `build_query` is in view as well:
+On 1.5.3, the defect affects a parameter that the caller passes straight into a call, with no assignment to the parameter first. Examples are `sanitize(user_input)` and `sanitize(user_input + "!")`. The data edge into the `actual_in` port of that call starts at the `entry` node of the caller, not at the `formal_in` port. So the value stops at the call, and no query follows it into the callee.
+
+A variable that the caller captures from an outer function and passes straight into a call stops in the same way. So does a module-level name inside an argument, for example `PREFIX` in `sanitize(PREFIX + "!")`. If the caller first assigns the value to a variable, the edge starts at that assignment, and CLDK follows the value into the callee. A value still leaves a callee through its `formal_out` ports, so a forward slice can reach the callers.
+
+On 1.5.4, some calls still stop the value. For example, in `sanitize(PREFIX)`, no query follows the module-level name `PREFIX` into `sanitize`. In `sanitize(a) + sanitize(b)`, no query follows `b` into `sanitize`. So on both versions, do not use a Python `exhausted` pair as evidence that no value flows between two callables.
+</Aside>
+
+To see the defect across two calls, copy `queries.py` into a new project directory named `queries-handle`. Add one more function to the copy, so that a caller of `build_query` is in view as well:
 
 ```python
 def handle(request):
     return build_query(request, 500)
 ```
 
-These are the real results on that file:
+Build its analysis at level 4, with `project_path="queries-handle"`. These are the real results on that project, on the pinned 1.5.3 and on 1.5.4:
 
-| Call | Result |
-| --- | --- |
-| `flows_to_call("user_input", "sanitize", within="build_query")` | `False` |
-| `flows_to_argument("user_input", "sanitize", "raw", within="build_query")` | `False` |
-| `flows_to_call("request", "build_query", within="handle")` | `False` |
-| `flows_to_argument("request", "build_query", "user_input", within="handle")` | `False` |
-| `paths_between(...)` | An empty `paths` list in every cross-callable direction tried |
-| `slice_forward("request", within="handle").total` | `4`, and every node stays inside `handle` |
+| Call | 1.5.3 | 1.5.4 |
+| --- | --- | --- |
+| `flows_to_call("user_input", "sanitize", within="build_query")` | `False` | `True` |
+| `flows_to_argument("user_input", "sanitize", "raw", within="build_query")` | `False` | `True` |
+| `flows_to_call("request", "build_query", within="handle")` | `False` | `True` |
+| `flows_to_argument("request", "build_query", "user_input", within="handle")` | `False` | `True` |
+| `paths_between("request", "raw", src_within="handle", dst_within="sanitize")` | No path | One path, across two calls |
+| `slice_forward("request", within="handle").total` | `4`, all inside `handle` | `21`, across all three functions |
 
-The `taint()` call is the one to watch. A pair lands in `exhausted` when the traversal searched it to the end and found no route. That is the refutation an empty `paths` list cannot give. `taint(sources=[("request", "handle")], sinks=[("raw", "sanitize")])` returns `paths == []`, `exhausted == [('request', 'raw')]`, `complete == True` and `unresolved == []`. That is a clean refutation of a flow that plainly exists in the program.
+The `taint()` call is the one to watch. When the traversal searches a pair to the end and finds no route, the pair lands in `exhausted`. That is the refutation an empty `paths` list cannot give. On 1.5.3, `taint(sources=[("request", "handle")], sinks=[("raw", "sanitize")])` returns `paths == []`, `exhausted == [('request', 'raw')]`, `complete == True` and `unresolved == []`. That is a clean refutation of a flow that plainly exists in the program. On 1.5.4, the same call returns one path and an empty `exhausted`.
 
-Do not use a Python `exhausted` pair as evidence that no value flows between two callables.
+The slice of `user_input` in `build_query` changes in this project too. On 1.5.3, `slice_forward("user_input", within="build_query").total` is 12, not 7. The slice leaves `build_query` through its `formal_out` ports and reaches 5 nodes of `handle`. On 1.5.4, the total is 19.
 
-The graph machinery is present. `build_query` holds three `formal_in` vertices, two `formal_out` vertices, one `actual_in` vertex and two `actual_out` vertices. A `summary` is set on `build_query` and on `handle`. `application.param_in` and `application.param_out` each hold 4 edges. The SDK traversal does not join them.
+The graph machinery is present on both versions. `build_query` holds three `formal_in` vertices, two `formal_out` vertices, one `actual_in` vertex and two `actual_out` vertices. The backend sets a `summary` on `build_query` and on `handle`. `get_application_view().param_in` and `get_application_view().param_out` each hold 4 edges. On this project, the two versions differ only in the data edges into the `actual_in` ports.
 
-TypeScript does join them, which is why every cross-call example on this page uses `CLDK.typescript(...)`. Python results that stay inside one callable, such as the `get_ddg` and `slice_forward` numbers above, are correct.
+TypeScript links the call on the pinned versions. That is why the `flows_to_call` and `paths_between` examples in [What CLDK gives you over the SDG](#what-cldk-gives-you-over-the-sdg) use `CLDK.typescript(...)`.
 
-On codeanalyzer-python 1.5.4 the same fixture links end to end. `flows_to_call("request", "build_query", within="handle")` returns `True`, `paths_between("request", "raw", ...)` returns one path across two call boundaries, and `taint()` returns that path with an empty `exhausted`.
-</Aside>
+### Get the fix
+
+After you install cldk, install codeanalyzer-python 1.5.4 to get the fix:
+
+```bash frame="none"
+pip install "codeanalyzer-python==1.5.4"
+```
+
+pip prints an `ERROR` line about the conflict with the `codeanalyzer-python==1.5.3` pin of cldk, and then installs 1.5.4. A later `pip install -U cldk` puts 1.5.3 back with no warning. After it, run the command above again.
+
+In a uv project, `uv add` refuses this conflict. Add these lines to `pyproject.toml` instead:
+
+```toml
+[tool.uv]
+override-dependencies = ["codeanalyzer-python==1.5.4"]
+```
+
+If `pyproject.toml` already has a `[tool.uv]` table, add only the `override-dependencies` line to that table. Then run `uv sync`.
 
 ## Where to go next
 
 <CardGrid>
   <LinkCard title="Taint analysis" description="Many sources against many sinks in one traversal, with sanitizer cuts and a verdict on each pair." href="/guides/taint/" />
-  <LinkCard title="Dataflow graphs" description="The four levels, the three graphs, and the slice and path methods that run over them." href="/guides/dataflow/" />
+  <LinkCard title="Dataflow inside one function" description="The four levels, the three graphs, and the slice and path methods that run over them." href="/guides/dataflow/" />
   <LinkCard title="TypeScript examples" description="Runnable code against the backend that links a value across a call." href="/examples/typescript/" />
 </CardGrid>

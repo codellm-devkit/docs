@@ -1,6 +1,6 @@
 ---
 title: Core concepts
-description: "What a static analysis can tell you, what it cannot, and the four rungs of program facts that CLDK builds from your source."
+description: "What a static analysis can tell you, what it cannot, and the four levels of program facts that CLDK builds from your source."
 ---
 
 import { Tabs, TabItem, Steps, Aside, Badge, LinkCard, CardGrid } from "@astrojs/starlight/components";
@@ -27,10 +27,14 @@ from cldk import CLDK
 from cldk.analysis import AnalysisLevel
 
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="queries",
     analysis_level=AnalysisLevel.call_graph,
 )
 ```
+
+Before you run this block, save the Python file from [One file, four answers](#one-file-four-answers) as `queries/queries.py`. The outputs on this page come from cldk 2.0.0, with codeanalyzer-python 1.5.3 and codeanalyzer-typescript 1.6.0.
+
+If `CLDK.python(...)` stops with `RuntimeError: Could not find a suitable base Python interpreter`, set `SYSTEM_PYTHON` as the Python Analysis tab in [Installing CLDK](/installing/#language-specific-dependencies) shows.
 
 ## A static analysis cannot be exact
 
@@ -52,7 +56,7 @@ if limit > 100:                # line 7
 
 A **data-dependence edge** records that one statement reads a value that another statement wrote. Line 6 assigns `name`. Line 7 reads `limit`.
 
-codeanalyzer-python records a data-dependence edge for `limit` from line 6 to line 7 anyway. Every such edge carries a **provenance**, which is the evidence the backend holds for the edge. The provenance of this one is `points-to`.
+At the `system_dependency_graph` analysis level, codeanalyzer-python records a data-dependence edge for `limit` from line 6 to line 7 anyway. Every such edge carries a **provenance**, which is the evidence the backend holds for the edge. The provenance of this one is `points-to`.
 
 Line 6 does not assign `limit`. The backend keeps the edge because it cannot prove that the call to `sanitize` leaves `limit` alone. An unprovable case stays in the graph, and that is over-approximation.
 
@@ -60,7 +64,7 @@ The cost to you is a false alarm. An over-approximated graph can hand you a path
 
 ### Under-approximation drops what the backend cannot resolve
 
-Take a third function, one that calls `build_query`:
+Add a third function to `queries.py`, one that calls `build_query`:
 
 ```python
 def handle(request):
@@ -70,28 +74,36 @@ def handle(request):
 The value `request` flows into the `user_input` parameter of `build_query`. If you ask codeanalyzer-python whether the value crosses that call, the answer is `False`.
 
 ```python
-# analysis is built with analysis_level=AnalysisLevel.system_dependency_graph
-analysis.flows_to_call("request", "build_query", within="handle")
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="queries",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+print(analysis.flows_to_call("request", "build_query", within="handle"))
 # -> False
 ```
 
-The graph holds the vertices for this call. The traversal in the pinned backend does not connect them. A real behavior is absent from the model, and that is under-approximation. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`.
+The graph holds the vertices for this call. But codeanalyzer-python 1.5.3 connects the argument of the call to the entry of `handle`, not to the `request` parameter. So no path goes from `request` into the call. A real behavior is absent from the model, and that is under-approximation.
 
-The cost to you is a clean answer that is wrong. A batch query reports the pair as searched and empty, with no diagnostic to warn you.
+codeanalyzer-python 1.5.4 fixes this defect ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0 pins `codeanalyzer-python==1.5.3`, which still has the defect ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. pip prints an `ERROR` line about the pin conflict, and then installs 1.5.4. In a uv project, `uv add` refuses the conflict. For uv, follow [Get the fix](/guides/system-dependence/#get-the-fix).
+
+The cost to you is a clean answer that is wrong. A batch query on the same `analysis` object reports the pair as searched and empty, with no diagnostic to warn you.
 
 ```python
 result = analysis.taint(
     sources=[("request", "handle")],
     sinks=[("raw", "sanitize")],
 )
-result.paths        # -> []
-result.exhausted    # -> [('request', 'raw')]
-result.complete     # -> True
-result.unresolved   # -> []
+print(result.paths)        # -> []
+print(result.exhausted)    # -> [('request', 'raw')]
+print(result.complete)     # -> True
+print(result.unresolved)   # -> []
 ```
 
 <Aside type="caution" title="Do not read this Python result as a refutation">
-A **refutation** is an answer that says no such flow exists anywhere in the program. This result is not one. The flow from `request` to `raw` is plain in the source. The empty `paths` list and the clean `exhausted` entry describe the emitted graph, not the program. For value flow across a call boundary, build the analysis with `CLDK.typescript`. See [System dependence](/guides/system-dependence/).
+A **refutation** is an answer that says no such flow exists anywhere in the program. This result is not one. The flow from `request` to `raw` is plain in the source. The empty `paths` list and the clean `exhausted` entry describe the emitted graph, not the program. For Python value flow across a call boundary, install codeanalyzer-python 1.5.4 over the pin, as [Get the fix](/guides/system-dependence/#get-the-fix) shows. Even on 1.5.4, some calls still stop a value, so a Python `exhausted` pair is still not a refutation.
 </Aside>
 
 ### An absent result is weaker evidence than a present one
@@ -109,30 +121,34 @@ Which direction is safe depends on the question you ask.
 
 CLDK sits on both sides of this table at once. The data-dependence edges over-approximate, which is the safe direction for an absence claim. The call structure under-approximates wherever **dispatch** stays unresolved. Dispatch is the step that turns a call site into the callable that the call runs. A backend cannot always settle it.
 
-So a refutation from CLDK is only as strong as the call structure beneath it. [Taint analysis](/guides/taint/) describes the `unresolved` ledger that tells you where that structure gave out.
+So a refutation from CLDK is only as strong as the call structure beneath it. In CLDK 2.0.0, no backend writes an unresolved call into the `unresolved` ledger of [Taint analysis](/guides/taint/). As a result, the ledger does not show where the call structure is incomplete.
 
-## The ladder CLDK builds
+## The four levels CLDK builds
 
-CLDK builds program facts in four rungs. A **callable** is one function or one method. Each rung is a strict superset of the rung below it. You pick a rung with the `analysis_level` argument, and CLDK passes the matching integer to the backend as `-a`.
+CLDK builds program facts in four levels. A **callable** is one function or one method. Each level is a strict superset of the level below it. You pick a level with the `analysis_level` argument, and CLDK passes the matching integer to the backend as `-a`.
 
-| Rung | `AnalysisLevel` member | Backend `-a` | What it adds | Page |
+| Level | `AnalysisLevel` member | Backend `-a` | What it adds | Page |
 | --- | --- | --- | --- | --- |
 | 1 | `symbol_table` | 1 | Classes, functions, parameters, signatures, source text | [Symbol tables](/guides/symbol-tables/) |
 | 2 | `call_graph` | 2 | Caller-to-callee edges | [Call graphs](/guides/call-graphs/) |
 | 3 | `program_dependency_graph` <Badge text="2.0" variant="caution" /> | 3 | Control flow and dataflow inside one callable | [Dataflow graphs](/guides/dataflow/) |
 | 4 | `system_dependency_graph` <Badge text="2.0" variant="caution" /> | 4 | Dataflow across call boundaries | [System dependence](/guides/system-dependence/) |
 
-Rungs 1 and 2 are the two rungs that CLDK 1.x has. Rungs 3 and 4 arrive in CLDK 2.0. Version 2.0 is a release candidate, so `pip install cldk` gives you 1.5.0 from PyPI. To get the pre-release, run:
+Levels 1 and 2 are the two levels that CLDK 1.x has. Levels 3 and 4 need CLDK 2.0 or later. To upgrade from CLDK 1.x, run:
 
 ```bash frame="none"
-pip install --pre cldk
+pip install -U cldk
 ```
+
+CLDK 2.0 installs the Java analyzer only with the `java` extra. If you analyze Java code, run `pip install -U "cldk[java]"` instead.
 
 <Aside type="note" title="codeanalyzer-iac counts to three, not four">
 The `-a` column above applies to codeanalyzer-java, codeanalyzer-python, and codeanalyzer-typescript. The infrastructure backend `caniac` takes `-a 1`, `2`, or `3` only, and it rejects level 4 with an error. Its three levels mean different things. Read [codeanalyzer-iac](/backends/codeanalyzer-iac/) for that scale.
 </Aside>
 
-Pick the lowest rung that answers your question. A higher rung costs more time and more memory. If a graph accessor raises `CodeanalyzerUsageException`, you built the `analysis` object below rung 3.
+Pick the lowest level that answers your question. A higher level costs more time and more memory.
+
+If a method raises `CodeanalyzerUsageException` and the message starts with `control and data flow need`, the analysis is below level 3. The value methods, such as `flows_to_call`, `paths_between`, `slice_forward` and `taint`, need level 4. Below level 4, they can raise `SelectorNotInGraph` with `value not in graph` for a name that exists. In each case, build the `analysis` object again at the level that the [Cheat sheet](/resources/cheatsheet/) gives for the method. If you analyzed a TypeScript project before at a lower level, also pass `eager=True` once. Without it, CLDK reuses the old cache.
 
 ## One file, four answers
 
@@ -169,31 +185,33 @@ The whole track follows one tiny file. Two functions carry every graph on this p
   </TabItem>
 </Tabs>
 
-The line numbers beside the Python file are the ones that every node identifier below uses. Each rung says something more about this file. The four sections below sketch what each rung says. The four pages that follow this one go deep.
+Save the Python file as `queries/queries.py` and the TypeScript file as `queries-ts/src/queries.ts`. If you added `handle` to `queries.py` earlier on this page, remove it. The numbers below come from these two functions only.
 
-### Rung 1 says what exists
+The line numbers beside the Python file are the ones that every node identifier below uses. Each level says something more about this file. The four sections below sketch what each level says. The four pages that follow this one go deep.
+
+### Level 1 says what exists
 
 The symbol table is the structured inventory of the project. For this file it records two functions, `sanitize` and `build_query`. It records the parameter names `raw`, `user_input`, and `limit`. It records the exact source text of each body.
 
-It records no relation between the two functions. Rung 1 knows that `sanitize` exists and that `build_query` exists, and nothing more.
+It also records each call in a body, such as the call to `sanitize` on line 6. TypeScript leaves the target of that call unresolved at level 1. Python resolves it at level 1 already, because the Python backend runs a name resolver, Jedi, on every call site. [Symbol tables](/guides/symbol-tables/#the-two-languages-resolve-at-different-levels) shows both cases.
 
-### Rung 2 says what calls what
+### Level 2 says what calls what
 
-The call graph adds one edge for this file, from `build_query` to `sanitize`.
+The Python call graph holds one edge for this file, from `build_query` to `sanitize`. The TypeScript graph also holds an edge from `sanitize` to the external node `(builtin).trim`.
 
 ```mermaid
 flowchart LR
     BQ["build_query"] -->|calls| SA["sanitize"]
 ```
 
-Two methods query that edge.
+Two methods query that edge. These blocks use the `analysis` object from the first block on this page.
 
 ```python
-analysis.reaches("build_query", "sanitize")
+print(analysis.reaches("build_query", "sanitize"))
 # -> True
 
 paths = analysis.call_paths_between("build_query", "sanitize")
-[[hop.to.callable for hop in path.hops] for path in paths]
+print([[hop.to.callable for hop in path.hops] for path in paths])
 # -> [['queries.sanitize']]
 ```
 
@@ -204,14 +222,14 @@ analysis.reaches("user_input", "raw")
 # raises SelectorNotInGraph: 1 of 1 callable not in graph: 'user_input'
 ```
 
-That exception marks the boundary between rung 2 and rung 3. Rung 2 knows that one function calls another. It knows nothing about the values that travel between them.
+That exception marks the boundary between level 2 and level 3. Level 2 knows that one function calls another. It knows nothing about the values that travel between them.
 
-### Rung 3 says what flows inside one function
+### Level 3 says what flows inside one function
 
-Rung 3 builds three graphs for each callable. Node identifiers name the callable, the line, and the column, so `build_query@6:4` is the node in `build_query` at line 6, column 4.
+Level 3 builds three graphs for each callable. Node identifiers name the callable, the line, and the column. This page shortens them, so `build_query@6:4` is the node in `build_query` at line 6, column 4.
 
-<Aside type="note" title="The dataflow numbers below come from a rung 4 build">
-Rung 3 builds all three graphs of this section. It does not build the parameter vertices that a value name resolves to, and it does not carry the `points-to` edges. So the data-dependence graph and the slice below need `analysis_level=AnalysisLevel.system_dependency_graph`. A rung 3 data-dependence graph for the same function is narrower, not different.
+<Aside type="note" title="The dataflow numbers below come from a level 4 build">
+Level 3 builds all three graphs of this section. It does not build the parameter vertices that a value name resolves to, and it does not carry the `points-to` edges. So the data-dependence graph and the slice below need `analysis_level=AnalysisLevel.system_dependency_graph`. A level 3 data-dependence graph for the same function is narrower, not different.
 </Aside>
 
 The **control-flow graph**, or CFG, records the order in which statements can run. codeanalyzer-python emits seven edges for `build_query`, and each edge carries a kind.
@@ -241,7 +259,7 @@ flowchart TD
 
 Line 8 runs only when the test on line 7 is true, so line 8 is control-dependent on line 7. Line 9 runs whatever line 7 decides, so line 9 is not control-dependent on line 7.
 
-The **data-dependence graph**, or DDG, records which statement produced the value that another statement reads. It holds two more kinds of node. A **parameter vertex** stands for one parameter of the callable, or for the value it returns, and it sits at the signature line. A **call-site vertex** stands for one argument or one result at a call.
+The **data-dependence graph**, or DDG, records which statement produced the value that another statement reads. It holds two more kinds of node. A **parameter vertex** stands for a value that enters or leaves the callable, such as a parameter or the return value. It sits at the signature line. A **call-site vertex** stands for one argument or one result at a call.
 
 The full DDG for `build_query` holds seventeen edges. The figure below draws eight of them. The other nine touch a parameter vertex, touch a call-site vertex, or carry the name `sanitize` itself into line 6.
 
@@ -262,30 +280,40 @@ Each edge names the variable that carries the value and the provenance that just
 A **forward slice** is the set of program points that a value at one point can affect. The forward slice of `user_input` inside `build_query` holds seven nodes.
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.python(
+    project_path="queries",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
 sl = analysis.slice_forward("user_input", within="build_query")
-sl.total                           # -> 7
-[node.ref for node in sl.roots]    # -> ['build_query@formal_in:0']
+print(sl.total)                                         # -> 7
+print([(node.kind, node.name) for node in sl.roots])    # -> [('parameter', 'user_input')]
 ```
 
-The one root is `build_query@formal_in:0`, the parameter vertex for `user_input`. The seven nodes cover lines 6, 7, 8, and 9, plus three nodes on the signature line. Every one of them stays inside `build_query`.
+The one root is `build_query@formal_in:0`, the parameter vertex for `user_input`. The seven nodes cover lines 6, 7, 8, and 9, plus three nodes on the signature line. On codeanalyzer-python 1.5.3, every one of them stays inside `build_query`. On 1.5.4, the same slice also enters `sanitize` and holds 14 nodes. [System dependence](/guides/system-dependence/#what-the-pinned-python-backend-does-not-link) explains why.
 
-### Rung 4 says what flows across the call
+### Level 4 says what flows across the call
 
-Rung 4 joins the per-callable graphs into one **system dependence graph**, or SDG. It adds edges that bind an argument at a call site to the matching parameter of the callee. It adds edges that carry a result back. It adds **summary** edges. A summary edge joins an argument of one call to a result of that same call, and it records that the value gets through.
+Level 4 joins the per-callable graphs into one **system dependence graph**, or SDG. It adds edges that bind an argument at a call site to the matching parameter of the callee. It adds edges that carry a result back. It adds **summary** edges. A summary edge joins an argument of one call to a result of that same call, and it records that the value gets through.
 
-The TypeScript backend links `userInput` across the call into `sanitize`. Build the analysis for the TypeScript project at rung 4 first.
+The TypeScript backend links `userInput` across the call into `sanitize`. Build the analysis for the TypeScript project at level 4 first.
 
 ```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
 analysis = CLDK.typescript(
     project_path="queries-ts",
     analysis_level=AnalysisLevel.system_dependency_graph,
 )
 
-analysis.flows_to_call("userInput", "sanitize", within="buildQuery")
+print(analysis.flows_to_call("userInput", "sanitize", within="buildQuery"))
 # -> True
 ```
 
-The boolean says that a flow exists. The next call returns the witness.
+The boolean says that a flow exists. The next call, on the same `analysis` object, returns the witness.
 
 ```python
 flows = analysis.paths_between(
@@ -293,7 +321,7 @@ flows = analysis.paths_between(
     src_within="buildQuery",
     dst_within="sanitize",
 )
-len(flows.paths)    # -> 1
+print(len(flows.paths))    # -> 1
 ```
 
 The single path has two hops. The figure below draws it as CLDK reports it.
@@ -304,38 +332,42 @@ flowchart LR
     A -->|"argument · prov []"| RAW["raw in sanitize"]
 ```
 
-The first hop is a `data` hop with the provenance `reaching-defs`, and it stays inside `buildQuery`. The second hop is an `argument` hop, and it crosses into `sanitize`. Its provenance list is empty, because the call itself is all the evidence a parameter edge needs. The forward slice grows to match:
+The first hop is a `data` hop with the provenance `reaching-defs`, and it stays inside `buildQuery`. The second hop is an `argument` hop, and it crosses into `sanitize`. Its provenance list is empty, because the call itself is all the evidence a parameter edge needs. On the same `analysis` object, the forward slice grows to match:
 
 ```python
-analysis.slice_forward("userInput", within="buildQuery").total
+print(analysis.slice_forward("userInput", within="buildQuery").total)
 # -> 11
 ```
 
-<Aside type="caution" title="Rung 4 crosses calls in TypeScript, not in Python">
-codeanalyzer-typescript 1.6.0 links value flow across a call, as the numbers above record. codeanalyzer-python 1.5.2 emits the parameter vertices and the summary records, and the SDK traversal does not connect them. This defect is fixed in codeanalyzer-python 1.5.4 ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). CLDK 2.0.0rc7 pins `codeanalyzer-python==1.5.2`, so the pre-release still carries it ([python-sdk #413](https://github.com/codellm-devkit/python-sdk/issues/413) tracks the pin bump). To get the fix today, install the backend over the pin with `pip install "codeanalyzer-python==1.5.4"`. Every cross-procedure value-flow example in this track uses TypeScript, because that is what the pinned backends answer today. For Python on 1.5.2, treat rung 4 value queries as intraprocedural.
+<Aside type="caution" title="Level 4 crosses calls in TypeScript, not in Python">
+codeanalyzer-typescript 1.6.0 links value flow across a call, as the numbers above record. codeanalyzer-python 1.5.3 emits the parameter vertices and the summary records. If a caller passes a parameter straight into a call, 1.5.3 connects the argument to the caller entry, not to the parameter. So the value of that parameter never reaches the callee.
+
+codeanalyzer-python 1.5.4 fixes this defect ([issue #220](https://github.com/codellm-devkit/codeanalyzer-python/issues/220)). [Get the fix](/guides/system-dependence/#get-the-fix) gives the steps for pip and for uv.
+
+The examples on this page that find a flow across a call use TypeScript. On 1.5.3 and on 1.5.4, a Python `False` or `exhausted` answer is not evidence that no value flows into or across a call.
 </Aside>
 
 ## How to read this track
 
-Read the four pages in rung order. Each page assumes the page before it.
+Read the four pages in order, from level 1 to level 4. Each page assumes the page before it.
 
 <Steps>
-1. [Symbol tables](/guides/symbol-tables/) builds rung 1. It shows you how to list classes, find a method, and pull exact source text.
+1. [Symbol tables](/guides/symbol-tables/) builds level 1. It shows you how to list classes, find a method, and map a file position to a declaration.
 
-2. [Call graphs](/guides/call-graphs/) builds rung 2. It shows you callers, callees, and callable reachability, and it states where dispatch stays unresolved.
+2. [Call graphs](/guides/call-graphs/) builds level 2. It shows you callers, callees, and callable reachability, and it states where dispatch stays unresolved.
 
-3. [Dataflow graphs](/guides/dataflow/) builds rung 3. It covers the three per-callable graphs, slices, flow paths, and the provenance order.
+3. [Dataflow graphs](/guides/dataflow/) builds level 3. It covers the three per-callable graphs, slices, flow paths, and the provenance order.
 
-4. [System dependence](/guides/system-dependence/) builds rung 4. It covers parameter edges, summary edges, and the two-phase traversal that crosses a call.
+4. [System dependence](/guides/system-dependence/) builds level 4. It covers parameter edges, summary edges, and the two-phase traversal that crosses a call.
 </Steps>
 
-[Taint analysis](/guides/taint/) sits on top of rung 4. Read it last, because its refutations only mean what the four rungs beneath them support.
+[Taint analysis](/guides/taint/) sits on top of level 4. Read it last, because its refutations only mean what the four levels beneath them support.
 
 ## Background reading
 
-For a reader-friendly book-length introduction to this whole field, read Michael D. Ernst, "Program Analysis" (course book), at [https://homes.cs.washington.edu/~mernst/pubs/program-analysis-book.pdf](https://homes.cs.washington.edu/~mernst/pubs/program-analysis-book.pdf). It assumes no prior background and it covers every term on this page.
+For a reader-friendly introduction to program analysis, read Michael D. Ernst, "Program Analysis" (course book), at [https://homes.cs.washington.edu/~mernst/pubs/program-analysis-book.pdf](https://homes.cs.washington.edu/~mernst/pubs/program-analysis-book.pdf).
 
-Three papers define the graphs that rungs 3 and 4 build. The later pages cite them where they apply.
+Three papers define the graphs that levels 3 and 4 build. The later pages cite them where they apply.
 
 - Weiser, "Program Slicing", ICSE 1981. The origin of slicing.
 - Ferrante, Ottenstein, Warren, "The Program Dependence Graph and Its Use in Optimization", ACM TOPLAS 9(3):319-349, 1987. The PDG and control dependence.
@@ -344,7 +376,7 @@ Three papers define the graphs that rungs 3 and 4 build. The later pages cite th
 ## Where to go next
 
 <CardGrid>
-  <LinkCard title="Symbol tables" description="Rung 1: the structured inventory of a project, and how to pull exact source text from it." href="/guides/symbol-tables/" />
+  <LinkCard title="Symbol tables" description="Level 1: the structured inventory of a project, and how to look up a declaration in it." href="/guides/symbol-tables/" />
   <LinkCard title="Quickstart" description="Install CLDK, point it at a project, and run your first query." href="/quickstart/" />
-  <LinkCard title="Cheat sheet" description="Every analysis method in one table, with the rung each one needs." href="/resources/cheatsheet/" />
+  <LinkCard title="Cheat sheet" description="Every analysis method, with the analysis level that each one needs." href="/resources/cheatsheet/" />
 </CardGrid>

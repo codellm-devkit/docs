@@ -5,7 +5,9 @@ description: "Technical reference for the Python backend. Jedi resolves the symb
 
 import { Tabs, TabItem, Steps, Aside, LinkCard, CardGrid, FileTree, Badge } from "@astrojs/starlight/components";
 
-The **codeanalyzer-python** backend is the Python backend behind `PythonAnalysis` in CLDK. It runs **Jedi** for symbol resolution and the level-1 call graph. At level 2, a **defuse linker** adds call edges through local def-use chains. Levels 3 and 4 build the dataflow graphs from the standard `ast` module. The output is the canonical schema v2 `Analysis` envelope with a `PyApplication` inside. The schema ships with the backend, and the CLDK Python SDK re-exports it.
+The **codeanalyzer-python** backend is the Python backend behind `PythonAnalysis` in CLDK. It runs **Jedi** for symbol resolution and the level-1 call graph. At level 2, a **defuse linker** adds call edges through local def-use chains. Levels 3 and 4 build the dataflow graphs from the standard `ast` module. At level 4, Scalpel, a Python static-analysis library, finds the names that can refer to the same object.
+
+The output is the canonical schema v2 `Analysis` envelope with a `PyApplication` inside. The schema ships with the backend, and the CLDK Python SDK re-exports it.
 
 ## Overview
 
@@ -21,7 +23,7 @@ The backend produces:
 
 ```mermaid
 flowchart LR
-    A["Input: project_path"] --> B["Virtualenv<br/>+ deps"]
+    A["Input: project_path"] --> B["Virtual environment<br/>+ deps"]
     B --> C["Jedi: symbol table<br/>+ Jedi call edges"]
     B --> D["defuse linker<br/>(level 2)"]
     D --> E["Merge edges"]
@@ -34,7 +36,7 @@ flowchart LR
 
 ## Key modules
 
-- **`codeanalyzer.core:Codeanalyzer`**: Orchestrates the analysis pipeline, manages the virtualenv and the cache, and runs the semantic passes.
+- **`codeanalyzer.core:Codeanalyzer`**: Orchestrates the analysis pipeline, manages the virtual environment and the cache, and runs the semantic passes.
 - **`codeanalyzer.syntactic_analysis:SymbolTableBuilder`**: Parses Python source with the standard `ast` module and Jedi, and extracts modules, classes, methods, and call sites.
 - **`codeanalyzer.semantic_analysis.call_graph`**: Converts the persisted `PyCallEdge` list into a `networkx.DiGraph` for in-process queries, and back.
 - **`codeanalyzer.semantic_analysis.defuse_linker`**: Resolves level-2 call sites through local def-use chains and module-scope bindings.
@@ -50,7 +52,7 @@ The file `codeanalyzer/schema/py_schema.py` defines all models, and the CLDK SDK
 ```python
 class PyApplication(BaseModel):
     symbol_table: Dict[str, PyModule]  # file_path → PyModule
-    call_graph: List[PyCallEdge] = []  # edges with source → target signature
+    call_graph: List[PyCallEdge] = []  # edges with src → dst ids
 ```
 
 ### Symbol table
@@ -62,7 +64,7 @@ class PyModule(BaseModel):
     module_name: str
     imports: List[PyImport] = []
     comments: List[PyComment] = []
-    classes: Dict[str, PyClass] = {}         # class_name → PyClass
+    types: Dict[str, PyClass] = {}           # class signature → PyClass
     functions: Dict[str, PyCallable] = {}    # function_name → PyCallable
     variables: List[PyVariableDeclaration] = []
     content_hash: Optional[str] = None       # for cache invalidation
@@ -76,11 +78,10 @@ class PyClass(BaseModel):
     name: str
     signature: str  # e.g., "my_pkg.module.ClassName"
     comments: List[PyComment] = []
-    code: str | None = None
     base_classes: List[str] = []  # parent signatures
-    methods: Dict[str, PyCallable] = {}           # method_name → PyCallable
+    callables: Dict[str, PyCallable] = {}         # method_name → PyCallable
     attributes: Dict[str, PyClassAttribute] = {}  # attr_name → attribute
-    inner_classes: Dict[str, "PyClass"] = {}
+    types: Dict[str, "PyClass"] = {}              # nested classes
     start_line: int
     end_line: int
 ```
@@ -92,17 +93,16 @@ class PyCallable(BaseModel):
     path: str
     signature: str  # e.g., "my_pkg.module.ClassName.method_name"
     comments: List[PyComment] = []
-    decorators: List[str] = []
+    decorators: List[PyDecorator] = []
     parameters: List[PyCallableParameter] = []
     return_type: Optional[str] = None
-    code: str | None = None  # source code of the callable
     start_line: int
     end_line: int
     code_start_line: int
     accessed_symbols: List[PySymbol] = []      # local variable / import refs
     call_sites: List[PyCallsite] = []          # calls made within this callable
-    inner_callables: Dict[str, "PyCallable"] = {}
-    inner_classes: Dict[str, "PyClass"] = {}
+    callables: Dict[str, "PyCallable"] = {}    # nested functions
+    types: Dict[str, "PyClass"] = {}           # nested classes
     local_variables: List[PyVariableDeclaration] = []
     cyclomatic_complexity: int = 0
 ```
@@ -128,11 +128,10 @@ class PyCallsite(BaseModel):
 **`PyCallEdge`**: A directed edge in the call graph.
 ```python
 class PyCallEdge(BaseModel):
-    source: str  # caller PyCallable.signature
-    target: str  # callee PyCallable.signature
-    type: Literal["CALL_DEP"] = "CALL_DEP"
+    src: str  # caller id, "can://<app>/python/..."
+    dst: str  # callee id
     weight: int = 1
-    provenance: List[Literal["jedi", "codeql", "joern"]] = []
+    prov: List[Literal["jedi", "defuse"]] = []
 ```
 
 ### Supporting models
@@ -162,7 +161,7 @@ class PyComment(BaseModel):
 
 All Py* models support:
 - Pydantic **v1 and v2** compatibility, built into `codeanalyzer.schema.py_schema`. The CLDK SDK itself needs Pydantic 2.
-- **Builder pattern**: `PyModule.builder().module_name("x").types({...}).build()`.
+- **Builder pattern**: `PyModule.builder().file_path("x.py").module_name("x").types({...}).build()`.
 - **Serialization**: `model_dump_json()`. JSON is the single wire format.
 
 ## CLI interface
@@ -185,18 +184,18 @@ The CLI is for backend developers and direct analysis runs. CLDK SDK users reach
 | --- | --- | --- | --- | --- |
 | `--input` | `-i` | PATH | Required, except with `--emit schema` | Project root directory to analyze |
 | `--output` | `-o` | PATH | None | Write `analysis.json` to this directory (stdout if None) |
-| `--emit` | | `json \| neo4j \| schema` | json | Output target: `json` (analysis.json), `neo4j` (`graph.cypher`, or a live Bolt push with `--neo4j-uri`), or `schema` (Neo4j schema contract, which needs no input) |
+| `--emit` | | `json \| neo4j \| schema` | json | Output target: `json` (analysis.json), `neo4j` (`graph.cypher`, or a live Bolt push with `--neo4j-uri` or `NEO4J_URI`), or `schema` (Neo4j schema contract, which needs no input) |
 | `--app-name` | | str | input dir name | Application name for the graph `:PyApplication` anchor |
-| `--neo4j-uri` | | str | None (`NEO4J_URI`) | Push the graph to a live Neo4j over Bolt (incremental). Omit it to write `graph.cypher` |
+| `--neo4j-uri` | | str | None (`NEO4J_URI`) | Push the graph to a live Neo4j over Bolt (incremental). Without this flag and without `NEO4J_URI`, the backend writes `graph.cypher` |
 | `--neo4j-user` | | str | neo4j (`NEO4J_USERNAME`) | Neo4j username |
 | `--neo4j-password` | | str | neo4j (`NEO4J_PASSWORD`) | Neo4j password (use the env var) |
 | `--neo4j-database` | | str | server default (`NEO4J_DATABASE`) | Neo4j database name |
 | `--analysis-level` | `-a` | 1-4 | 1 | Analysis depth. `1` symbol table and Jedi call graph. `2` adds defuse-linker call edges. `3` adds CFG, CDG, and DDG per callable. `4` adds the interprocedural SDG |
 | `--graph-field-depth` | | int | 3 | Level 3 only. Access-path depth bound for the DDG |
-| `--no-venv` / `--venv` | | bool | venv | Skip the virtualenv, and resolve imports against the ambient Python environment |
+| `--no-venv` / `--venv` | | bool | venv | Skip the virtual environment, and resolve imports against the ambient Python environment |
 | `--ray` / `--no-ray` | | bool | false | Enable Ray for distributed analysis |
 | `--eager` / `--lazy` | | bool | lazy | Force rebuild cache (eager) or reuse cached results (lazy) |
-| `--cache-dir` | `-c` | PATH | `.codeanalyzer` in input dir | Where to store the virtualenv and the analysis cache |
+| `--cache-dir` | `-c` | PATH | `.codeanalyzer` in input dir | Where to store the virtual environment and the analysis cache |
 | `--keep-cache` / `--clear-cache` | | bool | keep | Retain cache after analysis (default) or remove it |
 | `--skip-tests` / `--include-tests` | | bool | skip | Exclude or include `test_*.py` files, `*_test.py` files, and `tests` directories |
 | `--file-name` | | PATH | None | Analyze only a single file (relative to input dir) |
@@ -220,7 +219,7 @@ Level 2 adds the defuse-linker edges to the Jedi edges. Each edge records its pr
 ```bash
 canpy -i ./my_pkg --ray
 ```
-The command runs the analysis in parallel on Ray across the available cores.
+The command builds the symbol table of each file in parallel on Ray workers. The later stages of the analysis run in one process.
 
 **Save to a file:**
 ```bash
@@ -232,7 +231,7 @@ The command writes `results/analysis.json`.
 ```bash
 canpy -i ./my_pkg --cache-dir /tmp/analysis-cache --eager
 ```
-The command rebuilds the virtualenv and the analysis cache in `/tmp/analysis-cache/.codeanalyzer`.
+The command rebuilds the virtual environment and the analysis cache in `/tmp/analysis-cache/.codeanalyzer`.
 
 **Single file:**
 ```bash
@@ -242,9 +241,9 @@ The command analyzes only `src/handlers.py`.
 
 ## How the SDK consumes it
 
-A call to `CLDK.python(project_path="my_pkg")` in the Python SDK proceeds as follows:
+A call to `CLDK.python(project_path="flask")` in the Python SDK proceeds as follows:
 
-1. **Import**: `codeanalyzer-python` is a pinned dependency of `cldk`, and the SDK imports it in the same process. The backend creates a virtualenv for the dependencies of the analyzed project under `<cache_dir>/python/.codeanalyzer/<project name>/virtualenv`.
+1. **Import**: `codeanalyzer-python` is a pinned dependency of `cldk`, and the SDK imports it in the same process. The backend creates a virtual environment for the dependencies of the analyzed project under `<cache_dir>/python/.codeanalyzer/<project name>/virtualenv`.
 
 2. **Run**: The SDK builds an `AnalysisOptions` object with the analysis level, `rebuild_analysis`, `using_ray`, and `cache_dir`. Then it calls `Codeanalyzer(options).analyze()` in the same process. The SDK runs no `canpy` subprocess and reads no stdout.
 
@@ -257,6 +256,14 @@ A call to `CLDK.python(project_path="my_pkg")` in the Python SDK proceeds as fol
    - `get_callers(target_class_name, target_method_declaration) → Dict`
    - `get_callees(source_class_name, source_method_declaration) → Dict`
 
+The examples below run on Flask 3.1.3. Clone it into your working directory first:
+
+```bash
+git clone --depth 1 --branch 3.1.3 https://github.com/pallets/flask.git
+```
+
+In an activated virtual environment, set `SYSTEM_PYTHON` before you run the Python examples. For the command, see [Installing CLDK](/installing/#language-specific-dependencies).
+
 <Tabs syncKey="lang">
   <TabItem label="Direct SDK usage">
 ```python
@@ -265,7 +272,7 @@ from cldk.analysis import AnalysisLevel
 from cldk.analysis.commons.backend_config import PyCodeAnalyzerConfig
 
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     analysis_level=AnalysisLevel.call_graph,
     backend=PyCodeAnalyzerConfig(use_ray=True),  # optional; parallel analysis with Ray
 )
@@ -277,16 +284,16 @@ classes = analysis.get_classes()
 # Compute reachability
 call_graph = analysis.get_call_graph()
 import networkx as nx
-is_reachable = nx.has_path(call_graph, "my_pkg.main", "my_pkg.unsafe_sink")
+is_reachable = nx.has_path(call_graph, "src.flask.app.Flask.__call__", "src.flask.app.Flask.full_dispatch_request")
 
 # Find callers
-callers = analysis.get_callers("my_pkg.MyClass", "process")
+callers = analysis.get_callers("src.flask.app.Flask", "wsgi_app")
 ```
   </TabItem>
   <TabItem label="CLI directly">
 ```bash
-canpy -i ./my_pkg --codeql --output ./results --format json
-cat results/analysis.json | jq '.symbol_table | keys'
+canpy -i ./flask --output ./results
+cat results/analysis.json | jq '.application.symbol_table | keys'
 ```
   </TabItem>
 </Tabs>
@@ -295,7 +302,7 @@ cat results/analysis.json | jq '.symbol_table | keys'
 
 The **type** of the `backend=` configuration that you pass to `CLDK.python(...)` selects the backend:
 
-- **In-memory codeanalyzer** (default): omit `backend=`, or pass `backend=PyCodeAnalyzerConfig(...)`. The Python-only knob `use_ray=...` lives on this configuration, as does `cache_dir=...`.
+- **Local codeanalyzer** (default, in-process): omit `backend=`, or pass `backend=PyCodeAnalyzerConfig(...)`. The Python-only knob `use_ray=...` lives on this configuration, as does `cache_dir=...`.
 - **Read-only Neo4j**: pass `backend=Neo4jConnectionConfig(...)` to query a graph populated out of band. CLDK runs no local analysis.
 
 ```python
@@ -305,25 +312,24 @@ from cldk.analysis.commons.backend_config import (
     Neo4jConnectionConfig,
 )
 
-# In-memory backend with Ray + custom cache directory
+# Local backend with Ray + custom cache directory
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     backend=PyCodeAnalyzerConfig(
-        use_ray=True,
         use_ray=True,
         cache_dir="/tmp/analysis-cache",
     ),
 )
 
-# Read-only Neo4j backend
+# Read-only Neo4j backend (needs a running Neo4j that holds the graph)
 analysis = CLDK.python(
-    project_path="my_pkg",
+    project_path="flask",
     backend=Neo4jConnectionConfig(
         uri="bolt://localhost:7687",
         username="neo4j",
         password="neo4j",
         database=None,
-        application_name="my_pkg",
+        application_name="flask",
     ),
 )
 ```
@@ -336,12 +342,12 @@ The read-only backend queries a graph that codeanalyzer-python populates with `c
 
 `CLDK.python(...)` accepts the `project_path`, `analysis_level`, `target_files`, and `eager` keyword arguments. The `CLDK(language="python").analysis(...)` form is **deprecated**. Use `CLDK.python(...)`. The `from cldk import CLDK` import is the same for both forms.
 
-### Caching and virtualenv management
+### Caching and virtual environment management
 
 - **Cache location**: One language-keyed `cache_dir` (default: `<project_dir>/.codeanalyzer`). Python artifacts live under `<cache_dir>/python/`. Set it with `backend=PyCodeAnalyzerConfig(cache_dir=...)`.
-- **Virtualenv**: The backend creates it under the cache directory. It installs dependencies from `requirements.txt`, `pyproject.toml`, `setup.py`, and `Pipfile`.
+- **Virtual environment**: The backend creates it under the cache directory. It installs dependencies from `requirements.txt`, `pyproject.toml`, `setup.py`, and `Pipfile`.
 - **Analysis cache**: Indexed by file content hash. Unchanged files reuse cached results.
-- **Dataflow levels**: Levels 3 and 4 run in-process from the standard `ast` module. The backend downloads no analysis tool.
+- **Dataflow levels**: Levels 3 and 4 run in-process from the standard `ast` module. At level 4, a copy of Scalpel inside the backend finds the names that can refer to the same object. The backend downloads no analysis tool.
 
 To force a clean rebuild, pass `eager=True` to `CLDK.python(...)`, or `--eager` on the CLI. You can also remove the cache directory.
 

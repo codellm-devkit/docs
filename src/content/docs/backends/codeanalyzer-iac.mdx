@@ -54,7 +54,7 @@ With no path, the input is `.`. With no `--app-name`, the application takes the 
 ## Analysis levels
 
 <Aside type="caution" title="This scale is not the SDK scale">
-`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and `caniac` rejects level 4. Read this table, not the [dataflow levels](/guides/concepts/#the-ladder-cldk-builds).
+`caniac` takes `-a 1|2|3`. The language backends take `-a 1..4`. The numbers do not line up, and `caniac` rejects level 4. Read this table, not the [SDK analysis levels](/guides/concepts/#the-four-levels-cldk-builds).
 </Aside>
 
 | Level | Adds | Never does |
@@ -66,6 +66,13 @@ With no path, the input is `.`. With no `--app-name`, the application takes the 
 `-a/--analysis-level` takes 1, 2, or 3, and defaults to 1. The levels are additive. Every fact that a lower level published is present, unchanged, at every higher level.
 
 The graph always receives the deepest implemented level, which is L3 today. `--emit cypher` and `--emit neo4j` therefore raise the level to 3 unless you passed `--analysis-level` yourself. If you pass an explicit level below 3 with those targets, `caniac` rejects the run with an error. It does not silently raise the level.
+
+These commands use the test data in the codeanalyzer-iac repository. Run them in a clone of the repository:
+
+```bash
+git clone --depth 1 --branch v0.1.0 https://github.com/codellm-devkit/codeanalyzer-iac.git
+cd codeanalyzer-iac
+```
 
 ```bash
 caniac testdata/helm/l1-v2 --app-name payments --analysis-level 1 > analysis.json

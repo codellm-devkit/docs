@@ -1,14 +1,14 @@
 ---
 title: Examples
-description: Runnable CLDK examples for Python, Java, TypeScript, JavaScript, and infrastructure-as-code, grouped by analysis task.
+description: Runnable CLDK examples for Python, Java, TypeScript, and JavaScript, grouped by analysis task.
 ---
 
 import { CardGrid, LinkCard, Aside } from "@astrojs/starlight/components";
 
-Every example calls the public methods of the CLDK Python SDK. The sample output is illustrative. The examples are grouped by task. They use the same sample projects as the rest of these docs: a generic `my_pkg` for Python, [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) for Java, a generic `my_app` for TypeScript and JavaScript, and the [Quarkus Coffee Shop](https://github.com/quarkuscoffeeshop/quarkuscoffeeshop-helm) Helm chart for infrastructure-as-code.
+Every example calls the public methods of the CLDK Python SDK. The examples are grouped by task. They use the same sample projects as the rest of these docs. Python uses [Flask](https://github.com/pallets/flask), Java uses [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/), and TypeScript uses [Zod](https://github.com/colinhacks/zod). JavaScript uses a small `my_app` project.
 
 <Aside type="tip" title="One API, three languages">
-The Python, Java, and TypeScript pages follow the same pattern. First, the factory for the language builds the analysis (`CLDK.java(project_path=...)`, `CLDK.python(project_path=...)`, `CLDK.typescript(project_path=...)`). Then the analysis method for the task returns the result. JavaScript projects use the TypeScript factory. Infrastructure-as-code has no factory yet, so its page uses the `caniac` command, `jq`, and Cypher.
+The Python, Java, and TypeScript pages follow the same pattern. First, the factory for the language builds the analysis (`CLDK.java(project_path=...)`, `CLDK.python(project_path=...)`, `CLDK.typescript(project_path=...)`). Then the analysis method for the task returns the result. JavaScript projects use the TypeScript factory. Infrastructure-as-code has no factory yet. See the [codeanalyzer-iac](/backends/codeanalyzer-iac/) backend page.
 </Aside>
 
 <CardGrid>
@@ -21,6 +21,3 @@ The Python, Java, and TypeScript pages follow the same pattern. First, the facto
 ## Related pages
 
 For the full method list instead of worked snippets, see the [API reference](/reference/python-api/). For the model behind them, see [Core concepts](/guides/concepts/).
-
-<CardGrid>
-</CardGrid>
