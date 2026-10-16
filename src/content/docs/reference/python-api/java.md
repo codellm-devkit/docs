@@ -3,116 +3,512 @@ title: "Java API"
 description: "Program analysis for Java and related data models."
 ---
 
-Java is the most complete CLDK analysis. `JavaAnalysis` gives you a typed symbol
-table, a call graph, subclass and interface queries, and comments.
-[COCOA](/cocoa/) builds on these calls.
+`CLDK.java()` returns a `JavaAnalysis` object for a Java project. It gives you the
+symbol table, the call graph, the class hierarchy and the comments. CLDK 2.0 adds
+control flow and data flow inside each method, slices, value flow across calls,
+taint, entrypoint overviews and coverage, and the project artifacts. The analysis
+level that you ask for decides which of these you get.
 
-## Overview
-
-`CLDK.java(project_path=...)` returns a `JavaAnalysis` object backed by the
-[codeanalyzer-java](/backends/codeanalyzer-java/) backend, which uses WALA. It
-builds the symbol table, the call graph, the subclass and interface
-relationships, and the comments. In CLDK 2.0 the backend is the optional extra
-`cldk[java]`, and its wheel carries the jar and its own JVM. Caching is on by
-default under `<project>/.codeanalyzer`.
+The analyzer is [codeanalyzer-java](/backends/codeanalyzer-java/). It parses the
+source with JavaParser for the symbol table and the declared call edges. These edges
+come from the source alone, so they need no build. The analyzer also computes the
+control flow and data flow inside each method, and the parameter edges across calls,
+from the source. It runs WALA on the compiled classes to add the RTA (rapid type
+analysis) call edges and, at `system_dependency_graph`, the alias-aware (points-to)
+data dependence.
 
 ```mermaid
 flowchart LR
     P[Java project] --> A["CLDK.java(project_path)"]
-    A --> S[Symbol table]
-    A --> CG[Call graph]
-    A --> H[Subclasses & interfaces]
-    A --> CM[Comments]
+    A --> S["symbol_table: classes, methods, fields"]
+    S --> CG["call_graph: adds who calls whom"]
+    CG --> PDG["program_dependency_graph: adds flow inside a method"]
+    PDG --> SDG["system_dependency_graph: adds flow across calls, taint"]
 ```
 
-**Analysis levels.** `analysis_level` controls how much CLDK computes.
-`AnalysisLevel.symbol_table`, the default, populates classes, methods, and
-fields. `AnalysisLevel.call_graph` adds the call graph that `get_call_graph`,
-`get_callers`, and `get_callees` need. CLDK 2.0 adds
-`AnalysisLevel.program_dependency_graph` and
-`AnalysisLevel.system_dependency_graph` for dataflow. See
-[Dataflow graphs](/guides/dataflow/). If you need call relationships, set the
-level when you build the analysis:
+## Before you start
 
-```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
+### Install the Java extra
 
-analysis = CLDK.java(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-)
+```bash
+pip install "cldk[java]"
 ```
 
-To run against a read-only Neo4j backend instead of the in-process backend, pass
-a `Neo4jConnectionConfig` as `backend=`:
+CLDK runs on Python 3.11 to 3.14. For details, see
+[Supported Python versions](/installing/#supported-python-versions). The `java`
+extra installs codeanalyzer-java 3.3.3, which carries the analyzer and its own Java
+runtime. Keep the quotes, because zsh reads the brackets as a file pattern. For the
+[Neo4j backend](#neo4j-backend), install `"cldk[java,neo4j]"`. For uv and Poetry,
+see [Installing CLDK](/installing/).
 
-```python
-from cldk import CLDK
-from cldk.analysis import AnalysisLevel
-from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+If you install `cldk` without the extra, `CLDK.java()` raises
+`CodeanalyzerExecutionException` and tells you to install `"cldk[java]"`.
 
-analysis = CLDK.java(
-    project_path="commons-cli",
-    analysis_level=AnalysisLevel.call_graph,
-    backend=Neo4jConnectionConfig(
-        uri="bolt://localhost:7687",
-        username="neo4j",
-        password="password",
-        database="neo4j",
-        application_name="commons-cli",
-    ),
-)
+### Install a JDK and Maven for `call_graph` and up
+
+The `symbol_table` level runs on the bundled Java runtime and needs nothing else.
+From `call_graph` up, the analyzer compiles the project. For that, it needs:
+
+- a JDK 11 or later with `javac`
+- Maven or Gradle on `PATH`, or a wrapper (`mvnw`, `gradlew`) in the project
+
+Maven uses the JDK in `JAVA_HOME`. If `JAVA_HOME` is not set, Maven uses the
+`java` command on `PATH`. If `JAVA_HOME` points to a Java runtime without
+`javac`, the build fails, even with a JDK on `PATH`.
+
+The build writes its output into the project directory, for example `target/`.
+
+If the JDK or the build tool is missing, the analysis still succeeds. But the call
+graph keeps only the declared call edges, and CLDK logs a warning. Without Maven,
+the warning is:
+
+```text
+codeanalyzer-java did not fully compute analysis_level=call_graph: RTA call graph unavailable (NullPointerException: null); emitting declared edges only
 ```
+
+If Maven is available but the JDK is missing, the warning names
+`RuntimeException: No application classes found.` instead. In both cases, the cause
+is the missing tool. The warning names the analysis level that you ask for. At
+`system_dependency_graph`, a second warning names
+`L4 semantic ddg unavailable (WALA build failed)`. On Commons CLI, the call graph
+then has 648 nodes and 1950 edges. The full call graph has 652 nodes and 1980
+edges with JDK 17, or 1976 edges with JDK 21 or 25.
+
+`analysis.backend.analyzer_diagnostics` holds the same messages. An empty list there
+means that the analyzer reported no problem. `None` means that CLDK has no record of
+what the analyzer reported, for example for an `analysis.json` that you copied into
+the cache. In that case, CLDK logs a warning that starts with
+`codeanalyzer-java recorded no degradation verdict`.
+
+To install the tools, see
+[Language-specific dependencies](/installing/#language-specific-dependencies). After
+you install them, pass `eager=True` once, because the cache keeps the reduced
+analysis.
+
+### Get the sample project
+
+The examples use Apache Commons CLI 1.7.0:
+
+```bash
+git clone --depth 1 --branch rel/commons-cli-1.7.0 https://github.com/apache/commons-cli.git
+```
+
+Git can print
+`warning: refs/tags/rel/commons-cli-1.7.0 4c85f63010410c883ff8167f7ed9dde20641855e is not a commit!`
+and a note about a detached HEAD. You can ignore both.
+
+Run Python from the directory that contains `commons-cli`. A relative
+`project_path` starts at the current directory.
+
+### Test sources are part of the analysis
+
+Java analysis includes the test sources under `src/test/`, and you cannot turn this
+off. Python and TypeScript analysis skip tests. On Commons CLI, 44 of the 75 types
+come from `src/test/`. The [worked example](#build-the-analysis) shows how to find
+them.
+
+## Analysis levels
+
+Pass `analysis_level` as an [`AnalysisLevel`](/reference/python-api/core/#analysislevel)
+member, or as its name in a string, for example `"call_graph"`. The default is
+`symbol_table`. An unknown name raises `ValueError`.
+
+| Level | Analyzer flag | Adds | Methods that need it |
+| --- | --- | --- | --- |
+| `symbol_table` (default) | `-a 1` | classes, methods, fields, imports, comments, artifacts | the symbol-table methods |
+| `call_graph` | `-a 2` | the call graph | `get_call_graph`, `get_callers`, `get_callees`, `callers_of`, `callees_of`, `reaches`, `backward_cone`, `call_paths_between`, `get_class_call_graph`, `get_calling_lines` |
+| `program_dependency_graph` | `-a 3` | control flow, control dependence and data dependence inside each method | `get_cfg`, `get_cdg`, `get_ddg` |
+| `system_dependency_graph` | `-a 4` | dependence across calls | `slice_backward`, `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` |
+
+In CLDK 1.5.0, Java analysis stopped at level 2 (`call_graph`). CLDK 2.0 passes each
+level to the analyzer, so levels 3 and 4 work.
+
+:::caution[Below `call_graph`, the call graph is empty]
+At the default `symbol_table` level, the call-graph methods do not raise.
+`get_call_graph()` has 0 nodes, `get_callers()` returns `{}`, `callers_of()` returns
+`[]` and `reaches()` returns `False`. Ask for `call_graph` or deeper before you use
+them. The exception is `using_symbol_table=True` on `get_callers`, `get_callees` and
+`get_class_call_graph`. It reads the call sites from the symbol table, so it answers
+at `symbol_table`.
+:::
+
+Below `program_dependency_graph`, the methods for control flow and data flow raise
+`CodeanalyzerUsageException`. At `program_dependency_graph`, `get_cfg`, `get_cdg` and
+`get_ddg` answer. But `slice_forward`, `paths_between`, `flows_to_call`,
+`flows_to_argument` and `taint` raise `CodeanalyzerExecutionException`, and
+`slice_backward` returns an empty slice. For these six methods, ask for
+`system_dependency_graph`.
+
+At `system_dependency_graph`, `get_ddg` also returns the edges to and from the call
+arguments, the call results, the parameters and the return value. On Commons CLI,
+`get_ddg` for `OptionBuilder.create(java.lang.String)` returns 26 edges, against 10
+at `program_dependency_graph`.
+
+For the ideas behind the levels, see [Call graphs](/guides/call-graphs/),
+[Dataflow inside one function](/guides/dataflow/),
+[System dependence](/guides/system-dependence/) and
+[Taint analysis](/guides/taint/).
+
+## Names of classes and methods
+
+The `JavaAnalysis` methods take class and method names in a fixed form. A name in
+another form often returns an empty result and no error. Copy names from the
+analysis, or resolve them first.
+
+| Name | Form | Example |
+| --- | --- | --- |
+| Class | fully qualified, with nested classes joined by `.` | `org.apache.commons.cli.Option.Builder` |
+| Method | signature with fully qualified parameter types | `create(java.lang.String)`, not `create(String)` |
+| Constructor | `<init>` with the parameter types | `<init>(java.lang.String, java.lang.String)` |
+| Call-graph node | `"<type fqn>.<signature>"`, where fqn is the fully qualified name of the type | `org.apache.commons.cli.OptionBuilder.create(java.lang.String)` |
+
+`get_methods_in_class()` leaves out constructors. Use `get_constructors()` for them.
+
+[`resolve_callable`](#javaanalysisresolve_callable) finds the method for a partial
+name, for example `"withLongOpt"` or `"OptionBuilder.create(java.lang.String)"`. It
+returns a [`SliceNode`](/reference/python-api/results/#slicenode), and its
+`callable` field holds the full node name. It does not expand short parameter types
+such as `create(String)`. If no method matches the name, it raises
+`SelectorNotInGraph`. If more than one method matches, it raises `AmbiguousName`.
 
 ## Worked example
 
-Using [Apache Commons CLI](https://commons.apache.org/proper/commons-cli/) as the
-sample project.
+The outputs come from cldk 2.0.0 and codeanalyzer-java 3.3.3 on Commons CLI 1.7.0,
+with JDK 17 and Maven 3.9. With JDK 21 or 25, the call graph has 1976 edges, not
+1980.
 
-### Get the symbol table
-
-```python
-# Every file -> its compilation unit (classes, methods, fields).
-symbol_table = analysis.get_symbol_table()
-print(len(analysis.get_classes()), "classes")
-# 23 classes
-```
-
-### Build a call graph
+### Build the analysis
 
 ```python
-import networkx as nx
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
 
-cg = analysis.get_call_graph()      # networkx.DiGraph, caller -> callee
-print(cg)                           # DiGraph with N nodes / M edges
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+)
+classes = analysis.get_classes()
+tests = [name for name in classes if analysis.get_java_file(name).startswith("src/test/")]
+print(len(analysis.get_symbol_table()), "files")  # 65 files
+print(len(classes), "types,", len(tests), "from src/test")  # 75 types, 44 from src/test
 ```
+
+The first run builds the project with Maven, so it takes the most time. On Commons
+CLI, it takes about one to two minutes, and the analyzer prints nothing while it
+runs. Later runs read the cache and take a few seconds. `get_classes()` returns all
+declared types: classes, interfaces and nested classes, from main and test code.
+
+### Read the call graph
+
+This block continues the previous one.
+
+```python
+cg = analysis.get_call_graph()
+print(cg)  # DiGraph with 652 nodes and 1980 edges
+
+key = "org.apache.commons.cli.OptionBuilder.create(java.lang.String)"
+detail = cg.nodes[key]["method_detail"]
+print(detail.klass)  # org.apache.commons.cli.OptionBuilder
+print(detail.method_declaration)
+# public static Option create(final String opt) throws IllegalArgumentException
+```
+
+`get_call_graph()` returns a `networkx.DiGraph`. Each node is a
+`"<type fqn>.<signature>"` string. Its `method_detail` attribute is a
+[`JMethodDetail`](#jmethoddetail) with the class, the [`JCallable`](#jcallable) and
+the declaration. Each edge goes from the caller to the callee.
 
 ### Find who calls a method
+
+This block continues the previous one.
 
 ```python
 callers = analysis.get_callers(
     target_class_name="org.apache.commons.cli.OptionBuilder",
-    target_method_declaration="create(String)",
+    target_method_declaration="create(java.lang.String)",
 )
-# -> dict of caller method signatures + call-site locations
+print(len(callers["caller_details"]))  # 16
+for caller in callers["caller_details"][:3]:
+    method = caller["caller_method"]
+    print(method.klass, method.method.signature, caller["calling_lines"])
+# org.apache.commons.cli.OptionBuilder create() [79]
+# org.apache.commons.cli.OptionBuilder create(char) [90]
+# org.apache.commons.cli.AbstractParserTestCase testMissingRequiredGroup() [347, 348, 353]
+
+for node in analysis.callers_of("create(java.lang.String)", in_class="OptionBuilder")[:2]:
+    print(node.callable, node.line)
+# org.apache.commons.cli.OptionBuilder.create() 73
+# org.apache.commons.cli.OptionBuilder.create(char) 89
 ```
 
-See the [common tasks](/guides/common-tasks/) guide for more snippets, and the
-[cocoa](/cocoa/), the Code Context Agent plugin, for exposing these calls to an agent.
+`get_callers()` returns a dictionary with two keys:
+
+- `target_method`: the `JMethodDetail` of the method that you asked about
+- `caller_details`: one entry for each caller, with `caller_method` (a
+  `JMethodDetail`) and `calling_lines` (the lines of the calls, in the file of the
+  caller)
+
+If the name is not a call-graph node, `get_callers()` returns `{}` and raises no
+error. [`get_callees()`](#javaanalysisget_callees) has the same shape, with the keys
+`source_method` and `callee_details`. Each entry in `callee_details` has
+`callee_method` and `calling_lines`.
+
+The 2.0 method [`callers_of()`](#javaanalysiscallers_of) returns
+[`SliceNode`](/reference/python-api/results/#slicenode) objects. In each object,
+`line` is the first line of the calling method, not the line of the call. For
+example, `create()` starts at line 73 and calls `create(java.lang.String)` at line
+79. If no method matches the name, `callers_of()` raises `SelectorNotInGraph`. If
+more than one method matches, it raises `AmbiguousName`.
+
+### Follow a value across calls
+
+This block makes a new analysis at `system_dependency_graph`. The cache holds a lower
+level, so CLDK runs the analyzer again. On Commons CLI, this run takes about one
+minute or longer.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.system_dependency_graph,
+)
+create = "org.apache.commons.cli.OptionBuilder.create(java.lang.String)"
+option_init = "org.apache.commons.cli.Option.<init>(java.lang.String, java.lang.String)"
+
+result = analysis.taint(sources=[("opt", create)], sinks=[("option", option_init)])
+print(result.complete, len(result.paths))  # True 1
+for hop in result.paths[0].hops:
+    print(hop.via, "->", hop.to.kind, hop.to.name)
+# data -> statement None
+# data -> argument None
+# argument -> parameter option
+```
+
+The path starts at the parameter `opt` of `create(java.lang.String)`. It goes to the
+statement `option = new Option(opt, description)`, then to the argument of that
+constructor call. It ends at the constructor parameter `option`. On this path, the
+statement and the argument have no name, so `hop.to.name` is `None` for them. For the
+fields of the result, see [`TaintResult`](/reference/python-api/results/#taintresult).
+
+For more Commons CLI snippets, see [Java examples](/examples/java/).
+
+## What you can ask
+
+Each method links to its entry in the [API reference](#api-reference). The last
+column gives the lowest analysis level at which the methods answer.
+
+| Family | Methods | Lowest level |
+| --- | --- | --- |
+| Symbol table | [`get_symbol_table`](#javaanalysisget_symbol_table), [`get_compilation_units`](#javaanalysisget_compilation_units), [`get_java_compilation_unit`](#javaanalysisget_java_compilation_unit), [`get_java_file`](#javaanalysisget_java_file), [`get_application_view`](#javaanalysisget_application_view), [`get_classes`](#javaanalysisget_classes), [`get_class`](#javaanalysisget_class), [`get_classes_by_criteria`](#javaanalysisget_classes_by_criteria), [`get_interfaces`](#javaanalysisget_interfaces), [`get_enums`](#javaanalysisget_enums), [`get_enum_members`](#javaanalysisget_enum_members), [`get_records`](#javaanalysisget_records), [`get_nested_classes`](#javaanalysisget_nested_classes), [`get_methods`](#javaanalysisget_methods), [`get_methods_in_class`](#javaanalysisget_methods_in_class), [`get_constructors`](#javaanalysisget_constructors), [`get_method`](#javaanalysisget_method), [`get_method_parameters`](#javaanalysisget_method_parameters), [`get_fields`](#javaanalysisget_fields), [`get_imports`](#javaanalysisget_imports), [`get_variables`](#javaanalysisget_variables) | `symbol_table` |
+| Class hierarchy | [`get_class_hierarchy`](#javaanalysisget_class_hierarchy), [`get_sub_classes`](#javaanalysisget_sub_classes), [`get_extended_classes`](#javaanalysisget_extended_classes), [`get_implemented_interfaces`](#javaanalysisget_implemented_interfaces) | `symbol_table` |
+| Addressing | [`locate`](#javaanalysislocate), [`locate_many`](#javaanalysislocate_many), [`resolve_callable`](#javaanalysisresolve_callable), [`resolve_value`](#javaanalysisresolve_value), [`get_source`](#javaanalysisget_source), [`describe`](#javaanalysisdescribe) | `symbol_table` |
+| Bulk reads | [`get_callables_overview`](#javaanalysisget_callables_overview), [`get_method_bodies`](#javaanalysisget_method_bodies), [`get_callsites_for`](#javaanalysisget_callsites_for), [`get_call_targets`](#javaanalysisget_call_targets), [`get_decorated_callables`](#javaanalysisget_decorated_callables), [`get_methods_with_annotations`](#javaanalysisget_methods_with_annotations) | `symbol_table` |
+| Entrypoints and tests | [`get_entrypoints`](#javaanalysisget_entrypoints), [`get_entrypoint_classes`](#javaanalysisget_entrypoint_classes), [`get_entrypoint_coverage`](#javaanalysisget_entrypoint_coverage), [`get_entry_point_methods`](#javaanalysisget_entry_point_methods), [`get_entry_point_classes`](#javaanalysisget_entry_point_classes), [`get_test_methods`](#javaanalysisget_test_methods) | `symbol_table` |
+| Comments | [`get_comments_in_a_class`](#javaanalysisget_comments_in_a_class), [`get_comments_in_a_method`](#javaanalysisget_comments_in_a_method), [`get_comment_in_file`](#javaanalysisget_comment_in_file), [`get_all_comments`](#javaanalysisget_all_comments), [`get_all_docstrings`](#javaanalysisget_all_docstrings) | `symbol_table` |
+| Artifacts and configuration | [`get_artifacts`](#javaanalysisget_artifacts), [`get_dependencies`](#javaanalysisget_dependencies), [`get_config_keys`](#javaanalysisget_config_keys), [`get_config_uses`](#javaanalysisget_config_uses), [`get_unresolved_config_reads`](#javaanalysisget_unresolved_config_reads), [`get_config_readers`](#javaanalysisget_config_readers) | `symbol_table` |
+| View dispatches | [`get_view_dispatches`](#javaanalysisget_view_dispatches), [`get_view_dispatchers`](#javaanalysisget_view_dispatchers), [`get_unresolved_view_dispatches`](#javaanalysisget_unresolved_view_dispatches) | `symbol_table` |
+| Parse a source string | [`is_parsable`](#javaanalysisis_parsable), [`get_raw_ast`](#javaanalysisget_raw_ast) | any level |
+| Call graph | [`get_call_graph`](#javaanalysisget_call_graph), [`get_call_graph_json`](#javaanalysisget_call_graph_json), [`get_callers`](#javaanalysisget_callers), [`get_callees`](#javaanalysisget_callees), [`get_class_call_graph`](#javaanalysisget_class_call_graph), [`get_calling_lines`](#javaanalysisget_calling_lines), [`callers_of`](#javaanalysiscallers_of), [`callees_of`](#javaanalysiscallees_of), [`reaches`](#javaanalysisreaches), [`backward_cone`](#javaanalysisbackward_cone), [`call_paths_between`](#javaanalysiscall_paths_between) | `call_graph` |
+| Graphs inside one method | [`get_cfg`](#javaanalysisget_cfg), [`get_cdg`](#javaanalysisget_cdg), [`get_ddg`](#javaanalysisget_ddg) | `program_dependency_graph` |
+| Slices, value flow and taint | [`slice_backward`](#javaanalysisslice_backward), [`slice_forward`](#javaanalysisslice_forward), [`paths_between`](#javaanalysispaths_between), [`flows_to_call`](#javaanalysisflows_to_call), [`flows_to_argument`](#javaanalysisflows_to_argument), [`taint`](#javaanalysistaint) | `system_dependency_graph` |
+| External symbols | [`get_external_symbols`](#javaanalysisget_external_symbols) | Neo4j backend only |
+
+`get_artifacts`, `get_dependencies`, `get_config_keys`, `get_config_uses` and
+`get_unresolved_config_reads` return models from the Python API, not Java models.
+Their entries are on the Python page:
+[`PyArtifact`](/reference/python-api/python/#pyartifact),
+[`PyDependency`](/reference/python-api/python/#pydependency),
+[`PyConfigKey`](/reference/python-api/python/#pyconfigkey),
+[`PyConfigUseEdge`](/reference/python-api/python/#pyconfiguseedge) and
+[`PyConfigRead`](/reference/python-api/python/#pyconfigread).
+[`get_config_readers`](#javaanalysisget_config_readers) returns
+[`JCallableOverview`](#jcallableoverview) objects.
+
+## What Java refuses
+
+These methods raise an exception instead of a misleading empty result.
+
+| Method | When | Exception |
+| --- | --- | --- |
+| `get_all_crud_operations`, `get_all_create_operations`, `get_all_read_operations`, `get_all_update_operations`, `get_all_delete_operations` | Always. codeanalyzer-java 3.0.1 and later emit no CRUD data ([codeanalyzer-java#187](https://github.com/codellm-devkit/codeanalyzer-java/issues/187)). | `CodeanalyzerExecutionException` |
+| `get_service_entry_point_classes`, `get_service_entry_point_methods`, `remove_all_comments` | Always. CLDK 2.0 does not implement them. | `NotImplementedError` |
+| `CLDK.java(..., target_files=[...])` | Always. codeanalyzer-java 3.3.3 analyzes only whole projects. The message shows only the command line. | `CodeanalyzerExecutionException` |
+| `get_cfg`, `get_cdg`, `get_ddg`, `slice_backward`, `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` | Below `program_dependency_graph`. | `CodeanalyzerUsageException` |
+| `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`, `taint` | At `program_dependency_graph`. | `CodeanalyzerExecutionException` |
+| `get_external_symbols` | On the local backend. | `CodeanalyzerExecutionException` |
+| `get_all_comments`, `get_comment_in_file`, `get_unresolved_view_dispatches` | On the Neo4j backend. | `CodeanalyzerExecutionException` |
+| `get_view_dispatches`, `get_view_dispatchers`, `get_unresolved_view_dispatches` | The cache or the Neo4j graph comes from codeanalyzer-java older than 3.3.0. | `CodeanalyzerExecutionException` |
+| `get_config_uses`, `get_unresolved_config_reads`, `get_config_readers` | The cache comes from codeanalyzer-java older than 3.1.0. | `CodeanalyzerExecutionException` |
+| `get_symbol_table(paths=...)`, `get_classes(module=...)`, `get_call_graph(roots=..., depth=...)` | Always. Only `PythonAnalysis` has these keywords. | `TypeError` |
+
+Instead of `target_files`, analyze the whole project. Then filter the results by
+file with `get_java_file()`. If a method raises because the cache is too old, pass
+`eager=True` once. If the Neo4j graph is too old, write the graph again with `canjv`.
+
+The SDK [agent API reference](https://github.com/codellm-devkit/python-sdk/blob/v2.0.0/docs/agent-api-reference.md)
+gives the reasons in more detail.
+
+## Cache
+
+CLDK caches the analysis in `<project>/.codeanalyzer/java/`, in the files
+`analysis.json` and `analyzer_diagnostics.json`. Add `.codeanalyzer/` to your
+`.gitignore`.
+
+- CLDK reuses the cache and does not check the source files. After you edit the
+  code, pass `eager=True` once.
+- If the cache holds a lower level than you ask for, CLDK runs the analyzer again.
+- To keep the cache outside the project, pass
+  `backend=CodeAnalyzerConfig(cache_dir=...)`. CLDK then writes to
+  `<cache_dir>/java/`.
+- A cache from cldk 1.5.0 raises `CodeanalyzerExecutionException`. The message tells
+  you to pass `eager_analysis=True`, but `CLDK.java()` has no such keyword. Pass
+  `eager=True`, or delete `<project>/.codeanalyzer`.
+
+```python
+from cldk import CLDK
+from cldk.analysis import AnalysisLevel
+from cldk.analysis.commons.backend_config import CodeAnalyzerConfig
+
+# Analyze again, for example after you edit the code.
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+    eager=True,
+)
+
+# Keep the cache in cldk-cache/java/, outside the project directory.
+analysis = CLDK.java(
+    project_path="commons-cli",
+    analysis_level=AnalysisLevel.call_graph,
+    backend=CodeAnalyzerConfig(cache_dir="cldk-cache"),
+)
+```
+
+## Neo4j backend
+
+The Neo4j backend reads a graph that codeanalyzer-java wrote into a Neo4j database.
+CLDK does not write to the database. Before you connect, make sure that you have:
+
+1. The neo4j driver: `pip install "cldk[java,neo4j]"`.
+2. A running Neo4j server.
+3. A graph from codeanalyzer-java 3.2.0 or later. When you connect to an empty
+   database or to an older graph, CLDK raises `GraphSchemaMismatch`.
+
+To write the graph, run `canjv`, which comes with the `java` extra. Like the
+`call_graph` level, it builds the project, so it needs a JDK and Maven. Run it from
+the directory that contains `commons-cli`:
+
+```bash
+canjv -i commons-cli --emit neo4j --app-name commons-cli \
+  --neo4j-uri bolt://localhost:7687 --neo4j-user neo4j --neo4j-password password
+```
+
+When the command succeeds, it prints only a warning about
+`sun.reflect.Reflection.getCallerClass`. You can ignore it. Then pass a
+[`Neo4jConnectionConfig`](/reference/python-api/core/#neo4jconnectionconfig) as
+`backend=`:
+
+```python
+import logging
+
+from cldk import CLDK
+from cldk.analysis.commons.backend_config import Neo4jConnectionConfig
+
+logging.getLogger("neo4j").setLevel(logging.ERROR)  # hide the driver notifications
+
+analysis = CLDK.java(
+    backend=Neo4jConnectionConfig(
+        uri="bolt://localhost:7687",
+        username="neo4j",
+        password="password",
+        application_name="commons-cli",
+    ),
+)
+print(len(analysis.get_classes()), "types")  # 75 types
+print(analysis.get_call_graph())  # DiGraph with 652 nodes and 1980 edges
+```
+
+- `application_name` must match `--app-name`. The default of `--app-name` is the name
+  of the input directory. A wrong name raises `GraphSchemaMismatch`, and the message
+  blames the analyzer version.
+- The graph always holds all four analysis levels, so this backend ignores
+  `analysis_level`.
+- `project_path` is optional. If you give it, the directory must exist, and its name
+  becomes the default `application_name`.
+- Without the `logging` line, the driver prints several
+  `Received notification from DBMS server` warnings. They do not change the results.
+- The outputs come from a Neo4j 2026.07.1 server and a graph that `canjv` wrote
+  with JDK 17. With JDK 21 or 25, the call graph has 1976 edges, not 1980.
+
+To put many projects in one database, see
+[Multi-lingual, multi-project analysis at scale](/at-scale/).
+
+<!-- Remove each item when the SDK docstring is fixed. -->
+
+:::caution[Errors in the generated reference]
+The reference below comes from the docstrings of cldk 2.0.0. These entries are wrong:
+
+- `get_callers`, `get_callees`, `get_method`: the examples use short parameter types,
+  such as `"getUser(String)"`. These match nothing. Write fully qualified types, for
+  example `"create(java.lang.String)"`. The example `"process())"` also has an extra
+  `)`.
+- `get_callers`, `get_callees`: the result has no file field. See
+  [Find who calls a method](#find-who-calls-a-method) for the real keys.
+- `get_methods_in_class`, `get_constructors`: `get_methods_in_class` leaves out
+  constructors. Use `get_constructors`. A constructor key is `<init>(...)`, not the
+  name of the class.
+- `get_class_call_graph`: it returns only the direct calls, not all reachable edges.
+  Use `networkx.descendants` on `get_call_graph()`.
+- `get_call_graph_json`: it returns only the call-graph edges, not the full analysis.
+  Use `get_application_view().model_dump_json()`.
+- `get_java_compilation_unit`, `get_comment_in_file`: an absolute path or an unknown
+  path raises `KeyError` or `CodeanalyzerExecutionException`. Pass the relative path
+  from `get_java_file()`.
+- `get_comment_in_file`, `get_all_comments`, `get_all_docstrings`: on the local
+  backend, they return only the comments that the analyzer attaches to no code
+  element. Examples are the license header and a comment in an empty method body. For
+  javadoc, use `get_comments_in_a_class` and `get_comments_in_a_method`. On the Neo4j
+  backend, `get_all_docstrings` returns the javadoc of the declarations, and the other
+  two raise `CodeanalyzerExecutionException`.
+- The reference lists CRUD operation detection as a capability. It is not available:
+  `get_all_crud_operations` and the four other CRUD methods always raise. See
+  [What Java refuses](#what-java-refuses).
+- `remove_all_comments` always raises `NotImplementedError`. Pass the text of a
+  `.java` file to
+  [`TreesitterJava.remove_all_comments`](/reference/python-api/treesitter/#treesitterjavaremove_all_comments).
+- `slice_forward`, `paths_between`, `flows_to_call`, `flows_to_argument`: the
+  reference says that Java cannot answer. They answer at `system_dependency_graph`.
+- `get_entrypoint_coverage`, `get_config_uses`, `get_unresolved_config_reads`,
+  `get_config_readers`: the reference says that Java has no data. codeanalyzer-java
+  3.3.3 supplies it.
+- `taint`: the example `" -> ".join(h.to.name for h in path.hops)` raises `TypeError`,
+  because `name` is `None` on some hops, for example statement, branch and argument
+  hops. Print `h.to.kind` instead.
+- `JClassOverview.qualified_name` mentions `get_all_classes`. `JavaAnalysis` has no
+  such method. Use `get_classes`.
+- `is_parsable`: it returns `True` for some code with a syntax error, for example a
+  missing semicolon. Check `get_raw_ast(code).root_node.has_error` instead.
+:::
 
 ## API reference
 
 The full generated reference for the Java analysis API and data models
 follows.
 
+Some entries name internal design notes, for example J-1, J-5 and leg 3b, and the
+benchmark projects daytrader8 and ThingsBoard. You can ignore these names. J-1 means
+the call-graph node key. For its form, see
+[Names of classes and methods](#names-of-classes-and-methods).
+
 <!-- CLDK:API:START -->
 
 <!-- AUTO-GENERATED by scripts/gen_api_docs.py, do not edit by hand. -->
 
-[![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk) [![cldk 2.0.0rc7](https://img.shields.io/badge/cldk-2.0.0rc7-3776AB?logo=pypi&logoColor=white)](https://pypi.org/project/cldk/2.0.0rc7/)
+[![Source on GitHub](https://img.shields.io/badge/source-codellm--devkit%2Fpython--sdk-181717?logo=github&logoColor=white)](https://github.com/codellm-devkit/python-sdk) [![cldk 2.0.0](https://img.shields.io/badge/cldk-2.0.0-3776AB?logo=pypi&logoColor=white)](https://pypi.org/project/cldk/2.0.0/)
 
-_API reference generated from cldk 2.0.0rc7._
+_API reference generated from cldk 2.0.0._
 
 ## Analysis
 
@@ -124,24 +520,25 @@ It combines Tree-sitter-based parsing with the CodeAnalyzer backend to provide
 comprehensive code analysis capabilities.
 
 The analysis operates on a project directory (cross-file call graphs, class
-hierarchies, the symbol table). The 1.x single-file ``source_code`` mode was
-removed in 2.0 (spec leg 3, J-10): pass the project directory, or hand a source
+hierarchies, the symbol table). The 1.x single-file `source_code` mode was
+removed in 2.0: pass the project directory, or hand a source
 string to `TreesitterJava` directly.
 
-> **Key capabilities include**
-> - Symbol table extraction (classes, methods, fields, imports)
-> - Call graph construction and traversal
-> - Class hierarchy and inheritance analysis
-> - Method parameter and signature analysis
-> - Comment and Javadoc extraction
-> - CRUD operation detection for enterprise applications
-> - Entry point identification (main methods, REST endpoints)
+Key capabilities include:
+- Symbol table extraction (classes, methods, fields, imports)
+- Call graph construction and traversal
+- Class hierarchy and inheritance analysis
+- Method parameter and signature analysis
+- Comment and Javadoc extraction
+- CRUD operation detection for enterprise applications
+- Entry point identification (main methods, REST endpoints)
 
-> **The analysis is powered by**
-> - **Tree-sitter**: Fast incremental parsing for syntactic analysis
-> - **CodeAnalyzer**: Semantic analysis backend (JAR-based)
+The analysis is powered by:
+- **Tree-sitter**: Fast incremental parsing for syntactic analysis
+- **CodeAnalyzer**: Semantic analysis backend (JAR-based)
 
 > **See Also**
+>
 > - `PythonAnalysis`: Python equivalent.
 > - `JCodeanalyzer`: Backend implementation.
 
@@ -151,26 +548,118 @@ string to `TreesitterJava` directly.
 class JavaAnalysis
 ```
 
+| Method | Summary |
+| ------ | ------- |
+| [`get_imports`](#javaanalysisget_imports) | Return every distinct import target of the project, sorted. |
+| [`get_variables`](#javaanalysisget_variables) | Return the local variables each callable declares. |
+| [`get_service_entry_point_classes`](#javaanalysisget_service_entry_point_classes) | Return all service entry-point classes. |
+| [`get_service_entry_point_methods`](#javaanalysisget_service_entry_point_methods) | Return all service entry-point methods. |
+| [`get_application_view`](#javaanalysisget_application_view) | Return the complete analyzed application model. |
+| [`get_symbol_table`](#javaanalysisget_symbol_table) | Return the symbol table mapping file paths to compilation units. |
+| [`get_compilation_units`](#javaanalysisget_compilation_units) | Return all compilation units in the project as a list. |
+| [`get_class_hierarchy`](#javaanalysisget_class_hierarchy) | Return the complete class inheritance hierarchy as a graph. |
+| [`is_parsable`](#javaanalysisis_parsable) | Check if the given source code is valid Java syntax. |
+| [`get_raw_ast`](#javaanalysisget_raw_ast) | Parse source code and return the Tree-sitter AST. |
+| [`get_call_graph`](#javaanalysisget_call_graph) | Return the project call graph as a NetworkX directed graph. |
+| [`get_call_graph_json`](#javaanalysisget_call_graph_json) | Return the complete analysis results serialized as JSON. |
+| [`get_callers`](#javaanalysisget_callers) | Return all methods that call the specified target method. |
+| [`get_callees`](#javaanalysisget_callees) | Return all methods called by the specified source method. |
+| [`get_methods`](#javaanalysisget_methods) | Return all methods in the project grouped by class. |
+| [`get_classes`](#javaanalysisget_classes) | Return all classes in the project. |
+| [`get_classes_by_criteria`](#javaanalysisget_classes_by_criteria) | Return classes matching inclusion/exclusion filter criteria. |
+| [`get_class`](#javaanalysisget_class) | Return a specific class by its qualified name. |
+| [`get_method`](#javaanalysisget_method) | Return a specific method by class and method signature. |
+| [`get_method_parameters`](#javaanalysisget_method_parameters) | Return the parameters of a specific method. |
+| [`get_java_file`](#javaanalysisget_java_file) | Return the file path containing a class with the given name. |
+| [`get_java_compilation_unit`](#javaanalysisget_java_compilation_unit) | Return the compilation unit for a specific file path. |
+| [`get_methods_in_class`](#javaanalysisget_methods_in_class) | Return all methods defined in a specific class. |
+| [`get_constructors`](#javaanalysisget_constructors) | Return all constructors of a specific class. |
+| [`get_fields`](#javaanalysisget_fields) | Return all fields (member variables) of a specific class. |
+| [`get_nested_classes`](#javaanalysisget_nested_classes) | Return all nested (inner) classes of a specific class. |
+| [`get_sub_classes`](#javaanalysisget_sub_classes) | Return all classes that extend the specified class. |
+| [`get_extended_classes`](#javaanalysisget_extended_classes) | Return the superclass(es) that a class extends. |
+| [`get_implemented_interfaces`](#javaanalysisget_implemented_interfaces) | Return all interfaces implemented by a class. |
+| [`get_class_call_graph`](#javaanalysisget_class_call_graph) | Return call graph edges reachable from a class or method. |
+| [`get_entry_point_classes`](#javaanalysisget_entry_point_classes) | Return all classes identified as application entry points. |
+| [`get_entry_point_methods`](#javaanalysisget_entry_point_methods) | Return all methods identified as application entry points. |
+| [`remove_all_comments`](#javaanalysisremove_all_comments) | Remove all comments from the source code. |
+| [`get_methods_with_annotations`](#javaanalysisget_methods_with_annotations) | Return methods decorated with specific annotations. |
+| [`get_test_methods`](#javaanalysisget_test_methods) | Return methods identified as test methods. |
+| [`get_calling_lines`](#javaanalysisget_calling_lines) | Return line numbers where a method is called. |
+| [`get_call_targets`](#javaanalysisget_call_targets) | Return call targets using simple name resolution. |
+| [`get_all_crud_operations`](#javaanalysisget_all_crud_operations) | Return all CRUD (Create, Read, Update, Delete) operations. |
+| [`get_all_create_operations`](#javaanalysisget_all_create_operations) | Return all Create operations from CRUD analysis. |
+| [`get_all_read_operations`](#javaanalysisget_all_read_operations) | Return all Read operations from CRUD analysis. |
+| [`get_all_update_operations`](#javaanalysisget_all_update_operations) | Return all Update operations from CRUD analysis. |
+| [`get_all_delete_operations`](#javaanalysisget_all_delete_operations) | Return all Delete operations from CRUD analysis. |
+| [`get_comments_in_a_method`](#javaanalysisget_comments_in_a_method) | Return the method's own comment. |
+| [`get_comments_in_a_class`](#javaanalysisget_comments_in_a_class) | Return the class's own comment. |
+| [`get_comment_in_file`](#javaanalysisget_comment_in_file) | Return all comments in a specific file. |
+| [`get_all_comments`](#javaanalysisget_all_comments) | Return all comments in the project grouped by file. |
+| [`get_all_docstrings`](#javaanalysisget_all_docstrings) | Return all Javadoc comments in the project grouped by file. |
+| [`locate`](#javaanalysislocate) | Resolve a source position to its enclosing callable, with the source in hand. |
+| [`locate_many`](#javaanalysislocate_many) | Resolve many `(path, line)` positions in one round trip, in input order. |
+| [`resolve_callable`](#javaanalysisresolve_callable) | Resolve a callable name to the one callable it names, in the caller's vocabulary. |
+| [`resolve_value`](#javaanalysisresolve_value) | Resolve a value name inside a callable (in Java, a parameter) to the position that carries it. |
+| [`get_source`](#javaanalysisget_source) | Return the source text named by `node_id`, a callable, or one of its body nodes. |
+| [`describe`](#javaanalysisdescribe) | Fill in `source` for these positions, in one round trip. |
+| [`get_cfg`](#javaanalysisget_cfg) | Return one page of the control flow edges within one callable. |
+| [`get_cdg`](#javaanalysisget_cdg) | Return one page of the control dependence edges within one callable. |
+| [`get_ddg`](#javaanalysisget_ddg) | Return one page of the data dependence edges within one callable. |
+| [`slice_backward`](#javaanalysisslice_backward) | Return everything the value `src` depends on. |
+| [`slice_forward`](#javaanalysisslice_forward) | Return everything the value `src` can affect. |
+| [`backward_cone`](#javaanalysisbackward_cone) | Return every callable that can reach any of `sinks`, "what could get here". |
+| [`reaches`](#javaanalysisreaches) | Return whether there is a call path from `src` to `dst`. |
+| [`callers_of`](#javaanalysiscallers_of) | Return the callables that call this one, one hop back, addressed by name. |
+| [`callees_of`](#javaanalysiscallees_of) | Return the callables this one calls, one hop forward, addressed by name. |
+| [`paths_between`](#javaanalysispaths_between) | Return how the value `src` reaches the value `dst`, the sequences, where a slice is the set. |
+| [`call_paths_between`](#javaanalysiscall_paths_between) | Return how one callable reaches another, the evidence-carrying form of `reaches`. |
+| [`flows_to_call`](#javaanalysisflows_to_call) | Return whether the value `src` reaches any argument of a call to `callee`. |
+| [`flows_to_argument`](#javaanalysisflows_to_argument) | Return whether the value `src` reaches `callee`'s parameter `arg`. |
+| [`taint`](#javaanalysistaint) | Which of these sources reach which of these sinks, and what to make of the ones that do not. |
+| [`get_callables_overview`](#javaanalysisget_callables_overview) | Return a lightweight overview of every callable in the project, in one bulk read. |
+| [`get_method_bodies`](#javaanalysisget_method_bodies) | Return source text for the given callables, in one bulk read. |
+| [`get_decorated_callables`](#javaanalysisget_decorated_callables) | Return overviews of callables annotated with any of the given markers, in one bulk read. |
+| [`get_entrypoints`](#javaanalysisget_entrypoints) | Return overviews of every callable the analyzer marked as an entrypoint, in one bulk read. |
+| [`get_entrypoint_classes`](#javaanalysisget_entrypoint_classes) | Return overviews of every type the analyzer marked as an entrypoint in its own right. |
+| [`get_entrypoint_coverage`](#javaanalysisget_entrypoint_coverage) | Report the entrypoint pass's coverage, which for Java is that **there is no report**. |
+| [`get_callsites_for`](#javaanalysisget_callsites_for) | Return the call sites of the given callables, keyed by the key that named them. |
+| [`get_external_symbols`](#javaanalysisget_external_symbols) | Return every call-graph endpoint outside the analysed project, keyed by its `@external` id. |
+| [`get_artifacts`](#javaanalysisget_artifacts) | Return every non-code project artifact (`pom.xml`, properties files, descriptors, …), keyed by repo-relative path. |
+| [`get_dependencies`](#javaanalysisget_dependencies) | Return every declared dependency, one entry per declaring manifest, optionally filtered. |
+| [`get_config_keys`](#javaanalysisget_config_keys) | Return every configuration key flattened out of a config-bearing artifact, keyed `"<artifact repo-relative path>@key/<dotted key>"` (`pom.xml@key/project.artifactId`). |
+| [`get_config_uses`](#javaanalysisget_config_uses) | Return resolved code-to-config edges: which body node reads which config key. |
+| [`get_unresolved_config_reads`](#javaanalysisget_unresolved_config_reads) | Return every detector-matched config read that never closed on exactly one declared key. |
+| [`get_config_readers`](#javaanalysisget_config_readers) | Return overviews of every callable reading configuration key `key`. |
+| [`get_view_dispatches`](#javaanalysisget_view_dispatches) | Return every resolved view dispatch: which body node hands the request to which view template (JSP, Facelet, Thymeleaf), a `forward` / `include` / `sendRedirect` call, a `ModelAndView` construction or `setViewName`, or a Spring controller's `return`. |
+| [`get_unresolved_view_dispatches`](#javaanalysisget_unresolved_view_dispatches) | Return every detected dispatch that closed on no view (a variable target, a servlet URL, a view name matching two templates) with its reason and the tiers attempted. |
+| [`get_view_dispatchers`](#javaanalysisget_view_dispatchers) | Return overviews of every callable that dispatches to the view at `path`. |
+| [`get_interfaces`](#javaanalysisget_interfaces) | Return every interface in the project, keyed by qualified name. |
+| [`get_enums`](#javaanalysisget_enums) | Return every enum in the project, keyed by qualified name (192 in ThingsBoard; daytrader8 declares none). |
+| [`get_enum_members`](#javaanalysisget_enum_members) | Return the constants declared by one enum. |
+| [`get_records`](#javaanalysisget_records) | Return every record in the project, keyed by qualified name, the one Java-only type kind (35 in ThingsBoard; daytrader8 declares none). |
+
 Analysis facade for Java code.
 
 This class provides a comprehensive interface for performing static analysis
 on Java projects and source files. It combines Tree-sitter-based parsing for
 syntactic analysis with the CodeAnalyzer backend for semantic analysis.
 
-The facade is initialized with ``project_dir`` and provides full analysis
+The facade is initialized with `project_dir` and provides full analysis
 capabilities including cross-file call graphs, class hierarchies, and symbol
-tables; the single-file ``source_code`` mode was removed in 2.0.
+tables; the single-file `source_code` mode was removed in 2.0.
 
-> **Key features**
-> - Symbol table access with classes, methods, and fields
-> - Call graph construction and traversal
-> - Caller/callee relationship analysis
-> - Class hierarchy and inheritance queries
-> - Comment and Javadoc extraction
-> - CRUD operation detection
-> - Entry point identification
+Key features:
+- Symbol table access with classes, methods, and fields
+- Call graph construction and traversal
+- Caller/callee relationship analysis
+- Class hierarchy and inheritance queries
+- Comment and Javadoc extraction
+- CRUD operation detection
+- Entry point identification
 
 > **See Also**
+>
 > - `PythonAnalysis`: Python equivalent.
 > - `JCodeanalyzer`: Backend.
 
@@ -178,13 +667,13 @@ tables; the single-file ``source_code`` mode was removed in 2.0.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `project_dir` | `` |  |
-| `analysis_level` | `` |  |
-| `eager_analysis` | `` |  |
-| `target_files` | `` |  |
-| `backend_config` | `JavaBackend` |  |
-| `treesitter_java` | `TreesitterJava` |  |
-| `backend` | `JavaAnalysisBackend` |  |
+| `project_dir` | `str \| Path \| None` | Path to the Java project directory. |
+| `analysis_level` | `str` | The depth of analysis performed. |
+| `eager_analysis` | `bool` | Whether to force regeneration of analysis. |
+| `target_files` | `List[str] \| None` | Specific files to analyze. |
+| `backend_config` | [`JavaBackend`](/reference/python-api/core/#javabackend) | The backend configuration object. |
+| `treesitter_java` | [`TreesitterJava`](/reference/python-api/treesitter/#treesitterjava) | Tree-sitter parser for Java. |
+| `backend` | `JavaAnalysisBackend` | The underlying analysis backend. |
 | `has_resolution_edges` | `bool` | Whether call sites carry a resolved callee on this backend right now. |
 
 #### Methods
@@ -200,17 +689,17 @@ Return every distinct import target of the project, sorted.
 A **set**, not a per-file listing and not the file's import order: the Neo4j projection
 aggregates every import of a module that resolves to the same target onto one edge, so the
 order within a file is not recoverable there and a list that preserved it locally would be
-one the two backends disagree about. The 1.x signature is a flat ``List[str]`` and never
+one the two backends disagree about. The 1.x signature is a flat `List[str]` and never
 carried the file an import belongs to either.
 
 **Returns:**
 
-- `List[str]`: Fully qualified import targets (``"java.util.List"``, ``"java.io.*"``), sorted and
-- `List[str]`: distinct. A wildcard keeps its ``.*``; static imports are not marked here.
+- `List[str]`: Fully qualified import targets (`"java.util.List"`, `"java.io.*"`), sorted and
+  distinct. A wildcard keeps its `.*`; static imports are not marked here.
 
 > **See Also**
-> `get_symbol_table`: per-file `JImport` records,
->     with spans and the static/wildcard flags.
+>
+> - `get_symbol_table`: per-file `JImport` records, with spans and the static/wildcard flags.
 
 ##### `JavaAnalysis.get_variables`
 
@@ -224,23 +713,24 @@ Return the local variables each callable declares.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `**kwargs` | `` | The 1.x signature's filtering options, of which there are none. An unexpected keyword raises `TypeError` naming it, rather than being ignored: silently dropping a filter returns an unfiltered answer that looks filtered. |
+| `**kwargs` |  | The 1.x signature's filtering options, of which there are none. An unexpected keyword raises `TypeError` naming it, rather than being ignored: silently dropping a filter returns an unfiltered answer that looks filtered. |
 
 **Returns:**
 
-- `Dict`: ``{"<type fqn>.<signature>": [JLocalVariable, ...]}``, the J-1 call-graph key of
-- `Dict`: meth:`get_call_graph`, and one entry per callable including those declaring nothing.
-- `Dict`: Fields and parameters are *not* folded in; they have their own accessors. Each list is
-- `Dict`: ordered by ``(start_line, name)``: the Neo4j projection carries a line-only span, so
-- `Dict`: two variables declared on one line have no order there to preserve.
+- `Dict`: `{"<type fqn>.<signature>": [JLocalVariable, ...]}`, the J-1 call-graph key of
+  `get_call_graph`, and one entry per callable including those declaring nothing.
+  Fields and parameters are *not* folded in; they have their own accessors. Each list is
+  ordered by `(start_line, name)`: the Neo4j projection carries a line-only span, so
+  two variables declared on one line have no order there to preserve.
 
 **Raises:**
 
 - `TypeError`: An unexpected keyword argument was passed.
 
 > **See Also**
-> `get_fields`: class-level fields.
-> `get_method_parameters`: a callable's parameters.
+>
+> - `get_fields`: class-level fields.
+> - `get_method_parameters`: a callable's parameters.
 
 ##### `JavaAnalysis.get_service_entry_point_classes`
 
@@ -258,19 +748,20 @@ classes.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `**kwargs` | `` | Framework-specific filtering options (e.g., annotation filters for ``@RestController``, ``@Path``, etc.). |
+| `**kwargs` |  | Framework-specific filtering options (e.g., annotation filters for `@RestController`, `@Path`, etc.). |
 
 **Returns:**
 
-- `Dict[str, JType]`: A dictionary mapping qualified class names to `JType` objects
-- `Dict[str, JType]`: for classes identified as service entry points.
+- [`Dict[str, JType]`](#jtype): A dictionary mapping qualified class names to `JType` objects
+  for classes identified as service entry points.
 
 **Raises:**
 
 - `NotImplementedError`: This functionality is not yet implemented.
 
 > **See Also**
-> `get_entry_point_classes`: For general entry point detection.
+>
+> - `get_entry_point_classes`: For general entry point detection.
 
 ##### `JavaAnalysis.get_service_entry_point_methods`
 
@@ -288,20 +779,21 @@ message handlers.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `**kwargs` | `` | Framework-specific filtering options (e.g., HTTP method filters, annotation filters for ``@GET``, ``@POST``, etc.). |
+| `**kwargs` |  | Framework-specific filtering options (e.g., HTTP method filters, annotation filters for `@GET`, `@POST`, etc.). |
 
 **Returns:**
 
-- `Dict[str, Dict[str, JCallable]]`: A nested dictionary mapping class names to method signatures to
-- `Dict[str, Dict[str, JCallable]]`: class:`JCallable` objects for methods identified as service
-- `Dict[str, Dict[str, JCallable]]`: entry points.
+- [`Dict[str, Dict[str, JCallable]]`](#jcallable): A nested dictionary mapping class names to method signatures to
+  `JCallable` objects for methods identified as service
+  entry points.
 
 **Raises:**
 
 - `NotImplementedError`: This functionality is not yet implemented.
 
 > **See Also**
-> `get_entry_point_methods`: For general entry point detection.
+>
+> - `get_entry_point_methods`: For general entry point detection.
 
 ##### `JavaAnalysis.get_application_view`
 
@@ -318,11 +810,15 @@ analysis.
 
 **Returns:**
 
-- `JApplication`: class:`~cldk.models.java.JApplication` object containing: - All compilation units (``symbol_table`` attribute) - Project-level metadata - Aggregated statistics about the codebase
+- [`JApplication`](#japplication): A `JApplication` object containing:
+  - All compilation units (`symbol_table` attribute)
+  - Project-level metadata
+  - Aggregated statistics about the codebase
 
 > **See Also**
-> `get_symbol_table`: For direct access to the symbol table.
-> `get_compilation_units`: For a list of compilation units.
+>
+> - `get_symbol_table`: For direct access to the symbol table.
+> - `get_compilation_units`: For a list of compilation units.
 
 ##### `JavaAnalysis.get_symbol_table`
 
@@ -338,12 +834,17 @@ data structure for accessing analyzed code structure.
 
 **Returns:**
 
-- `Dict[str, JCompilationUnit]`: A dictionary where keys are file paths (as strings) and values are
-- `Dict[str, JCompilationUnit]`: class:`~cldk.models.java.JCompilationUnit` objects containing: - Package declaration - Import statements - Type declarations (classes, interfaces, enums) - Method and field definitions
+- [`Dict[str, JCompilationUnit]`](#jcompilationunit): A dictionary where keys are file paths (as strings) and values are
+  `JCompilationUnit` objects containing:
+  - Package declaration
+  - Import statements
+  - Type declarations (classes, interfaces, enums)
+  - Method and field definitions
 
 > **See Also**
-> `get_compilation_units`: For a list without file paths.
-> `get_java_compilation_unit`: For direct lookup by path.
+>
+> - `get_compilation_units`: For a list without file paths.
+> - `get_java_compilation_unit`: For direct lookup by path.
 
 ##### `JavaAnalysis.get_compilation_units`
 
@@ -359,11 +860,12 @@ Java source file.
 
 **Returns:**
 
-- `List[JCompilationUnit]`: A list of `JCompilationUnit` objects,
-- `List[JCompilationUnit]`: one for each Java source file analyzed in the project.
+- [`List[JCompilationUnit]`](#jcompilationunit): A list of `JCompilationUnit` objects,
+  one for each Java source file analyzed in the project.
 
 > **See Also**
-> `get_symbol_table`: For file-path-keyed access.
+>
+> - `get_symbol_table`: For file-path-keyed access.
 
 ##### `JavaAnalysis.get_class_hierarchy`
 
@@ -379,16 +881,17 @@ extends and implements relationships.
 
 **Returns:**
 
-- `nx.DiGraph`: A ``networkx.DiGraph`` with one node per declared type (interfaces, enums, annotations
-- `nx.DiGraph`: and records included) and an edge **subclass → supertype** carrying
-- `nx.DiGraph`: ``type="EXTENDS"`` or ``type="IMPLEMENTS"``, Java projects the two as separate
-- `nx.DiGraph`: relationship types and this keeps them apart. A supertype outside the project is a node
-- `nx.DiGraph`: too, spelled as the declaration wrote it.
+- `nx.DiGraph`: A `networkx.DiGraph` with one node per declared type (interfaces, enums, annotations
+  and records included) and an edge **subclass → supertype** carrying
+  `type="EXTENDS"` or `type="IMPLEMENTS"`, Java projects the two as separate
+  relationship types and this keeps them apart. A supertype outside the project is a node
+  too, spelled as the declaration wrote it.
 
 > **See Also**
-> `get_sub_classes`: For finding subclasses of a specific class.
-> `get_extended_classes`: For finding superclasses.
-> `get_implemented_interfaces`: For interface implementations.
+>
+> - `get_sub_classes`: For finding subclasses of a specific class.
+> - `get_extended_classes`: For finding superclasses.
+> - `get_implemented_interfaces`: For interface implementations.
 
 ##### `JavaAnalysis.is_parsable`
 
@@ -410,12 +913,13 @@ or for filtering out malformed code.
 
 **Returns:**
 
-- `bool`: ``True`` if the source code parses without syntax errors,
-- `bool`: ``False`` otherwise. Note that this only checks syntactic validity,
-- `bool`: not semantic correctness (e.g., type errors won't be caught).
+- `bool`: `True` if the source code parses without syntax errors,
+  `False` otherwise. Note that this only checks syntactic validity,
+  not semantic correctness (e.g., type errors won't be caught).
 
 > **See Also**
-> `get_raw_ast`: To obtain the full AST for valid code.
+>
+> - `get_raw_ast`: To obtain the full AST for valid code.
 
 ##### `JavaAnalysis.get_raw_ast`
 
@@ -437,17 +941,19 @@ extract syntactic information about the code structure.
 
 **Returns:**
 
-- `Tree`: A Tree-sitter ``Tree`` object representing the parsed AST. The tree
-- `Tree`: contains nodes representing all syntactic elements of the code,
-- `Tree`: including classes, methods, statements, and expressions.
+- `Tree`: A Tree-sitter `Tree` object representing the parsed AST. The tree
+  contains nodes representing all syntactic elements of the code,
+  including classes, methods, statements, and expressions.
 
-> **Note**
-> If the source code contains syntax errors, Tree-sitter will still
-> return a tree but with ERROR nodes at the locations of parse errors.
-> Use `is_parsable` to check for valid syntax first.
+:::note
+If the source code contains syntax errors, Tree-sitter will still
+return a tree but with ERROR nodes at the locations of parse errors.
+Use `is_parsable` to check for valid syntax first.
+:::
 
 > **See Also**
-> `is_parsable`: To validate syntax before parsing.
+>
+> - `is_parsable`: To validate syntax before parsing.
 
 ##### `JavaAnalysis.get_call_graph`
 
@@ -461,17 +967,24 @@ Constructs and returns a directed graph representing method call
 relationships across the entire project. Each node represents a
 method, and each edge represents a call from one method to another.
 
-The call graph requires ``analysis_level`` of at least ``"call_graph"``;
+The call graph requires `analysis_level` of at least `"call_graph"`;
 below it the graph is empty.
 
 **Returns:**
 
-- `nx.DiGraph`: A ``networkx.DiGraph`` where: - Nodes are keyed by the string ``"<type fqn>.<signature>"`` (e.g. ``"com.acme.Svc.run(java.lang.String)"``), with a `JMethodDetail` under ``method_detail`` and ``kind="callable"`` - Edges represent call relationships, directed from caller to callee, with ``type``, ``weight`` and ``calling_lines``
+- `nx.DiGraph`: A `networkx.DiGraph` where:
+  - Nodes are keyed by the string `"<type fqn>.<signature>"` (e.g.
+    `"com.acme.Svc.run(java.lang.String)"`), with a
+    `JMethodDetail` under `method_detail`
+    and `kind="callable"`
+  - Edges represent call relationships, directed from caller
+    to callee, with `type`, `weight` and `calling_lines`
 
 > **See Also**
-> `get_callers`: For finding callers of a specific method.
-> `get_callees`: For finding callees of a specific method.
-> `get_class_call_graph`: For class-scoped call graphs.
+>
+> - `get_callers`: For finding callers of a specific method.
+> - `get_callees`: For finding callees of a specific method.
+> - `get_class_call_graph`: For class-scoped call graphs.
 
 ##### `JavaAnalysis.get_call_graph_json`
 
@@ -488,16 +1001,21 @@ analysis results, sharing with other tools, or debugging.
 **Returns:**
 
 - `str`: A JSON-formatted string containing the complete analysis data,
-- `str`: including compilation units, classes, methods, and call
-- `str`: relationships.
+  including compilation units, classes, methods, and call
+  relationships.
 
 > **See Also**
-> `get_call_graph`: For the graph object directly.
+>
+> - `get_call_graph`: For the graph object directly.
 
 ##### `JavaAnalysis.get_callers`
 
 ```python
-get_callers(target_class_name: str, target_method_declaration: str, using_symbol_table: bool = False) -> Dict
+get_callers(
+    target_class_name: str,
+    target_method_declaration: str,
+    using_symbol_table: bool = False,
+) -> Dict
 ```
 
 Return all methods that call the specified target method.
@@ -510,22 +1028,30 @@ understanding how a method is used throughout the codebase.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `target_class_name` | `str` | The fully qualified name of the class containing the target method (e.g., ``"com.example.service.UserService"``). |
-| `target_method_declaration` | `str` | The method signature to find callers for (e.g., ``"getUser(String)"`` or ``"process())"``). |
-| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for resolution (faster but may be less accurate). If ``False`` (default), uses the full call graph analysis. |
+| `target_class_name` | `str` | The fully qualified name of the class containing the target method (e.g., `"com.example.service.UserService"`). |
+| `target_method_declaration` | `str` | The method signature to find callers for (e.g., `"getUser(String)"` or `"process())"`). |
+| `using_symbol_table` | `bool` | If `True`, uses the symbol table for resolution (faster but may be less accurate). If `False` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `Dict`: A dictionary containing information about all callers, including: - Caller method signatures - Call site locations (file and line) - Caller class information
+- `Dict`: A dictionary containing information about all callers, including:
+  - Caller method signatures
+  - Call site locations (file and line)
+  - Caller class information
 
 > **See Also**
-> `get_callees`: For the reverse direction (what a method calls).
-> `get_call_graph`: For the complete call relationship graph.
+>
+> - `get_callees`: For the reverse direction (what a method calls).
+> - `get_call_graph`: For the complete call relationship graph.
 
 ##### `JavaAnalysis.get_callees`
 
 ```python
-get_callees(source_class_name: str, source_method_declaration: str, using_symbol_table: bool = False) -> Dict
+get_callees(
+    source_class_name: str,
+    source_method_declaration: str,
+    using_symbol_table: bool = False,
+) -> Dict
 ```
 
 Return all methods called by the specified source method.
@@ -538,17 +1064,21 @@ dependencies and tracing execution paths.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `source_class_name` | `str` | The fully qualified name of the class containing the source method (e.g., ``"com.example.service.OrderService"``). |
-| `source_method_declaration` | `str` | The method signature to find callees for (e.g., ``"processOrder(Order)"``). |
-| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for resolution (faster but may be less accurate). If ``False`` (default), uses the full call graph analysis. |
+| `source_class_name` | `str` | The fully qualified name of the class containing the source method (e.g., `"com.example.service.OrderService"`). |
+| `source_method_declaration` | `str` | The method signature to find callees for (e.g., `"processOrder(Order)"`). |
+| `using_symbol_table` | `bool` | If `True`, uses the symbol table for resolution (faster but may be less accurate). If `False` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `Dict`: A dictionary containing information about all callees, including: - Callee method signatures - Target class information - Call site locations within the source method
+- `Dict`: A dictionary containing information about all callees, including:
+  - Callee method signatures
+  - Target class information
+  - Call site locations within the source method
 
 > **See Also**
-> `get_callers`: For the reverse direction (who calls a method).
-> `get_call_graph`: For the complete call relationship graph.
+>
+> - `get_callers`: For the reverse direction (who calls a method).
+> - `get_call_graph`: For the complete call relationship graph.
 
 ##### `JavaAnalysis.get_methods`
 
@@ -564,14 +1094,27 @@ and then method signature.
 
 **Returns:**
 
-- `Dict[str, Dict[str, JCallable]]`: A nested dictionary with structure:: { "com.example.ClassName": { "methodName(ParamType)": JCallable, "anotherMethod()": JCallable, ... }, ... }
-- `Dict[str, Dict[str, JCallable]]`: class:`~cldk.models.java.JCallable` contains the method's
-- `Dict[str, Dict[str, JCallable]]`: signature, parameters, return type, body, annotations, and other
-- `Dict[str, Dict[str, JCallable]]`: metadata.
+- [`Dict[str, Dict[str, JCallable]]`](#jcallable): A nested dictionary with structure:
+
+  ```python
+  {
+      "com.example.ClassName": {
+          "methodName(ParamType)": JCallable,
+          "anotherMethod()": JCallable,
+          ...
+      },
+      ...
+  }
+  ```
+
+  Each `JCallable` contains the method's
+  signature, parameters, return type, body, annotations, and other
+  metadata.
 
 > **See Also**
-> `get_methods_in_class`: For methods of a specific class.
-> `get_method`: For a single method by name.
+>
+> - `get_methods_in_class`: For methods of a specific class.
+> - `get_method`: For a single method by name.
 
 ##### `JavaAnalysis.get_classes`
 
@@ -586,18 +1129,22 @@ discovered during analysis, organized by their fully qualified names.
 
 **Returns:**
 
-- `Dict[str, JType]`: A dictionary mapping fully qualified class names (strings) to
-- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects containing class metadata,
-- `Dict[str, JType]`: methods, fields, and inheritance information.
+- [`Dict[str, JType]`](#jtype): A dictionary mapping fully qualified class names (strings) to
+  `JType` objects containing class metadata,
+  methods, fields, and inheritance information.
 
 > **See Also**
-> `get_class`: For a single class by name.
-> `get_classes_by_criteria`: For filtered class retrieval.
+>
+> - `get_class`: For a single class by name.
+> - `get_classes_by_criteria`: For filtered class retrieval.
 
 ##### `JavaAnalysis.get_classes_by_criteria`
 
 ```python
-get_classes_by_criteria(inclusions: List[str] | None = None, exclusions: List[str] | None = None) -> Dict[str, JType]
+get_classes_by_criteria(
+    inclusions: List[str] | None = None,
+    exclusions: List[str] | None = None,
+) -> Dict[str, JType]
 ```
 
 Return classes matching inclusion/exclusion filter criteria.
@@ -610,21 +1157,23 @@ any inclusion substring AND does not contain any exclusion substring.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `inclusions` | `List[str] \| None` | List of substrings that class names must contain to be included. If ``None`` or empty, no inclusion filtering is applied (effectively includes nothing unless you have at least one inclusion pattern). |
+| `inclusions` | `List[str] \| None` | List of substrings that class names must contain to be included. If `None` or empty, no inclusion filtering is applied (effectively includes nothing unless you have at least one inclusion pattern). |
 | `exclusions` | `List[str] \| None` | List of substrings that class names must NOT contain. Classes matching any exclusion pattern are filtered out, even if they match an inclusion pattern. |
 
 **Returns:**
 
-- `Dict[str, JType]`: A dictionary mapping qualified class names to
-- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for classes matching
-- `Dict[str, JType]`: the criteria.
+- [`Dict[str, JType]`](#jtype): A dictionary mapping qualified class names to
+  `JType` objects for classes matching
+  the criteria.
 
-> **Note**
-> The filtering uses substring matching (``in`` operator), not
-> regular expressions or glob patterns.
+:::note
+The filtering uses substring matching (`in` operator), not
+regular expressions or glob patterns.
+:::
 
 > **See Also**
-> `get_classes`: For all classes without filtering.
+>
+> - `get_classes`: For all classes without filtering.
 
 ##### `JavaAnalysis.get_class`
 
@@ -641,17 +1190,18 @@ methods, fields, annotations, modifiers, and inheritance information.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.service.UserService"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., `"com.example.service.UserService"`). |
 
 **Returns:**
 
-- `JType \| None`: class:`~cldk.models.java.JType` object containing all analyzed
-- `JType \| None`: information about the class. Returns ``None`` if the class is not
-- `JType \| None`: found in the analyzed project.
+- [`JType | None`](#jtype): A `JType` object containing all analyzed
+  information about the class. Returns `None` if the class is not
+  found in the analyzed project.
 
 > **See Also**
-> `get_classes`: For all classes in the project.
-> `get_java_file`: To find which file contains a class.
+>
+> - `get_classes`: For all classes in the project.
+> - `get_java_file`: To find which file contains a class.
 
 ##### `JavaAnalysis.get_method`
 
@@ -668,33 +1218,38 @@ signature, parameters, return type, annotations, body, and metrics.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class containing the method (e.g., ``"com.example.service.UserService"``). |
-| `qualified_method_name` | `str` | The method signature to retrieve (e.g., ``"getUser(String)"`` or ``"process())"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class containing the method (e.g., `"com.example.service.UserService"`). |
+| `qualified_method_name` | `str` | The method signature to retrieve (e.g., `"getUser(String)"` or `"process())"`). |
 
 **Returns:**
 
-- `JCallable \| None`: class:`~cldk.models.java.JCallable` object containing all
-- `JCallable \| None`: analyzed information about the method. Returns ``None`` if the
-- `JCallable \| None`: method is not found.
+- [`JCallable | None`](#jcallable): A `JCallable` object containing all
+  analyzed information about the method. Returns `None` if the
+  method is not found.
 
-> **Note**
-> Two fields depend on which backend answered. On the
-> ``analysis.json`` backend ``code`` is the **body block** and
-> ``body`` holds every body node. On the Neo4j backend ``code`` is
-> the whole **declaration** (it *ends with* the body block, because
-> the graph projects one line range per callable and no
-> ``body_span``) and ``body`` holds the ``call`` nodes only, about
-> 30% of the graph's body nodes, which is what ``call_sites`` needs
-> and all it needs.
+:::note
+Two fields depend on which backend answered. On the
+`analysis.json` backend `code` is the **body block** and
+`body` holds every body node. On the Neo4j backend `code` is
+the whole **declaration** (it *ends with* the body block, because
+the graph projects one line range per callable and no
+`body_span`) and `body` holds the `call` nodes only, about
+30% of the graph's body nodes, which is what `call_sites` needs
+and all it needs.
+:::
 
 > **See Also**
-> `get_methods_in_class`: For all methods of a class.
-> `get_method_parameters`: For just the parameter list.
+>
+> - `get_methods_in_class`: For all methods of a class.
+> - `get_method_parameters`: For just the parameter list.
 
 ##### `JavaAnalysis.get_method_parameters`
 
 ```python
-get_method_parameters(qualified_class_name: str, qualified_method_name: str) -> List[JCallableParameter]
+get_method_parameters(
+    qualified_class_name: str,
+    qualified_method_name: str,
+) -> List[JCallableParameter]
 ```
 
 Return the parameters of a specific method.
@@ -708,13 +1263,14 @@ Return the parameters of a specific method.
 
 **Returns:**
 
-- `List[JCallableParameter]`: class:`~cldk.models.java.models.JCallableParameter` objects
-- `List[JCallableParameter]`: (name, type, annotations, position), in signature order. Returns an
-- `List[JCallableParameter]`: empty list if the method is not found or has no parameters. (1.x
-- `List[JCallableParameter]`: annotated this ``List[str]``; it always returned the objects.)
+- [`List[JCallableParameter]`](#jcallableparameter): The `JCallableParameter` objects
+  (name, type, annotations, position), in signature order. Returns an
+  empty list if the method is not found or has no parameters. (1.x
+  annotated this `List[str]`; it always returned the objects.)
 
 > **See Also**
-> `get_method`: For complete method information.
+>
+> - `get_method`: For complete method information.
 
 ##### `JavaAnalysis.get_java_file`
 
@@ -732,16 +1288,17 @@ to source files.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class to locate (e.g., ``"com.example.service.UserService"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class to locate (e.g., `"com.example.service.UserService"`). |
 
 **Returns:**
 
-- `str \| None`: The file path (as a string) containing the class definition.
-- `str \| None`: Returns ``None`` if no class with the given name is found.
+- `str | None`: The file path (as a string) containing the class definition.
+  Returns `None` if no class with the given name is found.
 
 > **See Also**
-> `get_class`: To get the full class object by name.
-> `get_java_compilation_unit`: To get the compilation unit.
+>
+> - `get_class`: To get the full class object by name.
+> - `get_java_compilation_unit`: To get the compilation unit.
 
 ##### `JavaAnalysis.get_java_compilation_unit`
 
@@ -762,14 +1319,15 @@ specific Java source file in the analyzed project.
 
 **Returns:**
 
-- `JCompilationUnit`: class:`~cldk.models.java.JCompilationUnit` for the file,
-- `JCompilationUnit`: containing all analyzed information about package, imports,
-- `JCompilationUnit`: and type declarations. Returns ``None`` if the file is not
-- `JCompilationUnit`: part of the analyzed project.
+- [`JCompilationUnit`](#jcompilationunit): The `JCompilationUnit` for the file,
+  containing all analyzed information about package, imports,
+  and type declarations. Returns `None` if the file is not
+  part of the analyzed project.
 
 > **See Also**
-> `get_symbol_table`: For bulk access to all compilation units.
-> `get_java_file`: For reverse lookup (class to file).
+>
+> - `get_symbol_table`: For bulk access to all compilation units.
+> - `get_java_file`: For reverse lookup (class to file).
 
 ##### `JavaAnalysis.get_methods_in_class`
 
@@ -786,17 +1344,18 @@ instance methods, static methods, and constructors.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.service.UserService"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., `"com.example.service.UserService"`). |
 
 **Returns:**
 
-- `Dict[str, JCallable]`: A dictionary mapping method signatures (strings) to
-- `Dict[str, JCallable]`: class:`~cldk.models.java.JCallable` objects. Returns an empty
-- `Dict[str, JCallable]`: dictionary if the class is not found or has no methods.
+- [`Dict[str, JCallable]`](#jcallable): A dictionary mapping method signatures (strings) to
+  `JCallable` objects. Returns an empty
+  dictionary if the class is not found or has no methods.
 
 > **See Also**
-> `get_method`: For a single method by signature.
-> `get_constructors`: For constructors specifically.
+>
+> - `get_method`: For a single method by signature.
+> - `get_constructors`: For constructors specifically.
 
 ##### `JavaAnalysis.get_constructors`
 
@@ -813,16 +1372,17 @@ Constructors are methods with the same name as the class.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.model.User"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., `"com.example.model.User"`). |
 
 **Returns:**
 
-- `Dict[str, JCallable]`: A dictionary mapping constructor signatures to
-- `Dict[str, JCallable]`: class:`~cldk.models.java.JCallable` objects. Returns an empty
-- `Dict[str, JCallable]`: dictionary if the class has no explicit constructors.
+- [`Dict[str, JCallable]`](#jcallable): A dictionary mapping constructor signatures to
+  `JCallable` objects. Returns an empty
+  dictionary if the class has no explicit constructors.
 
 > **See Also**
-> `get_methods_in_class`: For all methods including constructors.
+>
+> - `get_methods_in_class`: For all methods including constructors.
 
 ##### `JavaAnalysis.get_fields`
 
@@ -839,16 +1399,17 @@ instance fields, static fields, and constants.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., ``"com.example.model.User"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the class (e.g., `"com.example.model.User"`). |
 
 **Returns:**
 
-- `List[JField]`: A list of `JField` objects, each
-- `List[JField]`: containing information about a field's name, type, modifiers,
-- `List[JField]`: and annotations.
+- [`List[JField]`](#jfield): A list of `JField` objects, each
+  containing information about a field's name, type, modifiers,
+  and annotations.
 
 > **See Also**
-> `get_class`: For complete class information.
+>
+> - `get_class`: For complete class information.
 
 ##### `JavaAnalysis.get_nested_classes`
 
@@ -865,15 +1426,16 @@ including static nested classes and inner classes.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the outer class (e.g., ``"com.example.model.Container"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the outer class (e.g., `"com.example.model.Container"`). |
 
 **Returns:**
 
-- `List[JType]`: A list of `JType` objects for each
-- `List[JType]`: nested class. Returns an empty list if no nested classes exist.
+- [`List[JType]`](#jtype): A list of `JType` objects for each
+  nested class. Returns an empty list if no nested classes exist.
 
 > **See Also**
-> `get_class`: For the outer class information.
+>
+> - `get_class`: For the outer class information.
 
 ##### `JavaAnalysis.get_sub_classes`
 
@@ -891,17 +1453,18 @@ finding implementations of abstract classes.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the base class to find subclasses of (e.g., ``"com.example.base.BaseService"``). |
+| `qualified_class_name` | `str` | The fully qualified name of the base class to find subclasses of (e.g., `"com.example.base.BaseService"`). |
 
 **Returns:**
 
-- `Dict[str, JType]`: A dictionary mapping qualified class names to
-- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for all classes that
-- `Dict[str, JType]`: extend the specified class.
+- [`Dict[str, JType]`](#jtype): A dictionary mapping qualified class names to
+  `JType` objects for all classes that
+  extend the specified class.
 
 > **See Also**
-> `get_extended_classes`: For the reverse (what a class extends).
-> `get_class_hierarchy`: For the full inheritance graph.
+>
+> - `get_extended_classes`: For the reverse (what a class extends).
+> - `get_class_hierarchy`: For the full inheritance graph.
 
 ##### `JavaAnalysis.get_extended_classes`
 
@@ -923,12 +1486,13 @@ can extend at most one other class (single inheritance).
 **Returns:**
 
 - `List[str]`: A list of superclass names (typically containing zero or one
-- `List[str]`: element, since Java has single inheritance). Returns empty list
-- `List[str]`: if the class directly extends Object or is not found.
+  element, since Java has single inheritance). Returns empty list
+  if the class directly extends Object or is not found.
 
 > **See Also**
-> `get_sub_classes`: For finding classes that extend this class.
-> `get_implemented_interfaces`: For interface implementations.
+>
+> - `get_sub_classes`: For finding classes that extend this class.
+> - `get_implemented_interfaces`: For interface implementations.
 
 ##### `JavaAnalysis.get_implemented_interfaces`
 
@@ -950,15 +1514,20 @@ A Java class can implement multiple interfaces.
 **Returns:**
 
 - `List[str]`: A list of interface names (as strings) that the class implements.
-- `List[str]`: Returns empty list if the class implements no interfaces.
+  Returns empty list if the class implements no interfaces.
 
 > **See Also**
-> `get_extended_classes`: For class inheritance.
+>
+> - `get_extended_classes`: For class inheritance.
 
 ##### `JavaAnalysis.get_class_call_graph`
 
 ```python
-get_class_call_graph(qualified_class_name: str, method_signature: str | None = None, using_symbol_table: bool = False) -> List[Tuple[JMethodDetail, JMethodDetail]]
+get_class_call_graph(
+    qualified_class_name: str,
+    method_signature: str | None = None,
+    using_symbol_table: bool = False,
+) -> List[Tuple[JMethodDetail, JMethodDetail]]
 ```
 
 Return call graph edges reachable from a class or method.
@@ -972,19 +1541,20 @@ of a specific component without the noise of the full project graph.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `qualified_class_name` | `str` | The fully qualified name of the class to start traversal from (e.g., ``"com.example.service.UserService"``). |
-| `method_signature` | `str \| None` | Optional method signature to further constrain the starting point. If provided, only edges reachable from that specific method are included. If ``None``, edges from all methods in the class are included. |
-| `using_symbol_table` | `bool` | If ``True``, uses the symbol table for faster but potentially less accurate resolution. If ``False`` (default), uses the full call graph analysis. |
+| `qualified_class_name` | `str` | The fully qualified name of the class to start traversal from (e.g., `"com.example.service.UserService"`). |
+| `method_signature` | `str \| None` | Optional method signature to further constrain the starting point. If provided, only edges reachable from that specific method are included. If `None`, edges from all methods in the class are included. |
+| `using_symbol_table` | `bool` | If `True`, uses the symbol table for faster but potentially less accurate resolution. If `False` (default), uses the full call graph analysis. |
 
 **Returns:**
 
-- `List[Tuple[JMethodDetail, JMethodDetail]]`: A list of tuples ``(caller, callee)`` where each element is a
-- `List[Tuple[JMethodDetail, JMethodDetail]]`: class:`~cldk.models.java.JMethodDetail` object representing
-- `List[Tuple[JMethodDetail, JMethodDetail]]`: a method in the call relationship.
+- [`List[Tuple[JMethodDetail, JMethodDetail]]`](#jmethoddetail): A list of tuples `(caller, callee)` where each element is a
+  `JMethodDetail` object representing
+  a method in the call relationship.
 
 > **See Also**
-> `get_call_graph`: For the complete project call graph.
-> `get_callees`: For direct callees of a single method.
+>
+> - `get_call_graph`: For the complete project call graph.
+> - `get_callees`: For direct callees of a single method.
 
 ##### `JavaAnalysis.get_entry_point_classes`
 
@@ -1000,12 +1570,13 @@ framework-specific entry point classes.
 
 **Returns:**
 
-- `Dict[str, JType]`: A dictionary mapping qualified class names to
-- `Dict[str, JType]`: class:`~cldk.models.java.JType` objects for classes identified
-- `Dict[str, JType]`: as entry points.
+- [`Dict[str, JType]`](#jtype): A dictionary mapping qualified class names to
+  `JType` objects for classes identified
+  as entry points.
 
 > **See Also**
-> `get_entry_point_methods`: For entry point methods.
+>
+> - `get_entry_point_methods`: For entry point methods.
 
 ##### `JavaAnalysis.get_entry_point_methods`
 
@@ -1021,12 +1592,13 @@ specific handler methods.
 
 **Returns:**
 
-- `Dict[str, Dict[str, JCallable]]`: A nested dictionary mapping class names to method signatures
-- `Dict[str, Dict[str, JCallable]]`: class:`~cldk.models.java.JCallable` objects for methods
-- `Dict[str, Dict[str, JCallable]]`: identified as entry points.
+- [`Dict[str, Dict[str, JCallable]]`](#jcallable): A nested dictionary mapping class names to method signatures
+  to `JCallable` objects for methods
+  identified as entry points.
 
 > **See Also**
-> `get_entry_point_classes`: For entry point classes.
+>
+> - `get_entry_point_classes`: For entry point classes.
 
 ##### `JavaAnalysis.remove_all_comments`
 
@@ -1036,17 +1608,20 @@ remove_all_comments() -> str
 
 Remove all comments from the source code.
 
-Strips all single-line (``//``) and multi-line (``/* */``) comments
+Strips all single-line (`//`) and multi-line (`/* */`) comments
 from the source code, including Javadoc comments. This is useful
 for code analysis that should ignore comment content.
 
 **Raises:**
 
 - `NotImplementedError`: always. This accessor only ever operated on the
-- meth:`TreesitterJava.remove_all_comments` directly.
+  `source_code` given to the 1.x constructor, and that single-file mode
+  was removed in 2.0. Pass the source to
+  `TreesitterJava.remove_all_comments` directly.
 
 > **See Also**
-> `get_all_comments`: For extracting comments instead.
+>
+> - `get_all_comments`: For extracting comments instead.
 
 ##### `JavaAnalysis.get_methods_with_annotations`
 
@@ -1057,29 +1632,31 @@ get_methods_with_annotations(annotations: List[str]) -> Dict[str, List[Dict]]
 Return methods decorated with specific annotations.
 
 This method is intended to find all methods that have any of the
-specified annotations, such as ``@Override``, ``@Test``,
-``@RequestMapping``, or custom annotations.
+specified annotations, such as `@Override`, `@Test`,
+`@RequestMapping`, or custom annotations.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `annotations` | `List[str]` | List of annotation names to search for (e.g., ``["Override", "Test", "RequestMapping"]``). The ``@`` symbol should not be included. |
+| `annotations` | `List[str]` | List of annotation names to search for (e.g., `["Override", "Test", "RequestMapping"]`). The `@` symbol should not be included. |
 
 **Returns:**
 
 - `Dict[str, List[Dict]]`: A dictionary keyed by **the strings passed in**, each mapping to a list of
-- `Dict[str, List[Dict]]`: ``{"class", "signature", "method_name", "body"}`` dicts, sorted by
-- `Dict[str, List[Dict]]`: ``(class, signature)``. An annotation no callable carries is omitted. ``body`` is
-- `Dict[str, List[Dict]]`: attr:`~cldk.models.java.models.JCallable.code`, which is the body block off
-- `Dict[str, List[Dict]]`: ``analysis.json`` and the whole declaration off the Neo4j projection, the same
-- `Dict[str, List[Dict]]`: documented model property `get_test_methods` hands back.
-- `Dict[str, List[Dict]]`: Matching reads the analyzer's own annotations rather than re-parsing source, so it
-- `Dict[str, List[Dict]]`: answers on a Neo4j-backed analysis, which carries no module source at all.
+  `{"class", "signature", "method_name", "body"}` dicts, sorted by
+  `(class, signature)`. An annotation no callable carries is omitted. `body` is
+  `code`, which is the body block off
+  `analysis.json` and the whole declaration off the Neo4j projection, the same
+  documented model property `get_test_methods` hands back.
+
+  Matching reads the analyzer's own annotations rather than re-parsing source, so it
+  answers on a Neo4j-backed analysis, which carries no module source at all.
 
 > **See Also**
-> `get_test_methods`: For finding test methods specifically.
-> `get_decorated_callables`: The projected form, whose J-5 marker rule this shares.
+>
+> - `get_test_methods`: For finding test methods specifically.
+> - `get_decorated_callables`: The projected form, whose J-5 marker rule this shares.
 
 ##### `JavaAnalysis.get_test_methods`
 
@@ -1090,27 +1667,27 @@ get_test_methods() -> Dict[str, str]
 Return methods identified as test methods.
 
 A callable is a test method when one of its own annotations is a test-declaring one:
-``@Test`` (JUnit 4/5, TestNG), ``@ParameterizedTest``, ``@RepeatedTest``, ``@TestFactory``
-or ``@TestTemplate``. The annotation is matched by simple name, so a fully qualified
-spelling (``@org.junit.Test``) matches too, and its arguments are ignored, the same
-marker rule the spec's J-5 gives ``get_decorated_callables``.
+`@Test` (JUnit 4/5, TestNG), `@ParameterizedTest`, `@RepeatedTest`, `@TestFactory`
+or `@TestTemplate`. The annotation is matched by simple name, so a fully qualified
+spelling (`@org.junit.Test`) matches too, and its arguments are ignored, the same
+marker rule the spec's J-5 gives `get_decorated_callables`.
 
 This reads the **analyzer's own** annotations off the model rather than re-parsing a
-module's ``source``, so it answers identically on both backends: a Neo4j-backed analysis
-carries no module ``source`` at all (``JCompilationUnit.source`` is ``""``), and the
-source-parsing version returned ``{}`` there, an empty reading as "this application has
+module's `source`, so it answers identically on both backends: a Neo4j-backed analysis
+carries no module `source` at all (`JCompilationUnit.source` is `""`), and the
+source-parsing version returned `{}` there, an empty reading as "this application has
 no tests" on an application with thousands.
 
 **Returns:**
 
-- `Dict[str, str]`: A dictionary mapping ``"<type fqn>.<signature>"``, the call-graph node key of J-1,
-- `Dict[str, str]`: unique application-wide, to the callable's ``code``. Note that ``code`` is the body
-- `Dict[str, str]`: block off ``analysis.json`` and the whole declaration off the Neo4j projection
-- `Dict[str, str]`: (`code`).
+- `Dict[str, str]`: A dictionary mapping `"<type fqn>.<signature>"` (the call-graph node key of J-1,
+  unique application-wide) to the callable's `code`. Note that `code` is the body
+  block off `analysis.json` and the whole declaration off the Neo4j projection
+  (`code`).
 
 > **See Also**
-> `get_methods_with_annotations`: For finding methods with
->     any annotation.
+>
+> - `get_methods_with_annotations`: For finding methods with any annotation.
 
 ##### `JavaAnalysis.get_calling_lines`
 
@@ -1132,12 +1709,13 @@ where the specified method is invoked.
 **Returns:**
 
 - `List[int]`: Sorted, distinct **absolute file lines** of every call to a method of that name anywhere
-- `List[int]`: in the project, read off ``get_call_graph()``'s ``calling_lines`` edge attribute. A full
-- `List[int]`: signature is accepted and cut at its first ``(``; overloads share a name at a call site
-- `List[int]`: and so cannot be separated here. Empty when nothing calls that name.
+  in the project, read off `get_call_graph()`'s `calling_lines` edge attribute. A full
+  signature is accepted and cut at its first `(`; overloads share a name at a call site
+  and so cannot be separated here. Empty when nothing calls that name.
 
 > **See Also**
-> `get_callers`: For finding caller methods instead of lines.
+>
+> - `get_callers`: For finding caller methods instead of lines.
 
 ##### `JavaAnalysis.get_call_targets`
 
@@ -1159,13 +1737,14 @@ analysis.
 
 **Returns:**
 
-- `Set[str]`: The subset of ``declared_methods``' keys, cut to their simple names at the last
-- `Set[str]`: ``(``, so a signature-keyed dict such as `get_methods_in_class`'s can be passed
-- `Set[str]`: straight in, that some call site in the project actually writes. Simple-name matching
-- `Set[str]`: no overload resolution, no receiver typing, no hierarchy walk.
+- `Set[str]`: The subset of `declared_methods`' keys (cut to their simple names at the last
+  `(`, so a signature-keyed dict such as `get_methods_in_class`'s can be passed
+  straight in) that some call site in the project actually writes. Simple-name matching
+  only: no overload resolution, no receiver typing, no hierarchy walk.
 
 > **See Also**
-> `get_call_graph`: For full semantic call resolution.
+>
+> - `get_call_graph`: For full semantic call resolution.
 
 ##### `JavaAnalysis.get_all_crud_operations`
 
@@ -1182,13 +1761,20 @@ in enterprise applications.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries, each containing: - ``"class"``: The `JType` containing the operation - ``"method"``: The `JCallable` performing the operation - ``"operations"``: List of `JCRUDOperation` objects
+- [`List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`](#jtype): A list of dictionaries, each containing:
+  - `"class"`: The `JType` containing
+    the operation
+  - `"method"`: The `JCallable`
+    performing the operation
+  - `"operations"`: List of
+    `JCRUDOperation` objects
 
 > **See Also**
-> `get_all_create_operations`: For create operations only.
-> `get_all_read_operations`: For read operations only.
-> `get_all_update_operations`: For update operations only.
-> `get_all_delete_operations`: For delete operations only.
+>
+> - `get_all_create_operations`: For create operations only.
+> - `get_all_read_operations`: For read operations only.
+> - `get_all_update_operations`: For update operations only.
+> - `get_all_delete_operations`: For delete operations only.
 
 ##### `JavaAnalysis.get_all_create_operations`
 
@@ -1199,15 +1785,16 @@ get_all_create_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUD
 Return all Create operations from CRUD analysis.
 
 Identifies database insert/create operations by analyzing
-``save()``, ``persist()``, ``insert()``, and similar patterns.
+`save()`, `persist()`, `insert()`, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+- [`List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`](#jtype): A list of dictionaries with class, method, and operation details.
+  Same structure as `get_all_crud_operations`.
 
 > **See Also**
-> `get_all_crud_operations`: For all CRUD operations.
+>
+> - `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_read_operations`
 
@@ -1218,15 +1805,16 @@ get_all_read_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUDOp
 Return all Read operations from CRUD analysis.
 
 Identifies database read/select operations by analyzing
-``find()``, ``get()``, ``select()``, and similar patterns.
+`find()`, `get()`, `select()`, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+- [`List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`](#jtype): A list of dictionaries with class, method, and operation details.
+  Same structure as `get_all_crud_operations`.
 
 > **See Also**
-> `get_all_crud_operations`: For all CRUD operations.
+>
+> - `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_update_operations`
 
@@ -1237,15 +1825,16 @@ get_all_update_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUD
 Return all Update operations from CRUD analysis.
 
 Identifies database update operations by analyzing
-``update()``, ``merge()``, ``set()``, and similar patterns.
+`update()`, `merge()`, `set()`, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+- [`List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`](#jtype): A list of dictionaries with class, method, and operation details.
+  Same structure as `get_all_crud_operations`.
 
 > **See Also**
-> `get_all_crud_operations`: For all CRUD operations.
+>
+> - `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_all_delete_operations`
 
@@ -1256,20 +1845,24 @@ get_all_delete_operations() -> List[Dict[str, Union[JType, JCallable, List[JCRUD
 Return all Delete operations from CRUD analysis.
 
 Identifies database delete operations by analyzing
-``delete()``, ``remove()``, and similar patterns.
+`delete()`, `remove()`, and similar patterns.
 
 **Returns:**
 
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: A list of dictionaries with class, method, and operation details.
-- `List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`: Same structure as `get_all_crud_operations`.
+- [`List[Dict[str, Union[JType, JCallable, List[JCRUDOperation]]]]`](#jtype): A list of dictionaries with class, method, and operation details.
+  Same structure as `get_all_crud_operations`.
 
 > **See Also**
-> `get_all_crud_operations`: For all CRUD operations.
+>
+> - `get_all_crud_operations`: For all CRUD operations.
 
 ##### `JavaAnalysis.get_comments_in_a_method`
 
 ```python
-get_comments_in_a_method(qualified_class_name: str, method_signature: str) -> List[JComment]
+get_comments_in_a_method(
+    qualified_class_name: str,
+    method_signature: str,
+) -> List[JComment]
 ```
 
 Return the method's own comment.
@@ -1277,7 +1870,7 @@ Return the method's own comment.
 **Not** every comment inside the body: on both backends this is the
 analyzer's per-declaration comment list, which holds the comment
 immediately above the declaration and nothing else (at most one; 70 of
-the 128 callables in the committed ``-a 4`` fixture have one, 65 of
+the 128 callables in the committed `-a 4` fixture have one, 65 of
 them javadoc). Comments *inside* a method body reach the SDK only
 through `get_comment_in_file`, which reports the whole file's.
 
@@ -1290,20 +1883,22 @@ through `get_comment_in_file`, which reports the whole file's.
 
 **Returns:**
 
-- `List[JComment]`: A list of `JComment` objects found
-- `List[JComment]`: within the method body. Returns empty list if method not found.
+- [`List[JComment]`](#jcomment): A list of `JComment` objects found
+  within the method body. Returns empty list if method not found.
 
-> **Note**
-> On a backend whose source keeps only per-declaration javadoc, the
-> Neo4j backend, this narrows to **the method's javadoc alone**: a
-> strictly smaller set than every comment in the body, and still a
-> real answer about a real declaration, which is why this accessor
-> narrows where `get_all_comments` and
-> `get_comment_in_file` refuse (J-16).
+:::note
+On a backend whose source keeps only per-declaration javadoc (the
+Neo4j backend) this narrows to **the method's javadoc alone**: a
+strictly smaller set than every comment in the body, and still a
+real answer about a real declaration, which is why this accessor
+narrows where `get_all_comments` and
+`get_comment_in_file` refuse.
+:::
 
 > **See Also**
-> `get_comments_in_a_class`: For class-level comments.
-> `get_all_comments`: For all comments in the project.
+>
+> - `get_comments_in_a_class`: For class-level comments.
+> - `get_all_comments`: For all comments in the project.
 
 ##### `JavaAnalysis.get_comments_in_a_class`
 
@@ -1315,7 +1910,7 @@ Return the class's own comment.
 
 **Not** the comments inside the class body: on both backends this is
 the type declaration's own comment list, the comment immediately
-above ``class Foo``. A method's comment is on
+above `class Foo`. A method's comment is on
 `get_comments_in_a_method`, and an inline comment in a body is
 on neither; `get_comment_in_file` reports the whole file's.
 
@@ -1327,16 +1922,18 @@ on neither; `get_comment_in_file` reports the whole file's.
 
 **Returns:**
 
-- `List[JComment]`: A list of `JComment` objects found
-- `List[JComment]`: within the class. Returns empty list if class not found.
+- [`List[JComment]`](#jcomment): A list of `JComment` objects found
+  within the class. Returns empty list if class not found.
 
-> **Note**
-> Narrows to the class's javadoc alone on a javadoc-only backend, in
-> exactly the way `get_comments_in_a_method` does (J-16).
+:::note
+Narrows to the class's javadoc alone on a javadoc-only backend, in
+exactly the way `get_comments_in_a_method` does.
+:::
 
 > **See Also**
-> `get_comments_in_a_method`: For method-specific comments.
-> `get_comment_in_file`: For file-level comments.
+>
+> - `get_comments_in_a_method`: For method-specific comments.
+> - `get_comment_in_file`: For file-level comments.
 
 ##### `JavaAnalysis.get_comment_in_file`
 
@@ -1357,15 +1954,19 @@ including file-level comments, class comments, and method comments.
 
 **Returns:**
 
-- `List[JComment]`: A list of `JComment` objects found
-- `List[JComment]`: in the file. Returns empty list if file not found.
+- [`List[JComment]`](#jcomment): A list of `JComment` objects found
+  in the file. Returns empty list if file not found.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: If the backend's source carries no file-level comments at all, the Neo4j projection does not, naming what is missing and what to read instead. An empty list would read as "this file has no comments" (J-16).
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): If the backend's source carries no
+  file-level comments at all (the Neo4j projection does not)
+  naming what is missing and what to read instead. An empty list
+  would read as "this file has no comments".
 
 > **See Also**
-> `get_all_comments`: For comments across all files.
+>
+> - `get_all_comments`: For comments across all files.
 
 ##### `JavaAnalysis.get_all_comments`
 
@@ -1380,15 +1981,17 @@ by file path.
 
 **Returns:**
 
-- `Dict[str, List[JComment]]`: A dictionary mapping file paths (strings) to lists of
-- `Dict[str, List[JComment]]`: class:`~cldk.models.java.JComment` objects.
+- [`Dict[str, List[JComment]]`](#jcomment): A dictionary mapping file paths (strings) to lists of
+  `JComment` objects.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: As `get_comment_in_file` does, and for the same reason (J-16).
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): As `get_comment_in_file`
+  does, and for the same reason.
 
 > **See Also**
-> `get_all_docstrings`: For Javadoc comments only.
+>
+> - `get_all_docstrings`: For Javadoc comments only.
 
 ##### `JavaAnalysis.get_all_docstrings`
 
@@ -1398,26 +2001,28 @@ get_all_docstrings() -> Dict[str, List[JComment]]
 
 Return all Javadoc comments in the project grouped by file.
 
-Retrieves only Javadoc-style comments (``/** ... */``) from all
+Retrieves only Javadoc-style comments (`/** ... */`) from all
 analyzed files. These typically document classes, methods, and
 fields.
 
 **Returns:**
 
-- `Dict[str, List[JComment]]`: A dictionary mapping file paths (strings) to lists of
-- `Dict[str, List[JComment]]`: class:`~cldk.models.java.JComment` objects where
-- `Dict[str, List[JComment]]`: ``is_javadoc`` is ``True``.
+- [`Dict[str, List[JComment]]`](#jcomment): A dictionary mapping file paths (strings) to lists of
+  `JComment` objects where
+  `is_javadoc` is `True`.
 
-> **Note**
-> *Which* javadoc depends on the backend: the ``analysis.json``
-> backend reports each compilation unit's own comment list, holding
-> the **file-level** javadoc; the Neo4j backend reports the javadoc of
-> each **declaration** in the file (type, callable, field, enum
-> constant, record component). Both are javadoc keyed by file, and
-> they are different sets for the same file (J-16).
+:::note
+*Which* javadoc depends on the backend: the `analysis.json`
+backend reports each compilation unit's own comment list, holding
+the **file-level** javadoc; the Neo4j backend reports the javadoc of
+each **declaration** in the file (type, callable, field, enum
+constant, record component). Both are javadoc keyed by file, and
+they are different sets for the same file.
+:::
 
 > **See Also**
-> `get_all_comments`: For all comment types.
+>
+> - `get_all_comments`: For all comment types.
 
 ##### `JavaAnalysis.locate`
 
@@ -1428,37 +2033,38 @@ locate(path: str, line: int) -> LocateResult
 Resolve a source position to its enclosing callable, with the source in hand.
 
 The single most-needed query for triaging a scanner alert: an alert arrives as
-``file:line`` and this resolves it to the enclosing callable in one call, rather than
-``get_method``, falling back to ``get_callers``, falling back to scanning the symbol table
+`file:line` and this resolves it to the enclosing callable in one call, rather than
+`get_method`, falling back to `get_callers`, falling back to scanning the symbol table
 by hand. Four outcomes stay distinguishable, see
-`LocateResult`: inside a callable (``callable`` set,
-plus ``body`` when a body node is that precise), at real module scope (``module_scope``
+`LocateResult`: inside a callable (`callable` set,
+plus `body` when a body node is that precise), at real module scope (`module_scope`
 diagnostic), in the gap between two callables (also module scope, never snapped to the
-nearest callable), or in a file the analysis has no module for (``file_not_in_graph``).
+nearest callable), or in a file the analysis has no module for (`file_not_in_graph`).
 
-There is no ``col`` parameter: the Neo4j graph projects only ``start_line``/``end_line`` on
-``:JCallable`` and ``:JBodyNode``, so a column would work in process and be silently inert
+There is no `col` parameter: the Neo4j graph projects only `start_line`/`end_line` on
+`:JCallable` and `:JBodyNode`, so a column would work in process and be silently inert
 over the graph.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `path` | `str` | The file path. Normalised against the backend's module keys, so a ``./``-prefixed or absolute path resolves rather than reading back as ``file_not_in_graph``. |
+| `path` | `str` | The file path. Normalised against the backend's module keys, so a `./`-prefixed or absolute path resolves rather than reading back as `file_not_in_graph`. |
 | `line` | `int` | The 1-based line number. |
 
 **Returns:**
 
-- `LocateResult`: class:`~cldk.analysis.commons.results.LocateResult` carrying the innermost body
-- `LocateResult`: node, the enclosing callable, its owning type, its module, and the source slice, never
-- `LocateResult`: an ambiguous empty. ``module.module_name`` is the unit's **declared package** (J-2),
-- `LocateResult`: and ``source`` is the enclosing callable's text, which is the **body block** on the
-- `LocateResult`: ``analysis.json`` backend and the whole **declaration** over Neo4j (see
-- `LocateResult`: meth:`get_source`). A module-scope result over Neo4j is ``""`` plus a
-- `LocateResult`: ``module_source_unavailable`` diagnostic: the graph carries no module text.
+- [`LocateResult`](/reference/python-api/results/#locateresult): A `LocateResult` carrying the innermost body
+  node, the enclosing callable, its owning type, its module, and the source slice, never
+  an ambiguous empty. `module.module_name` is the unit's **declared package**,
+  and `source` is the enclosing callable's text, which is the **body block** on the
+  `analysis.json` backend and the whole **declaration** over Neo4j (see
+  `get_source`). A module-scope result over Neo4j is `""` plus a
+  `module_source_unavailable` diagnostic: the graph carries no module text.
 
 > **See Also**
-> `locate_many`: The bulk form, the point, not an optimisation.
+>
+> - `locate_many`: The bulk form, the point, not an optimisation.
 
 ##### `JavaAnalysis.locate_many`
 
@@ -1466,74 +2072,84 @@ over the graph.
 locate_many(positions: Sequence[Tuple[str, int]]) -> List[LocateResult]
 ```
 
-Resolve many ``(path, line)`` positions in one round trip, in input order.
+Resolve many `(path, line)` positions in one round trip, in input order.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `positions` | `Sequence[Tuple[str, int]]` | The ``(path, line)`` pairs to resolve, e.g. from a scanner's alert list. |
+| `positions` | `Sequence[Tuple[str, int]]` | The `(path, line)` pairs to resolve, e.g. from a scanner's alert list. |
 
 **Returns:**
 
-- `List[LocateResult]`: class:`~cldk.analysis.commons.results.LocateResult` per input position, in the
-- `List[LocateResult]`: same order.
+- [`List[LocateResult]`](/reference/python-api/results/#locateresult): One `LocateResult` per input position, in the
+  same order.
 
 > **See Also**
-> `locate`: The single-position form.
+>
+> - `locate`: The single-position form.
 
 ##### `JavaAnalysis.resolve_callable`
 
 ```python
-resolve_callable(name: str, in_class: str | None = None, in_module: str | None = None) -> SliceNode
+resolve_callable(
+    name: str,
+    *,
+    in_class: str | None = None,
+    in_module: str | None = None,
+) -> SliceNode
 ```
 
 Resolve a callable name to the one callable it names, in the caller's vocabulary.
 
 The addressing step every name-taking accessor performs, exposed so a caller can perform it
-once and keep the answer::
+once and keep the answer:
 
-    node = java.resolve_callable("cancelOrder(java.lang.Integer, boolean)", in_class="TradeDirect")
-    node.callable   # "…impl.direct.TradeDirect.cancelOrder(java.lang.Integer, boolean)"
-    node.file, node.line
+```python
+node = java.resolve_callable("cancelOrder(java.lang.Integer, boolean)", in_class="TradeDirect")
+node.callable   # "…impl.direct.TradeDirect.cancelOrder(java.lang.Integer, boolean)"
+node.file, node.line
+```
 
-``name`` matches whole or as a dotted suffix, **and** against the signature with its
-parameter tail cut, so ``"cancelOrder"`` names a method a caller has not typed the
+`name` matches whole or as a dotted suffix, **and** against the signature with its
+parameter tail cut, so `"cancelOrder"` names a method a caller has not typed the
 parameters of; the tail-carrying spelling is what resolves one overload out of a pair
-(J-3). ``in_class`` is a dotted suffix of the owning type's qualified name, which, for a
-local or anonymous class, carries the callable that declares it (the J-1 erratum);
-``in_module`` is a repo-relative path suffix or a dotted spelling of the unit's **declared
-package**, optionally qualified by a type it declares (J-2). Ambiguity raises with every
+(J-3). `in_class` is a dotted suffix of the owning type's qualified name, which, for a
+local or anonymous class, carries the callable that declares it;
+`in_module` is a repo-relative path suffix or a dotted spelling of the unit's **declared
+package**, optionally qualified by a type it declares. Ambiguity raises with every
 candidate; nothing is guessed.
 
-Everything the analyzer emitted as a callable is addressable (J-6): an initializer
-(``<clinit>$0()``) resolves and behaves like a method, and an **implicit** callable
-resolves with ``line=-1``, it has no span at all, which is why `get_source` refuses
+Everything the analyzer emitted as a callable is addressable: an initializer
+(`<clinit>$0()`) resolves and behaves like a method, and an **implicit** callable
+resolves with `line=-1`, it has no span at all, which is why `get_source` refuses
 it by name rather than returning an empty string.
 
 **Raises:**
 
-- `AmbiguousName`: More than one callable matched.
-- `SelectorNotInGraph`: Nothing matched, naming the argument that missed.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): More than one callable matched.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Nothing matched, naming the argument that missed.
 
 ##### `JavaAnalysis.resolve_value`
 
 ```python
-resolve_value(name: str, within: str) -> SliceNode
+resolve_value(name: str, *, within: str) -> SliceNode
 ```
 
-Resolve a value name inside a callable, in Java, a parameter, to the position that
+Resolve a value name inside a callable (in Java, a parameter) to the position that
 carries it.
 
-The same resolution the dataflow accessors perform on their ``src``, exposed so a caller can
-check what a name means before asking a question of it::
+The same resolution the dataflow accessors perform on their `src`, exposed so a caller can
+check what a name means before asking a question of it:
 
-    java.resolve_value("orderID", within="TradeDirect.cancelOrder").kind   # "parameter"
+```python
+java.resolve_value("orderID", within="TradeDirect.cancelOrder").kind   # "parameter"
+```
 
 **Raises:**
 
-- `AmbiguousName`: ``within`` named more than one callable, or ``name`` more than one value.
-- `SelectorNotInGraph`: No such callable, or no such value in it.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): `within` named more than one callable, or `name` more than one value.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): No such callable, or no such value in it.
 
 ##### `JavaAnalysis.get_source`
 
@@ -1541,21 +2157,21 @@ check what a name means before asking a question of it::
 get_source(node_id: str) -> str
 ```
 
-Return the source text named by ``node_id``, a callable, or one of its body nodes.
+Return the source text named by `node_id`, a callable, or one of its body nodes.
 
-``node_id`` is a callable's ``"<type fqn>.<signature>"`` name (what `resolve_callable`
-returns in ``callable``), a callable's opaque id (what it returns in ``ref``), or the
+`node_id` is a callable's `"<type fqn>.<signature>"` name (what `resolve_callable`
+returns in `callable`), a callable's opaque id (what it returns in `ref`), or the
 body-node id `node_id` hands back, so a
 statement or call site `locate` found can be re-fetched precisely. Passed back as
 received, never composed.
 
 **What comes back for a callable depends on the backend, and it is the graph's difference,
-not this method's.** On the ``analysis.json`` backend it is the **body block**; over Neo4j
-it is the whole **declaration**, which *ends with* that body block: the projection carries
-one line range per callable and no ``body_span`` (upstream codeanalyzer-java#176). The
+not this method's.** On the `analysis.json` backend it is the **body block**; over Neo4j
+it is the whole **declaration**, which *ends with* that body block, the projection carries
+one line range per callable and no `body_span` (upstream codeanalyzer-java#176). The
 relation is exact and total, so a caller reading either can rely on it; it is recorded in
-the lossiness table of ``docs/agent-api-reference.md`` and asserted by the live parity
-suite. A **body node** likewise has text only on the ``analysis.json`` backend: the graph
+the lossiness table of `docs/agent-api-reference.md` and asserted by the live parity
+suite. A **body node** likewise has text only on the `analysis.json` backend: the graph
 carries none below callable granularity.
 
 **Parameters:**
@@ -1570,7 +2186,9 @@ carries none below callable granularity.
 
 **Raises:**
 
-- `KeyError`: Nothing matches ``node_id``, or it names a node with no recoverable source, an implicit callable (the analyzer emits it with no span and no body), or, over Neo4j, a body node. The message names the reason.
+- `KeyError`: Nothing matches `node_id`, or it names a node with no recoverable source,
+  an implicit callable (the analyzer emits it with no span and no body), or, over
+  Neo4j, a body node. The message names the reason.
 
 ##### `JavaAnalysis.describe`
 
@@ -1578,14 +2196,14 @@ carries none below callable granularity.
 describe(nodes: Sequence[object]) -> List[SliceNode]
 ```
 
-Fill in ``source`` for these positions, in one round trip.
+Fill in `source` for these positions, in one round trip.
 
 Addressing answers *where*; this answers *what*, and it is a second call because source is
-the one field with no size ceiling. Takes anything carrying an address, slice nodes, a
-``locate()`` result, and gives back the same
-`SliceNode` shape with ``source`` filled.
+the one field with no size ceiling. Takes anything carrying an address (slice nodes, a
+`locate()` result) and gives back the same
+`SliceNode` shape with `source` filled.
 
-Afterwards, ``source=None`` means exactly one thing: **this position exists and there is no
+Afterwards, `source=None` means exactly one thing: **this position exists and there is no
 text for it.** A ref that names nothing raises instead.
 
 **Parameters:**
@@ -1596,8 +2214,8 @@ text for it.** A ref that names nothing raises instead.
 
 **Returns:**
 
-- `List[SliceNode]`: The same positions, in the same order, with ``source`` filled where the backend has
-- `List[SliceNode]`: text for them.
+- [`List[SliceNode]`](/reference/python-api/results/#slicenode): The same positions, in the same order, with `source` filled where the backend has
+  text for them.
 
 **Raises:**
 
@@ -1607,7 +2225,13 @@ text for it.** A ref that names nothing raises instead.
 ##### `JavaAnalysis.get_cfg`
 
 ```python
-get_cfg(callable: str, in_class: str | None = None, page_size: int = DEFAULT_PAGE_SIZE, cursor: str | None = None) -> EdgePage[JCfgEdge]
+get_cfg(
+    callable: str,
+    *,
+    in_class: str | None = None,
+    page_size: int = 10000,
+    cursor: str | None = None,
+) -> EdgePage[JCfgEdge]
 ```
 
 Return one page of the control flow edges within one callable.
@@ -1622,58 +2246,78 @@ body-node ids `get_source` accepts, so a statement on a path can be read back.
 | ---- | ---- | ----------- |
 | `callable` | `str` | The callable's name, resolved as in `resolve_callable`. |
 | `in_class` | `str \| None` | Disambiguate by owning class. |
-| `page_size` | `int` | Most edges to return. |
-| `cursor` | `str \| None` | ``next_cursor`` from a previous page. |
+| `page_size` | `int` | Most edges to return. Default: [`DEFAULT_PAGE_SIZE`](/reference/python-api/results/#default_page_size) (10000). |
+| `cursor` | `str \| None` | `next_cursor` from a previous page. |
 
 **Returns:**
 
-- `EdgePage[JCfgEdge]`: class:`~cldk.analysis.commons.results.EdgePage` of
-- `EdgePage[JCfgEdge]`: class:`~cldk.models.java.models.JCfgEdge`, whose ``complete`` says whether the page is
-- `EdgePage[JCfgEdge]`: the whole graph and whose ``total`` says how large that is.
+- [`EdgePage[JCfgEdge]`](/reference/python-api/results/#edgepage): An `EdgePage` of
+  `JCfgEdge`, whose `complete` says whether the page is
+  the whole graph and whose `total` says how large that is.
 
 **Raises:**
 
-- `AmbiguousName`: ``callable`` named more than one callable.
-- `SelectorNotInGraph`: Nothing matched.
-- `ValueError`: ``page_size`` below 1, or a cursor from another page.
-- `CodeanalyzerUsageException`: ``callable`` is an implicit callable, it resolves (J-6) and the analyzer emits it with no body, so there is no flow to page, or the analysis was built below ``analysis_level="program_dependency_graph"``.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): `callable` named more than one callable.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Nothing matched.
+- `ValueError`: `page_size` below 1, or a cursor from another page.
+- [`CodeanalyzerUsageException`](/reference/python-api/results/#codeanalyzerusageexception): `callable` is an implicit callable (it resolves
+  and the analyzer emits it with no body, so there is no flow to page) or the
+  analysis was built below `analysis_level="program_dependency_graph"`.
 
 ##### `JavaAnalysis.get_cdg`
 
 ```python
-get_cdg(callable: str, in_class: str | None = None, page_size: int = DEFAULT_PAGE_SIZE, cursor: str | None = None) -> EdgePage[JCdgEdge]
+get_cdg(
+    callable: str,
+    *,
+    in_class: str | None = None,
+    page_size: int = 10000,
+    cursor: str | None = None,
+) -> EdgePage[JCdgEdge]
 ```
 
 Return one page of the control dependence edges within one callable.
 
-``src`` is the branching node ``dst`` is control dependent on, the analyzer's
+`src` is the branching node `dst` is control dependent on, the analyzer's
 post-dominance over the CFG, not re-derived here. Arguments and failures are
 `get_cfg`'s.
 
 ##### `JavaAnalysis.get_ddg`
 
 ```python
-get_ddg(callable: str, in_class: str | None = None, page_size: int = DEFAULT_PAGE_SIZE, cursor: str | None = None) -> EdgePage[JDdgEdge]
+get_ddg(
+    callable: str,
+    *,
+    in_class: str | None = None,
+    page_size: int = 10000,
+    cursor: str | None = None,
+) -> EdgePage[JDdgEdge]
 ```
 
 Return one page of the data dependence edges within one callable.
 
-Each edge names the variable it flows (``var``) and the evidence for it (``prov``), which in
-Java is one of **two** tiers: ``ssa`` (324,959 edges on the reference graph) or
-``points-to`` (1,134). `prov_rank` ranks ``points-to``
+Each edge names the variable it flows (`var`) and the evidence for it (`prov`), which in
+Java is one of **two** tiers, `ssa` (324,959 edges on the reference graph) or
+`points-to` (1,134). `prov_rank` ranks `points-to`
 least certain, which is what a caller weighing two hops reads. Arguments and failures are
 `get_cfg`'s.
 
 ##### `JavaAnalysis.slice_backward`
 
 ```python
-slice_backward(src: str, within: str, depth: int | None = DEFAULT_DEPTH, max_nodes: int = DEFAULT_MAX_NODES) -> Slice
+slice_backward(
+    src: str,
+    *,
+    within: str,
+    depth: int | None = 5,
+    max_nodes: int = 10000,
+) -> Slice
 ```
 
-Return everything the value ``src`` depends on.
+Return everything the value `src` depends on.
 
-On an analysis whose port lattice carries no dependence edge, codeanalyzer-java before
-3.0.3, or ``--l3-engine wala``, that is the seed plus the argument vertex at every call
+On an analysis whose port lattice carries no dependence edge (codeanalyzer-java before
+3.0.3, or `--l3-engine wala`) that is the seed plus the argument vertex at every call
 site that passes a value into the parameter, and nothing behind those arguments. It is
 still a real answer that varies with the program, which is why this one answers where
 `slice_forward` refuses. From 3.0.3 the walk carries on into the statements that
@@ -1683,28 +2327,34 @@ computed those arguments.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `src` | `str` | The value's name, in Java, a parameter of ``within``. |
+| `src` | `str` | The value's name, in Java, a parameter of `within`. |
 | `within` | `str` | The callable to look inside. Required: a value name is scoped by its callable. |
-| `depth` | `int \| None` | Most hops from the seed; ``None`` for the whole cone. |
-| `max_nodes` | `int` | Most nodes to return. A cap that fires is reported, never silent. |
+| `depth` | `int \| None` | Most hops from the seed; `None` for the whole cone. Default: [`DEFAULT_DEPTH`](/reference/python-api/results/#default_depth) (5). |
+| `max_nodes` | `int` | Most nodes to return. A cap that fires is reported, never silent. Default: [`DEFAULT_MAX_NODES`](/reference/python-api/results/#default_max_nodes) (10000). |
 
 **Returns:**
 
-- `Slice`: class:`~cldk.analysis.commons.results.Slice` containing the seed, ordered by node id.
+- [`Slice`](/reference/python-api/results/#slice): A `Slice` containing the seed, ordered by node id.
 
 **Raises:**
 
-- `AmbiguousName`: ``within`` or ``src`` matched more than one thing.
-- `SelectorNotInGraph`: Either matched nothing.
-- `ValueError`: ``depth`` is not a positive ``int``, or ``max_nodes`` is below 1.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): `within` or `src` matched more than one thing.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Either matched nothing.
+- `ValueError`: `depth` is not a positive `int`, or `max_nodes` is below 1.
 
 ##### `JavaAnalysis.slice_forward`
 
 ```python
-slice_forward(src: str, within: str, depth: int | None = DEFAULT_DEPTH, max_nodes: int = DEFAULT_MAX_NODES) -> Slice
+slice_forward(
+    src: str,
+    *,
+    within: str,
+    depth: int | None = 5,
+    max_nodes: int = 10000,
+) -> Slice
 ```
 
-Return everything the value ``src`` can affect.
+Return everything the value `src` can affect.
 
 **Java cannot answer this today and says so.** A parameter vertex has no outgoing dependence
 edge in codeanalyzer-java's output, so the result would be the seed alone for every
@@ -1713,95 +2363,118 @@ Arguments and names are judged first; then it raises naming the gap.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: The analyzer's port lattice carries no dependence edge.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analyzer's port lattice carries no dependence edge.
 
 ##### `JavaAnalysis.backward_cone`
 
 ```python
-backward_cone(sinks: Sequence[str], depth: int | None = DEFAULT_DEPTH, max_nodes: int = DEFAULT_MAX_NODES) -> Slice
+backward_cone(
+    sinks: Sequence[str],
+    *,
+    depth: int | None = 5,
+    max_nodes: int = 10000,
+) -> Slice
 ```
 
-Return every callable that can reach any of ``sinks``, "what could get here".
+Return every callable that can reach any of `sinks`, "what could get here".
 
 A call-graph cone, so its vertices are callables; the sinks are in the result and in
-``roots``. Bounded by default, because an unbounded cone on a real application is a
-truncated answer to a question nobody asked; ``depth=None`` asks for the whole thing and
-``total`` says how much a cap left out.
+`roots`. Bounded by default, because an unbounded cone on a real application is a
+truncated answer to a question nobody asked; `depth=None` asks for the whole thing and
+`total` says how much a cap left out.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
 | `sinks` | `Sequence[str]` | The callables to walk back from, each resolved as in `resolve_callable`. |
-| `depth` | `int \| None` | Most call hops back; ``None`` for the whole cone. |
-| `max_nodes` | `int` | Most nodes to return. |
+| `depth` | `int \| None` | Most call hops back; `None` for the whole cone. Default: [`DEFAULT_DEPTH`](/reference/python-api/results/#default_depth) (5). |
+| `max_nodes` | `int` | Most nodes to return. Default: [`DEFAULT_MAX_NODES`](/reference/python-api/results/#default_max_nodes) (10000). |
 
 **Raises:**
 
-- `AmbiguousName`: A sink matched more than one callable.
-- `SelectorNotInGraph`: A sink matched none.
-- `TypeError`: ``sinks`` is a bare string.
-- `ValueError`: ``sinks`` is empty, or a bound is out of range.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): A sink matched more than one callable.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A sink matched none.
+- `TypeError`: `sinks` is a bare string.
+- `ValueError`: `sinks` is empty, or a bound is out of range.
 
 ##### `JavaAnalysis.reaches`
 
 ```python
-reaches(src: str, dst: str, depth: int | None = None) -> bool
+reaches(src: str, dst: str, *, depth: int | None = None) -> bool
 ```
 
-Return whether there is a call path from ``src`` to ``dst``.
+Return whether there is a call path from `src` to `dst`.
 
 The cheap check before asking for the paths themselves. **Unbounded by default**, unlike the
 slices: a hop budget on a boolean would make "there is no path" and "there is no path within
-five hops" the same ``False``.
+five hops" the same `False`.
 
 **Raises:**
 
-- `AmbiguousName`: Either name matched more than one callable.
-- `SelectorNotInGraph`: Either matched none.
-- `ValueError`: ``depth`` is not a positive ``int``.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): Either name matched more than one callable.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Either matched none.
+- `ValueError`: `depth` is not a positive `int`.
 
 ##### `JavaAnalysis.callers_of`
 
 ```python
-callers_of(name: str, in_class: str | None = None, in_module: str | None = None) -> List[SliceNode]
+callers_of(
+    name: str,
+    *,
+    in_class: str | None = None,
+    in_module: str | None = None,
+) -> List[SliceNode]
 ```
 
 Return the callables that call this one, one hop back, addressed by name.
 
 The name-based sibling of `get_callers`, which takes a class name plus a method
-signature and returns raw dicts; that one is a frozen 1.x signature and is unchanged. ``[]``
+signature and returns raw dicts; that one is a frozen 1.x signature and is unchanged. `[]`
 is unambiguous, a name matching nothing raises.
 
 **Raises:**
 
-- `AmbiguousName`: ``name`` matched more than one callable.
-- `SelectorNotInGraph`: Nothing matched.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): `name` matched more than one callable.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Nothing matched.
 
 ##### `JavaAnalysis.callees_of`
 
 ```python
-callees_of(name: str, in_class: str | None = None, in_module: str | None = None) -> List[SliceNode]
+callees_of(
+    name: str,
+    *,
+    in_class: str | None = None,
+    in_module: str | None = None,
+) -> List[SliceNode]
 ```
 
 Return the callables this one calls, one hop forward, addressed by name.
 
-Java's call graph has no external vertices on either backend (J-1), so unlike Python's and
-TypeScript's this never reports a ``kind="external"`` node; ``get_external_symbols`` is where
+Java's call graph has no external vertices on either backend, so unlike Python's and
+TypeScript's this never reports a `kind="external"` node; `get_external_symbols` is where
 call targets outside the project live.
 
 **Raises:**
 
-- `AmbiguousName`: ``name`` matched more than one callable.
-- `SelectorNotInGraph`: Nothing matched.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname): `name` matched more than one callable.
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): Nothing matched.
 
 ##### `JavaAnalysis.paths_between`
 
 ```python
-paths_between(src: str, dst: str, src_within: str, dst_within: str, depth: int | None = None, max_paths: int = DEFAULT_MAX_PATHS) -> FlowPaths
+paths_between(
+    src: str,
+    dst: str,
+    *,
+    src_within: str,
+    dst_within: str,
+    depth: int | None = None,
+    max_paths: int = 10,
+) -> FlowPaths
 ```
 
-Return how the value ``src`` reaches the value ``dst``, the sequences, where a slice is
+Return how the value `src` reaches the value `dst`, the sequences, where a slice is
 the set.
 
 Two scopes, not one, and neither defaults to the other: a value is addressed by a name plus
@@ -1813,103 +2486,127 @@ names are judged first.
 
 **Raises:**
 
-- `AmbiguousName / SelectorNotInGraph`: A name matched more than one thing, or nothing.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname) / [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A name matched more than one thing, or nothing.
 - `ValueError`: A bound is out of range, or the two endpoints are the same position.
-- `CodeanalyzerExecutionException`: The analyzer's port lattice carries no dependence edge.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analyzer's port lattice carries no dependence edge.
 
 ##### `JavaAnalysis.call_paths_between`
 
 ```python
-call_paths_between(src: str, dst: str, depth: int | None = None, max_paths: int = DEFAULT_MAX_PATHS) -> FlowPaths
+call_paths_between(
+    src: str,
+    dst: str,
+    *,
+    depth: int | None = None,
+    max_paths: int = 10,
+) -> FlowPaths
 ```
 
 Return how one callable reaches another, the evidence-carrying form of `reaches`.
 
-Every hop is ``via="call"`` with no ``var`` and no ``prov``: a call edge carries neither, and
+Every hop is `via="call"` with no `var` and no `prov`: a call edge carries neither, and
 saying so is better than inventing a provenance. Only shortest paths, ordered so that
-``max_paths`` truncates a prefix of one total order rather than an arbitrary subset.
+`max_paths` truncates a prefix of one total order rather than an arbitrary subset.
 
 **Raises:**
 
-- `AmbiguousName / SelectorNotInGraph`: A name matched more than one callable, or none.
-- `ValueError`: A bound is out of range, or ``src`` and ``dst`` name the same callable.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname) / [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A name matched more than one callable, or none.
+- `ValueError`: A bound is out of range, or `src` and `dst` name the same callable.
 
 ##### `JavaAnalysis.flows_to_call`
 
 ```python
-flows_to_call(src: str, callee: str, within: str, depth: int | None = None) -> bool
+flows_to_call(src: str, callee: str, *, within: str, depth: int | None = None) -> bool
 ```
 
-Return whether the value ``src`` reaches any argument of a call to ``callee``.
+Return whether the value `src` reaches any argument of a call to `callee`.
 
 **Java cannot answer this today and says so**: see `slice_forward`.
 
 **Raises:**
 
-- `AmbiguousName / SelectorNotInGraph`: A name matched more than one thing, or nothing.
-- `ValueError`: ``depth`` is not a positive ``int``.
-- `CodeanalyzerExecutionException`: The analyzer's port lattice carries no dependence edge.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname) / [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A name matched more than one thing, or nothing.
+- `ValueError`: `depth` is not a positive `int`.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analyzer's port lattice carries no dependence edge.
 
 ##### `JavaAnalysis.flows_to_argument`
 
 ```python
-flows_to_argument(src: str, callee: str, arg: str, within: str, depth: int | None = None) -> bool
+flows_to_argument(
+    src: str,
+    callee: str,
+    arg: str,
+    *,
+    within: str,
+    depth: int | None = None,
+) -> bool
 ```
 
-Return whether the value ``src`` reaches ``callee``'s parameter ``arg``.
+Return whether the value `src` reaches `callee`'s parameter `arg`.
 
 A different question from `flows_to_call`: a tainted value routinely reaches a method
-without reaching the parameter that matters. ``arg`` is named, never numbered.
+without reaching the parameter that matters. `arg` is named, never numbered.
 
 **Java cannot answer this today and says so**: see `slice_forward`.
 
 **Raises:**
 
-- `AmbiguousName / SelectorNotInGraph`: A name matched more than one thing, or nothing, including ``arg`` naming no parameter of ``callee``, which is a caller error and not a ``False``.
-- `ValueError`: ``depth`` is not a positive ``int``.
-- `CodeanalyzerExecutionException`: The analyzer's port lattice carries no dependence edge.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname) / [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A name matched more than one thing, or nothing,
+  including `arg` naming no parameter of `callee`, which is a caller error and not
+  a `False`.
+- `ValueError`: `depth` is not a positive `int`.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analyzer's port lattice carries no dependence edge.
 
 ##### `JavaAnalysis.taint`
 
 ```python
-taint(sources: Sequence[Tuple[str, str]], sinks: Sequence[Tuple[str, str]], sanitizers: Sequence[Tuple[str, str] | str] = (), depth: int | None = None, max_paths: int = DEFAULT_MAX_PATHS) -> TaintResult
+taint(
+    sources: Sequence[Tuple[str, str]],
+    sinks: Sequence[Tuple[str, str]],
+    sanitizers: Sequence[Tuple[str, str] | str] = (),
+    *,
+    depth: int | None = None,
+    max_paths: int = 10,
+) -> TaintResult
 ```
 
 Which of these sources reach which of these sinks, and what to make of the ones that do not.
 
-m sources against n sinks in one traversal, where `paths_between` proves one flow::
+m sources against n sinks in one traversal, where `paths_between` proves one flow:
 
-    r = java.taint(
-        sources=[("userID", "TradeAppServlet.doPost")],
-        sinks=[("sql", "TradeDirect.getOrders")],
-        sanitizers=["TradeAppServlet.escapeUserID", ("checked", "TradeAppServlet.doPost")],
-    )
-    for path in r.paths:
-        print(" -> ".join(h.to.name for h in path.hops))
-    for src, sink in r.exhausted:
-        print(src, "does not reach", sink)
+```python
+r = java.taint(
+    sources=[("userID", "TradeAppServlet.doPost")],
+    sinks=[("sql", "TradeDirect.getOrders")],
+    sanitizers=["TradeAppServlet.escapeUserID", ("checked", "TradeAppServlet.doPost")],
+)
+for path in r.paths:
+    print(" -> ".join(h.to.name for h in path.hops))
+for src, sink in r.exhausted:
+    print(src, "does not reach", sink)
+```
 
-**``exhausted`` is the reason to call this and the only output that can do harm.** A pair is
-listed there when it was searched to exhaustion and nothing was found, the refutation
-`paths_between`'s ``[]`` cannot give, and only when all three hold: no witness, no
-diagnostic in ``unresolved`` implicating it, and **``depth`` was ``None``**. An explicit
-``depth`` empties ``exhausted`` by rule, because a bound turns a real long flow into an empty
+**`exhausted` is the reason to call this and the only output that can do harm.** A pair is
+listed there when it was searched to exhaustion and nothing was found (the refutation
+`paths_between`'s `[]` cannot give) and only when all three hold: no witness, no
+diagnostic in `unresolved` implicating it, and **`depth` was `None`**. An explicit
+`depth` empties `exhausted` by rule, because a bound turns a real long flow into an empty
 result and a wrong refutation closes a live alert.
 
-**``complete`` is the batch's flag, not the pair's.** While it is ``False``, no absence claim
-stands on any pair in the result: one blocked pair voids the whole batch's ``exhausted``.
+**`complete` is the batch's flag, not the pair's.** While it is `False`, no absence claim
+stands on any pair in the result: one blocked pair voids the whole batch's `exhausted`.
 
 **Sources, sinks and sanitizers are the caller's to supply**: no framework catalogue ships
-here. A bare ``str`` cuts a *callable* on the path (a transforming sanitizer, resolved with
+here. A bare `str` cuts a *callable* on the path (a transforming sanitizer, resolved with
 `resolve_callable` and so named as a callable *this application* declares); a
-``(name, within)`` pair cuts a *variable* inside that callable, which is the only thing that
+`(name, within)` pair cuts a *variable* inside that callable, which is the only thing that
 severs a *validating* guard, since a guard never sits on the data path. Both cuts are applied
 inside the search, so the result is the shortest **unsanitized** route.
 
 **Java refuses this on a disconnected port lattice**, exactly as `slice_forward`,
 `paths_between`, `flows_to_call` and `flows_to_argument` do
-(codeanalyzer-java#227). The gate is asked of the data, whether this application's
-``formal_in`` vertices carry any outgoing SDG edge, and never of the analyzer's version, so
+(codeanalyzer-java#227). The gate is asked of the data (whether this application's
+`formal_in` vertices carry any outgoing SDG edge) and never of the analyzer's version, so
 output that connects the two layers makes this answer with no change here. Names and bounds
 are judged first, so a typo is reported as a typo.
 
@@ -1917,19 +2614,23 @@ are judged first, so a typo is reported as a typo.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `sources` | `Sequence[Tuple[str, str]]` | The values taint enters at, each ``(name, within)``. |
+| `sources` | `Sequence[Tuple[str, str]]` | The values taint enters at, each `(name, within)`. |
 | `sinks` | `Sequence[Tuple[str, str]]` | The values it must not reach, addressed the same way. |
-| `sanitizers` | `Sequence[Tuple[str, str] \| str]` | Bare names cut callables; ``(name, within)`` pairs cut variables. |
-| `depth` | `int \| None` | Most hops; ``None`` (the default) for no bound, and ``exhausted`` is empty whenever it is set. |
-| `max_paths` | `int` | Most witnesses **per pair**, not per call. |
+| `sanitizers` | `Sequence[Tuple[str, str] \| str]` | Bare names cut callables; `(name, within)` pairs cut variables. |
+| `depth` | `int \| None` | Most hops; `None` (the default) for no bound, and `exhausted` is empty whenever it is set. |
+| `max_paths` | `int` | Most witnesses **per pair**, not per call. Default: [`DEFAULT_MAX_PATHS`](/reference/python-api/results/#default_max_paths) (10). |
 
 **Raises:**
 
-- `AmbiguousName / SelectorNotInGraph`: A name, or a sanitizer's ``within``, matched more than one thing or nothing, including a sanitizer whose shape disagrees with what it resolves to.
-- `TypeError`: ``sources`` or ``sinks`` is a bare string, which would unpack into a pair.
-- `ValueError`: A bound is out of range, ``sources`` or ``sinks`` is empty, or a sanitizer names a blank variable.
-- `CodeanalyzerExecutionException`: The analyzer's port lattice carries no dependence edge.
-- `CodeanalyzerUsageException`: This analysis was built below ``analysis_level="system_dependency_graph"``.
+- [`AmbiguousName`](/reference/python-api/results/#ambiguousname) / [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): A name, or a sanitizer's `within`, matched more
+  than one thing or nothing, including a sanitizer whose shape disagrees with what it
+  resolves to.
+- `TypeError`: `sources` or `sinks` is a bare string, which would unpack into a pair.
+- `ValueError`: A bound is out of range, `sources` or `sinks` is empty, or a sanitizer
+  names a blank variable.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analyzer's port lattice carries no dependence edge.
+- [`CodeanalyzerUsageException`](/reference/python-api/results/#codeanalyzerusageexception): This analysis was built below
+  `analysis_level="system_dependency_graph"`.
 
 ##### `JavaAnalysis.get_callables_overview`
 
@@ -1947,12 +2648,13 @@ afterwards via `get_method` or `get_method_bodies`.
 
 **Returns:**
 
-- `List[JCallableOverview]`: A flat list, one entry per callable the analyzer emitted, initializers, implicit
-- `List[JCallableOverview]`: constructors and the callables of local and anonymous classes included (J-6).
+- [`List[JCallableOverview]`](#jcallableoverview): A flat list, one entry per callable the analyzer emitted, initializers, implicit
+  constructors and the callables of local and anonymous classes included.
 
 > **See Also**
-> `get_decorated_callables`: The same projection filtered by annotation.
-> `get_method_bodies`: Bulk source fetch for chosen keys.
+>
+> - `get_decorated_callables`: The same projection filtered by annotation.
+> - `get_method_bodies`: Bulk source fetch for chosen keys.
 
 ##### `JavaAnalysis.get_method_bodies`
 
@@ -1966,19 +2668,20 @@ Return source text for the given callables, in one bulk read.
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `signatures` | `List[str]` | The keys `get_callables_overview` hands back (``JCallableOverview.key``, the J-1 ``"<type fqn>.<signature>"`` name), matched exactly. A bare Java signature is unique only within its declaring type, so it is not an address here. |
+| `signatures` | `List[str]` | The keys `get_callables_overview` hands back (`JCallableOverview.key`, the J-1 `"<type fqn>.<signature>"` name), matched exactly. A bare Java signature is unique only within its declaring type, so it is not an address here. |
 
 **Returns:**
 
 - `Dict[str, str]`: A dict mapping each key to its source text. Keys with no matching callable are omitted,
-- `Dict[str, str]`: as are callables with no source text of their own, the implicit constructors, and only
-- `Dict[str, str]`: those (1,117 of daytrader8's 1,216). The ``<clinit>$N()`` initializers carry a body
-- `Dict[str, str]`: block and do come back. Every value is a real, non-empty ``str``.
+  as are callables with no source text of their own, the implicit constructors, and only
+  those (1,117 of daytrader8's 1,216). The `<clinit>$N()` initializers carry a body
+  block and do come back. Every value is a real, non-empty `str`.
 
-> **Note**
-> The text differs by backend exactly as `get_source` does: the body block off
-> ``analysis.json``, the whole declaration off the Neo4j projection
-> (codeanalyzer-java#176).
+:::note
+The text differs by backend exactly as `get_source` does: the body block off
+`analysis.json`, the whole declaration off the Neo4j projection
+(codeanalyzer-java#176).
+:::
 
 ##### `JavaAnalysis.get_decorated_callables`
 
@@ -1992,15 +2695,16 @@ Return overviews of callables annotated with any of the given markers, in one bu
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `markers` | `List[str]` | Annotation names. Each matches by simple name (``Test``), with a leading ``@`` ignored (``@Test``), or by fully-qualified name (``org.junit.Test``), J-5. Nothing is matched fuzzily (E8). |
+| `markers` | `List[str]` | Annotation names. Each matches by simple name (`Test`), with a leading `@` ignored (`@Test`), or by fully-qualified name (`org.junit.Test`), J-5. Nothing is matched fuzzily. |
 
 **Returns:**
 
-- `List[JCallableOverview]`: A list of `JCallableOverview`, one per matching
-- `List[JCallableOverview]`: callable.
+- [`List[JCallableOverview]`](#jcallableoverview): A list of `JCallableOverview`, one per matching
+  callable.
 
 > **See Also**
-> `get_callables_overview`: The unfiltered projection.
+>
+> - `get_callables_overview`: The unfiltered projection.
 
 ##### `JavaAnalysis.get_entrypoints`
 
@@ -2016,13 +2720,13 @@ rediscover it. 133 of daytrader8's 1,216 callables carry it.
 
 **Returns:**
 
-- `List[JCallableOverview]`: A list of `JCallableOverview`. Empty means the pass
-- `List[JCallableOverview]`: found no entrypoint *callables*, the mark itself is never missing, on either backend.
+- [`List[JCallableOverview]`](#jcallableoverview): A list of `JCallableOverview`. Empty means the pass
+  found no entrypoint *callables*, the mark itself is never missing, on either backend.
 
 > **See Also**
-> `get_entrypoint_classes`: The type-level sibling this walk never sees.
-> `get_entrypoint_coverage`: Whether the pass itself had gaps, which Java, alone
->     of the three languages, cannot say.
+>
+> - `get_entrypoint_classes`: The type-level sibling this walk never sees.
+> - `get_entrypoint_coverage`: Whether the pass itself had gaps, which Java, alone of the three languages, cannot say.
 
 ##### `JavaAnalysis.get_entrypoint_classes`
 
@@ -2034,7 +2738,7 @@ Return overviews of every type the analyzer marked as an entrypoint in its own r
 
 `get_entrypoints` walks callables only, so a type marked at the declaration with no
 individually-marked method is invisible to it. This is that sibling, the projected form of
-`get_entry_point_classes`, which keeps its 1.x ``Dict[str, JType]`` shape.
+`get_entry_point_classes`, which keeps its 1.x `Dict[str, JType]` shape.
 
 ##### `JavaAnalysis.get_entrypoint_coverage`
 
@@ -2045,15 +2749,15 @@ get_entrypoint_coverage() -> EntrypointCoverage
 Report the entrypoint pass's coverage, which for Java is that **there is no report**.
 
 codeanalyzer-java 3.0.1 emits the entrypoint marks and nothing about the pass that made
-them: ``analysis.json`` has no report key and the ``:JApplication`` anchor carries only
-``name``/``schema_version``/``analyzer_name``/``analyzer_version``. So this returns an
-`EntrypointCoverage` whose ``diagnostics`` carry
-``entrypoint_report_unavailable`` and whose other fields are therefore not coverage
+them: `analysis.json` has no report key and the `:JApplication` anchor carries only
+`name`/`schema_version`/`analyzer_name`/`analyzer_version`. So this returns an
+`EntrypointCoverage` whose `diagnostics` carry
+`entrypoint_report_unavailable` and whose other fields are therefore not coverage
 information, the same "say so honestly" shape as
 `diagnostics`'s
-``module_source_unavailable``, and identical on both backends (J-4).
+`module_source_unavailable`, and identical on both backends.
 
-It is deliberately **not** synthesised from the ``is_entrypoint`` booleans: a count of
+It is deliberately **not** synthesised from the `is_entrypoint` booleans: a count of
 syntactically-marked callables is not a coverage record.
 
 ##### `JavaAnalysis.get_callsites_for`
@@ -2075,13 +2779,13 @@ frontier.
 
 **Returns:**
 
-- `Dict[str, List[JCallSite]]`: A dict mapping each existing key to its list of
-- `Dict[str, List[JCallSite]]`: class:`~cldk.models.java.models.JCallSite` (empty when the callable makes no calls);
-- `Dict[str, List[JCallSite]]`: keys with no matching callable are omitted.
+- [`Dict[str, List[JCallSite]]`](#jcallsite): A dict mapping each existing key to its list of
+  `JCallSite` (empty when the callable makes no calls);
+  keys with no matching callable are omitted.
 
 > **See Also**
-> `has_resolution_edges`: Distinguishes a genuinely unresolved callee from a graph
->     carrying no resolution at all.
+>
+> - `has_resolution_edges`: Distinguishes a genuinely unresolved callee from a graph carrying no resolution at all.
 
 ##### `JavaAnalysis.get_external_symbols`
 
@@ -2090,16 +2794,20 @@ get_external_symbols() -> Dict[str, JExternalSymbol]
 ```
 
 Return every call-graph endpoint outside the analysed project, keyed by its
-``@external`` id.
+`@external` id.
 
 **Returns:**
 
-- `Dict[str, JExternalSymbol]`: The analyzer's own ``external_symbols`` map. Empty means the run homed them and this
-- `Dict[str, JExternalSymbol]`: project's call graph makes no calls outside itself.
+- [`Dict[str, JExternalSymbol]`](#jexternalsymbol): The analyzer's own `external_symbols` map. Empty means the run homed them and this
+  project's call graph makes no calls outside itself.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: The run never homed them, which is a different fact. codeanalyzer-java emits ``external_symbols`` only under ``--external-calls``, which ``--emit neo4j`` forces and a local ``-a`` run does not, so the Neo4j backend answers and the local one refuses rather than returning an empty dict that would read as "nothing outside".
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The run never homed them, which is a different fact.
+  codeanalyzer-java emits `external_symbols` only under `--external-calls`, which
+  `--emit neo4j` forces and a local `-a` run does not, so the Neo4j backend
+  answers and the local one refuses rather than returning an empty dict that would
+  read as "nothing outside".
 
 ##### `JavaAnalysis.get_artifacts`
 
@@ -2107,35 +2815,41 @@ Return every call-graph endpoint outside the analysed project, keyed by its
 get_artifacts() -> Dict[str, PyArtifact]
 ```
 
-Return every non-code project artifact (``pom.xml``, properties files, descriptors, …),
+Return every non-code project artifact (`pom.xml`, properties files, descriptors, …),
 keyed by repo-relative path.
 
-This layer (``Artifact``/``ConfigKey``/``Package`` nodes) is the one part of the graph every
-``codeanalyzer-<lang>`` projects identically and unprefixed, so it is carried in the shared
-``Py*`` models rather than in Java-specific ones. ``JArtifact.text_truncated`` has no home
-on the shared model; read it off ``JApplication.artifacts`` when it matters.
+This layer (`Artifact`/`ConfigKey`/`Package` nodes) is the one part of the graph every
+`codeanalyzer-<lang>` projects identically and unprefixed, so it is carried in the shared
+`Py*` models rather than in Java-specific ones. `JArtifact.text_truncated` has no home
+on the shared model; read it off `JApplication.artifacts` when it matters.
 
 > **See Also**
-> `get_dependencies`, `get_config_keys`, `get_config_uses`.
+>
+> - `get_dependencies`, `get_config_keys`, `get_config_uses`.
 
 ##### `JavaAnalysis.get_dependencies`
 
 ```python
-get_dependencies(direct_only: bool = False, ecosystem: str | None = None, declared_in: str | None = None) -> List[PyDependency]
+get_dependencies(
+    *,
+    direct_only: bool = False,
+    ecosystem: str | None = None,
+    declared_in: str | None = None,
+) -> List[PyDependency]
 ```
 
 Return every declared dependency, one entry per declaring manifest, optionally filtered.
 
-All three filters default to "don't filter". The Maven ``group`` coordinate has no home on
-the shared model; read it off ``JApplication.dependencies`` when ``name`` alone is
+All three filters default to "don't filter". The Maven `group` coordinate has no home on
+the shared model; read it off `JApplication.dependencies` when `name` alone is
 ambiguous.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `direct_only` | `bool` | When ``True``, excludes lockfile-only transitive pins. |
-| `ecosystem` | `str \| None` | When given, only dependencies from this package ecosystem (``"maven"``). |
+| `direct_only` | `bool` | When `True`, excludes lockfile-only transitive pins. |
+| `ecosystem` | `str \| None` | When given, only dependencies from this package ecosystem (`"maven"`). |
 | `declared_in` | `str \| None` | When given, only dependencies declared by this artifact id. |
 
 ##### `JavaAnalysis.get_config_keys`
@@ -2145,11 +2859,11 @@ get_config_keys() -> Dict[str, PyConfigKey]
 ```
 
 Return every configuration key flattened out of a config-bearing artifact, keyed
-``"<artifact repo-relative path>@key/<dotted key>"`` (``pom.xml@key/project.artifactId``).
+`"<artifact repo-relative path>@key/<dotted key>"` (`pom.xml@key/project.artifactId`).
 
-That is the analyzer's own id with its ``can://<app>/artifact/`` prefix dropped: the
-application name belongs to the run, not to the key, and ``can://`` ids stay off the public
-surface (E6). The full id is still on ``PyConfigKey.id``. Python and TypeScript key this by
+That is the analyzer's own id with its `can://<app>/artifact/` prefix dropped: the
+application name belongs to the run, not to the key, and `can://` ids stay off the public
+surface. The full id is still on `PyConfigKey.id`. Python and TypeScript key this by
 the raw id today; aligning the three is tracked as python-sdk#346 and is deliberately not
 done piecemeal here.
 
@@ -2161,18 +2875,19 @@ get_config_uses(key: str | None = None) -> List[PyConfigUseEdge]
 
 Return resolved code-to-config edges: which body node reads which config key.
 
-Always ``[]`` on codeanalyzer-java 3.0.1, which has no code-to-config detector (there is no
-``config_uses`` on the Java wire), so there is nothing for ``key`` to filter.
+Always `[]` on codeanalyzer-java 3.0.1, which has no code-to-config detector (there is no
+`config_uses` on the Java wire), so there is nothing for `key` to filter.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `key` | `str \| None` | When given, only edges whose target key has this bare ``key``. |
+| `key` | `str \| None` | When given, only edges whose target key has this bare `key`. |
 
 > **See Also**
-> `get_config_readers`: The same edges, resolved to their reading callables.
-> `get_unresolved_config_reads`: The reads this cannot show.
+>
+> - `get_config_readers`: The same edges, resolved to their reading callables.
+> - `get_unresolved_config_reads`: The reads this cannot show.
 
 ##### `JavaAnalysis.get_unresolved_config_reads`
 
@@ -2182,7 +2897,7 @@ get_unresolved_config_reads() -> List[PyConfigRead]
 
 Return every detector-matched config read that never closed on exactly one declared key.
 
-Always ``[]`` on codeanalyzer-java 3.0.1: there is no config-read detector, so there is
+Always `[]` on codeanalyzer-java 3.0.1: there is no config-read detector, so there is
 nothing to have failed to resolve.
 
 ##### `JavaAnalysis.get_config_readers`
@@ -2191,9 +2906,9 @@ nothing to have failed to resolve.
 get_config_readers(key: str) -> List[JCallableOverview]
 ```
 
-Return overviews of every callable reading configuration key ``key``.
+Return overviews of every callable reading configuration key `key`.
 
-Always ``[]`` for the same reason `get_config_uses` is: with no code-to-config edges
+Always `[]` for the same reason `get_config_uses` is: with no code-to-config edges
 on the Java wire there is no edge to resolve to a reading callable.
 
 **Parameters:**
@@ -2209,22 +2924,24 @@ get_view_dispatches(view: str | None = None) -> List[JViewDispatch]
 ```
 
 Return every resolved view dispatch: which body node hands the request to which view
-template (JSP, Facelet, Thymeleaf), a ``forward`` / ``include`` / ``sendRedirect`` call, a
-``ModelAndView`` construction or ``setViewName``, or a Spring controller's ``return``.
+template (JSP, Facelet, Thymeleaf), a `forward` / `include` / `sendRedirect` call, a
+`ModelAndView` construction or `setViewName`, or a Spring controller's `return`.
 
 **Parameters:**
 
 | Name | Type | Description |
 | ---- | ---- | ----------- |
-| `view` | `str \| None` | When given, only edges whose view's repo-relative path ends with it, segment-aligned (``home.jsp`` or ``WEB-INF/jsp/home.jsp``). |
+| `view` | `str \| None` | When given, only edges whose view's repo-relative path ends with it, segment-aligned (`home.jsp` or `WEB-INF/jsp/home.jsp`). |
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: The analysis predates codeanalyzer-java 3.3.0, which is where the pass exists; an older analysis is refused rather than answered ``[]``.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analysis predates codeanalyzer-java 3.3.0, which is
+  where the pass exists; an older analysis is refused rather than answered `[]`.
 
 > **See Also**
-> `get_view_dispatchers`: The same edges, resolved to their dispatching callables.
-> `get_unresolved_view_dispatches`: The dispatches this cannot show.
+>
+> - `get_view_dispatchers`: The same edges, resolved to their dispatching callables.
+> - `get_unresolved_view_dispatches`: The dispatches this cannot show.
 
 ##### `JavaAnalysis.get_unresolved_view_dispatches`
 
@@ -2232,12 +2949,13 @@ template (JSP, Facelet, Thymeleaf), a ``forward`` / ``include`` / ``sendRedirect
 get_unresolved_view_dispatches() -> List[JViewDispatchUnresolved]
 ```
 
-Return every detected dispatch that closed on no view, a variable target, a servlet URL,
-a view name matching two templates, with its reason and the tiers attempted.
+Return every detected dispatch that closed on no view (a variable target, a servlet URL,
+a view name matching two templates) with its reason and the tiers attempted.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: The analysis predates codeanalyzer-java 3.3.0; or, on the Neo4j backend, always, the record lives in ``analysis.json`` only.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): The analysis predates codeanalyzer-java 3.3.0; or, on the
+  Neo4j backend, always, the record lives in `analysis.json` only.
 
 ##### `JavaAnalysis.get_view_dispatchers`
 
@@ -2245,7 +2963,7 @@ a view name matching two templates, with its reason and the tiers attempted.
 get_view_dispatchers(path: str) -> List[JCallableOverview]
 ```
 
-Return overviews of every callable that dispatches to the view at ``path``.
+Return overviews of every callable that dispatches to the view at `path`.
 
 **Parameters:**
 
@@ -2255,7 +2973,7 @@ Return overviews of every callable that dispatches to the view at ``path``.
 
 **Raises:**
 
-- `CodeanalyzerExecutionException`: As `get_view_dispatches`.
+- [`CodeanalyzerExecutionException`](/reference/python-api/results/#codeanalyzerexecutionexception): As `get_view_dispatches`.
 
 ##### `JavaAnalysis.get_interfaces`
 
@@ -2265,8 +2983,8 @@ get_interfaces() -> Dict[str, JType]
 
 Return every interface in the project, keyed by qualified name.
 
-The ``kind``-filtered siblings of `get_classes`, sharing TypeScript's names for the
-same concepts (G3). Measured: 3 interfaces in daytrader8, 594 in ThingsBoard.
+The `kind`-filtered siblings of `get_classes`, sharing TypeScript's names for the
+same concepts. Measured: 3 interfaces in daytrader8, 594 in ThingsBoard.
 
 ##### `JavaAnalysis.get_enums`
 
@@ -2293,7 +3011,9 @@ Return the constants declared by one enum.
 
 **Raises:**
 
-- `SelectorNotInGraph`: The name is not an enum of this application, no type at all, or a type of another kind. An empty list means an enum that declares no constant, which is a different answer (D7).
+- [`SelectorNotInGraph`](/reference/python-api/results/#selectornotingraph): The name is not an enum of this application, no type at all, or a
+  type of another kind. An empty list means an enum that declares no constant, which
+  is a different answer.
 
 ##### `JavaAnalysis.get_records`
 
@@ -2303,49 +3023,49 @@ get_records() -> Dict[str, JType]
 
 Return every record in the project, keyed by qualified name, the one Java-only type kind
 (35 in ThingsBoard; daytrader8 declares none). Annotation types have no leaf accessor of
-their own and stay reachable through `get_classes` (J-7).
+their own and stay reachable through `get_classes`.
 
 ## Schema
 
-Java schema models, a pydantic mirror of ``codeanalyzer-java/src/main/java/com/ibm/cldk/schema``
-at the 3.0.1 floor, schema v2 (the pin itself is ``[tool.backend-versions]`` in ``pyproject.toml``).
+Java schema models, a pydantic mirror of `codeanalyzer-java/src/main/java/com/ibm/cldk/schema`
+at the 3.0.1 floor, schema v2 (the pin itself is `[tool.backend-versions]` in `pyproject.toml`).
 
-The wire is one containment tree: ``JAnalysis{analyzer, application}`` →
-``JApplication{symbol_table{path → JCompilationUnit}, call_graph, param_in, param_out, artifacts,
+The wire is one containment tree: `JAnalysis{analyzer, application}` →
+`JApplication{symbol_table{path → JCompilationUnit}, call_graph, param_in, param_out, artifacts,
 dependencies, config_uses, config_reads_unresolved, view_dispatches, view_dispatches_unresolved,
-entrypoint_report}`` →
-``JCompilationUnit{types{name → JType}}`` → ``JType{fields{}, callables{signature →
-JCallable}, types{}}`` → ``JCallable{body{}, cfg, cdg, ddg, summary, types{}}``. Every node carries a
-``can://`` ``id`` and a ``kind``; a unit carries its full ``source`` once and every node's text is a
-slice of it. Gson omits ``null`` fields, so an absent key is a ``None``/empty default here.
+entrypoint_report}` →
+`JCompilationUnit{types{name → JType}}` → `JType{fields{}, callables{signature →
+JCallable}, types{}}` → `JCallable{body{}, cfg, cdg, ddg, summary, types{}}`. Every node carries a
+`can://` `id` and a `kind`; a unit carries its full `source` once and every node's text is a
+slice of it. Gson omits `null` fields, so an absent key is a `None`/empty default here.
 
 What the 1.x models exposed as stored fields is kept as **properties** where the wire still has the
-fact in another shape (J-8): ``code`` over ``span`` + ``source``, ``call_sites`` over the ``call``
-body nodes, ``thrown_exceptions`` over ``error_channel``, ``cyclomatic_complexity`` over ``metrics``,
-``variable_declarations`` over ``local_variables``, ``referenced_types``/``accessed_fields`` over
-``refs``, the ``is_*`` type predicates over ``kind`` and the owner chain. What the wire does not
-carry (CRUD) is an empty list, and the facade raises for it (J-4).
+fact in another shape: `code` over `span` + `source`, `call_sites` over the `call`
+body nodes, `thrown_exceptions` over `error_channel`, `cyclomatic_complexity` over `metrics`,
+`variable_declarations` over `local_variables`, `referenced_types`/`accessed_fields` over
+`refs`, the `is_*` type predicates over `kind` and the owner chain. What the wire does not
+carry (CRUD) is an empty list, and the facade raises for it.
 
-``extra="ignore"`` since #386: an additive analyzer release is consumable without an SDK edit. What
+`extra="ignore"` since #386: an additive analyzer release is consumable without an SDK edit. What
 that gives up is the drift detector, an unmodelled field is dropped silently, so a field the SDK does
-not declare is unreachable rather than an error. The projections in ``projections.py`` keep
-``extra="forbid"``, because they are constructed by this SDK and never validated from the wire, so
+not declare is unreachable rather than an error. The projections in `projections.py` keep
+`extra="forbid"`, because they are constructed by this SDK and never validated from the wire, so
 there strictness guards our own typos rather than the analyzer's additions.
 
 ### `JSpan`
 
 ```python
-class JSpan(_Base)
+class JSpan(BaseModel)
 ```
 
-``start``/``end`` are ``[line, column]`` (1-based); ``bytes`` are ``[from, to]`` **UTF-8 byte**
-offsets into the owning unit's ``source`` (the analyzer's ``Spans.java`` computes them as prefix
-sums over ``getBytes(UTF_8)``).
+`start`/`end` are `[line, column]` (1-based); `bytes` are `[from, to]` **UTF-8 byte**
+offsets into the owning unit's `source` (the analyzer's `Spans.java` computes them as prefix
+sums over `getBytes(UTF_8)`).
 
-**``-1`` in any position means "not known", never zero.** A span rebuilt from the Neo4j
-projection carries real lines and real byte offsets -- codeanalyzer-java 3.2.0 writes both -- and
-``-1`` for both columns, which the graph does not write at all; a ``0`` there would read as
-column one, which is a position, and a wrong one. Off ``analysis.json`` every position is the
+**`-1` in any position means "not known", never zero.** A span rebuilt from the Neo4j
+projection carries real lines and real byte offsets (codeanalyzer-java 3.2.0 writes both) and
+`-1` for both columns, which the graph does not write at all; a `0` there would read as
+column one, which is a position, and a wrong one. Off `analysis.json` every position is the
 analyzer's own.
 
 #### Attributes
@@ -2359,160 +3079,235 @@ analyzer's own.
 ### `JComment`
 
 ```python
-class JComment(_Spanned)
+class JComment(BaseModel)
 ```
 
 A comment or Javadoc block.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `content` | `str` |  |
-| `is_javadoc` | `bool` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `content` | `str` |  |  |
+| `is_javadoc` | `bool` | `False` |  |
 
 ### `JImport`
 
 ```python
-class JImport(_Spanned)
+class JImport(BaseModel)
 ```
 
-An import declaration: ``name`` is the imported simple name, ``path`` the fully-qualified target.
+An import declaration: `name` is the imported simple name, `path` the fully-qualified target.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `path` | `str` |  |
-| `is_static` | `bool` |  |
-| `is_wildcard` | `bool` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `path` | `str` |  |  |
+| `is_static` | `bool` | `False` |  |
+| `is_wildcard` | `bool` | `False` |  |
 
 ### `JDecorator`
 
 ```python
-class JDecorator(_Spanned)
+class JDecorator(BaseModel)
 ```
 
-An annotation use; ``args`` are the source spellings of its arguments (``name="accountejb"``).
+An annotation use; `args` are the source spellings of its arguments (`name="accountejb"`).
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `args` | `List[str]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `args` | `List[str]` | `[]` |  |
 
 ### `JTypeParameter`
 
 ```python
-class JTypeParameter(_Spanned)
+class JTypeParameter(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `bounds` | `List[str]` |  |
-| `decorators` | `List[JDecorator]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `bounds` | `List[str]` | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
 
 ### `JEnumConstant`
 
 ```python
-class JEnumConstant(_Spanned)
+class JEnumConstant(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `arguments` | `List[str]` |  |
-| `comments` | `List[JComment]` |  |
-| `decorators` | `List[JDecorator]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `arguments` | `List[str]` | `[]` |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
 
 ### `JRecordComponent`
 
 ```python
-class JRecordComponent(_Spanned)
+class JRecordComponent(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `type` | `str` |  |
-| `modifiers` | `List[str]` |  |
-| `decorators` | `List[JDecorator]` |  |
-| `comments` | `List[JComment]` |  |
-| `is_variadic` | `bool` |  |
-| `annotations` | `List[str]` |  |
-| `comment` | `Optional[JComment]` |  |
-| `is_var_args` | `bool` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `type` | `str` |  |  |
+| `modifiers` | `List[str]` | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `is_variadic` | `bool` | `False` |  |
+| `annotations` | `List[str]` |  |  |
+| `comment` | [`Optional[JComment]`](#jcomment) |  |  |
+| `is_var_args` | `bool` |  |  |
 
 ### `JCallableParameter`
 
 ```python
-class JCallableParameter(_Spanned)
+class JCallableParameter(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `Optional[str]` |  |
-| `type` | `str` |  |
-| `modifiers` | `List[str]` |  |
-| `decorators` | `List[JDecorator]` |  |
-| `is_variadic` | `bool` |  |
-| `annotations` | `List[str]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `Optional[str]` | `None` |  |
+| `type` | `str` |  |  |
+| `modifiers` | `List[str]` | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
+| `is_variadic` | `bool` | `False` |  |
+| `annotations` | `List[str]` |  |  |
 
 ### `JLocalVariable`
 
 ```python
-class JLocalVariable(_Spanned)
+class JLocalVariable(BaseModel)
 ```
 
-A local variable declaration inside a callable (the 1.x ``JVariableDeclaration``).
+A local variable declaration inside a callable (the 1.x `JVariableDeclaration`).
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `name` | `str` |  |
-| `type` | `str` |  |
-| `initializer` | `Optional[str]` |  |
-| `comments` | `List[JComment]` |  |
-| `comment` | `Optional[JComment]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `name` | `str` |  |  |
+| `type` | `str` |  |  |
+| `initializer` | `Optional[str]` | `None` |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `comment` | [`Optional[JComment]`](#jcomment) |  |  |
 
 ### `JField`
 
 ```python
-class JField(_Node)
+class JField(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `kind` | `Literal['field']` |  |
-| `name` | `str` |  |
-| `type` | `str` |  |
-| `modifiers` | `List[str]` |  |
-| `comments` | `List[JComment]` |  |
-| `decorators` | `List[JDecorator]` |  |
-| `initializer` | `Optional[str]` |  |
-| `annotations` | `List[str]` |  |
-| `variables` | `List[str]` |  |
-| `variable_initializers` | `Optional[Dict[str, str]]` |  |
-| `comment` | `Optional[JComment]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+Inherited from `_Node` (`id`): A spanned node with a `can://` `id`. Identity is the id: nodes from independent parses of the same artifact compare equal and hash alike, and the owner back-references stay out of `==`.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `id` | `str` |  |  |
+| `kind` | `Literal['field']` | `'field'` |  |
+| `name` | `str` |  |  |
+| `type` | `str` |  |  |
+| `modifiers` | `List[str]` | `[]` |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
+| `initializer` | `Optional[str]` | `None` |  |
+| `annotations` | `List[str]` |  |  |
+| `variables` | `List[str]` |  |  |
+| `variable_initializers` | `Optional[Dict[str, str]]` |  |  |
+| `comment` | [`Optional[JComment]`](#jcomment) |  |  |
 
 ### `JMetrics`
 
 ```python
-class JMetrics(_Base)
+class JMetrics(BaseModel)
 ```
 
 #### Attributes
@@ -2524,51 +3319,59 @@ class JMetrics(_Base)
 ### `JRefs`
 
 ```python
-class JRefs(_Base)
+class JRefs(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `types` | `List[str]` |  |
-| `fields` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `types` | `List[str]` | `[]` |  |
+| `fields` | `List[str]` | `[]` |  |
 
 ### `JBodyNode`
 
 ```python
-class JBodyNode(_Spanned)
+class JBodyNode(BaseModel)
 ```
 
-One entry of a callable's ``body{}`` map, keyed ``L:C``, ``@entry``/``@exit``/``@formal_in:N``/
-``@formal_out`` or ``L:C/actual_in:N``/``L:C/actual_out``. Every attribute is optional: the
+One entry of a callable's `body{}` map, keyed `L:C`, `@entry`/`@exit`/`@formal_in:N`/
+`@formal_out` or `L:C/actual_in:N`/`L:C/actual_out`. Every attribute is optional: the
 analyzer writes the empty call-shaped fields on non-call nodes too.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `kind` | `str` |  |
-| `callee` | `Optional[str]` |  |
-| `arguments` | `List[str]` |  |
-| `receiver_expr` | `Optional[str]` |  |
-| `receiver_type` | `Optional[str]` |  |
-| `argument_types` | `List[str]` |  |
-| `argument_expr` | `List[str]` |  |
-| `callee_signature` | `Optional[str]` |  |
-| `method_name` | `Optional[str]` |  |
-| `return_type` | `Optional[str]` |  |
-| `accessibility` | `Optional[str]` |  |
-| `comment` | `Optional[JComment]` |  |
-| `is_static_call` | `Optional[bool]` |  |
-| `is_constructor_call` | `bool` |  |
-| `of` | `Optional[str]` |  |
-| `parent` | `Optional[str]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `kind` | `str` |  |  |
+| `callee` | `Optional[str]` | `None` |  |
+| `arguments` | `List[str]` | `[]` |  |
+| `receiver_expr` | `Optional[str]` | `None` |  |
+| `receiver_type` | `Optional[str]` | `None` |  |
+| `argument_types` | `List[str]` | `[]` |  |
+| `argument_expr` | `List[str]` | `[]` |  |
+| `callee_signature` | `Optional[str]` | `None` |  |
+| `method_name` | `Optional[str]` | `None` |  |
+| `return_type` | `Optional[str]` | `None` |  |
+| `accessibility` | `Optional[str]` | `None` |  |
+| `comment` | [`Optional[JComment]`](#jcomment) | `None` |  |
+| `is_static_call` | `Optional[bool]` | `None` |  |
+| `is_constructor_call` | `bool` | `False` |  |
+| `of` | `Optional[str]` | `None` |  |
+| `parent` | `Optional[str]` | `None` |  |
 
 ### `JCfgEdge`
 
 ```python
-class JCfgEdge(_Base)
+class JCfgEdge(BaseModel)
 ```
 
 #### Attributes
@@ -2582,7 +3385,7 @@ class JCfgEdge(_Base)
 ### `JCdgEdge`
 
 ```python
-class JCdgEdge(_Base)
+class JCdgEdge(BaseModel)
 ```
 
 #### Attributes
@@ -2595,22 +3398,22 @@ class JCdgEdge(_Base)
 ### `JDdgEdge`
 
 ```python
-class JDdgEdge(_Base)
+class JDdgEdge(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `src` | `str` |  |
-| `dst` | `str` |  |
-| `var` | `Optional[str]` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `src` | `str` |  |  |
+| `dst` | `str` |  |  |
+| `var` | `Optional[str]` | `None` |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JSummaryEdge`
 
 ```python
-class JSummaryEdge(_Base)
+class JSummaryEdge(BaseModel)
 ```
 
 #### Attributes
@@ -2623,220 +3426,243 @@ class JSummaryEdge(_Base)
 ### `JCRUDOperation`
 
 ```python
-class JCRUDOperation(_Base)
+class JCRUDOperation(BaseModel)
 ```
 
 Not emitted by codeanalyzer-java 3.0.1 (upstream #187); kept for import compatibility.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `line_number` | `int` |  |
-| `operation_type` | `Optional[CRUDOperationType]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `line_number` | `int` |  |  |
+| `operation_type` | [`Optional[CRUDOperationType]`](#crudoperationtype) | `None` |  |
 
 ### `JCRUDQuery`
 
 ```python
-class JCRUDQuery(_Base)
+class JCRUDQuery(BaseModel)
 ```
 
 Not emitted by codeanalyzer-java 3.0.1 (upstream #187); kept for import compatibility.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `line_number` | `int` |  |
-| `query_arguments` | `Optional[List[str]]` |  |
-| `query_type` | `Optional[CRUDQueryType]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `line_number` | `int` |  |  |
+| `query_arguments` | `Optional[List[str]]` | `None` |  |
+| `query_type` | [`Optional[CRUDQueryType]`](#crudquerytype) | `None` |  |
 
 ### `JCallSite`
 
 ```python
-class JCallSite(_Base)
+class JCallSite(BaseModel)
 ```
 
-The 1.x per-call record, built on demand from a ``call`` body node (`from_body_node`).
-The four visibility booleans derive from ``accessibility`` and are ``None`` when the callee was
+The 1.x per-call record, built on demand from a `call` body node (`from_body_node`).
+The four visibility booleans derive from `accessibility` and are `None` when the callee was
 not resolved.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `comment` | `Optional[JComment]` |  |
-| `method_name` | `str` |  |
-| `receiver_expr` | `str` |  |
-| `receiver_type` | `str` |  |
-| `argument_types` | `List[str]` |  |
-| `argument_expr` | `List[str]` |  |
-| `return_type` | `str` |  |
-| `callee_signature` | `str` |  |
-| `is_static_call` | `Optional[bool]` |  |
-| `is_private` | `Optional[bool]` |  |
-| `is_public` | `Optional[bool]` |  |
-| `is_protected` | `Optional[bool]` |  |
-| `is_unspecified` | `Optional[bool]` |  |
-| `is_constructor_call` | `bool` |  |
-| `crud_operation` | `Optional[JCRUDOperation]` |  |
-| `crud_query` | `Optional[JCRUDQuery]` |  |
-| `start_line` | `int` |  |
-| `start_column` | `int` |  |
-| `end_line` | `int` |  |
-| `end_column` | `int` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `comment` | [`Optional[JComment]`](#jcomment) | `None` |  |
+| `method_name` | `str` |  |  |
+| `receiver_expr` | `str` | `''` |  |
+| `receiver_type` | `str` | `''` |  |
+| `argument_types` | `List[str]` | `[]` |  |
+| `argument_expr` | `List[str]` | `[]` |  |
+| `return_type` | `str` | `''` |  |
+| `callee_signature` | `str` | `''` |  |
+| `is_static_call` | `Optional[bool]` | `None` |  |
+| `is_private` | `Optional[bool]` | `None` |  |
+| `is_public` | `Optional[bool]` | `None` |  |
+| `is_protected` | `Optional[bool]` | `None` |  |
+| `is_unspecified` | `Optional[bool]` | `None` |  |
+| `is_constructor_call` | `bool` | `False` |  |
+| `crud_operation` | [`Optional[JCRUDOperation]`](#jcrudoperation) | `None` |  |
+| `crud_query` | [`Optional[JCRUDQuery]`](#jcrudquery) | `None` |  |
+| `start_line` | `int` | `-1` |  |
+| `start_column` | `int` | `-1` |  |
+| `end_line` | `int` | `-1` |  |
+| `end_column` | `int` | `-1` |  |
 
 #### Methods
 
 ##### `JCallSite.from_body_node`
 
 ```python
-from_body_node(node: JBodyNode) -> 'JCallSite'
+@classmethod
+from_body_node(node: JBodyNode) -> JCallSite
 ```
 
 ### `JCallable`
 
 ```python
-class JCallable(_Node)
+class JCallable(BaseModel)
 ```
 
-A method, constructor or initializer (``<clinit>$N()``). Implicit callables (default
+A method, constructor or initializer (`<clinit>$N()`). Implicit callables (default
 constructors) carry no span, body, parameters, metrics or declaration.
 
-``cfg``/``cdg``/``ddg`` are present from L3 and ``summary`` from L4 **off ``analysis.json``**,
-where ``None`` means the run was below that level and re-running higher fills them in.
-**Off the Neo4j projection all four are ``None`` at every level**, and re-ingesting does not
-change that: ``--emit neo4j`` already forces L4, and this leg's projection does not rebuild the
-per-callable graphs from it (leg 3b reads them on demand). So ``None`` here is "this backend
+`cfg`/`cdg`/`ddg` are present from L3 and `summary` from L4 **off `analysis.json`**,
+where `None` means the run was below that level and re-running higher fills them in.
+**Off the Neo4j projection all four are `None` at every level**, and re-ingesting does not
+change that: `--emit neo4j` already forces L4, and this leg's projection does not rebuild the
+per-callable graphs from it (leg 3b reads them on demand). So `None` here is "this backend
 does not carry it", not "analyse deeper".
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `kind` | `str` |  |
-| `signature` | `str` |  |
-| `parameters` | `List[JCallableParameter]` |  |
-| `return_type` | `Optional[str]` |  |
-| `error_channel` | `List[str]` |  |
-| `modifiers` | `List[str]` |  |
-| `decorators` | `List[JDecorator]` |  |
-| `type_parameters` | `List[JTypeParameter]` |  |
-| `body_span` | `Optional[JSpan]` |  |
-| `declaration` | `Optional[str]` |  |
-| `is_implicit` | `bool` |  |
-| `comments` | `List[JComment]` |  |
-| `is_entrypoint` | `bool` |  |
-| `entrypoint_frameworks` | `List[str]` |  |
-| `metrics` | `Optional[JMetrics]` |  |
-| `refs` | `Optional[JRefs]` |  |
-| `local_variables` | `List[JLocalVariable]` |  |
-| `body` | `Dict[str, JBodyNode]` |  |
-| `cfg` | `Optional[List[JCfgEdge]]` |  |
-| `cdg` | `Optional[List[JCdgEdge]]` |  |
-| `ddg` | `Optional[List[JDdgEdge]]` |  |
-| `summary` | `Optional[List[JSummaryEdge]]` |  |
-| `types` | `Dict[str, 'JType']` |  |
-| `code` | `str` | The 1.x ``code``: the **body block** (``body_span``), which is what ``code_start_line`` |
-| `code_start_line` | `int` | The file line :attr:`code` starts on: the body block's first line, or the declaration's |
-| `annotations` | `List[str]` |  |
-| `thrown_exceptions` | `List[str]` |  |
-| `cyclomatic_complexity` | `Optional[int]` |  |
-| `variable_declarations` | `List[JLocalVariable]` |  |
-| `referenced_types` | `List[str]` |  |
-| `accessed_fields` | `List[str]` |  |
-| `call_sites` | `List[JCallSite]` |  |
-| `is_constructor` | `bool` |  |
-| `is_static` | `bool` |  |
-| `crud_operations` | `List[JCRUDOperation]` |  |
-| `crud_queries` | `List[JCRUDQuery]` |  |
+Inherited from `_Spanned` (`span`, `start_line`, `end_line`, `start_column`, `end_column`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+Inherited from `_Node` (`id`): A spanned node with a `can://` `id`. Identity is the id: nodes from independent parses of the same artifact compare equal and hash alike, and the owner back-references stay out of `==`.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `id` | `str` |  |  |
+| `kind` | `str` |  |  |
+| `signature` | `str` |  |  |
+| `parameters` | [`List[JCallableParameter]`](#jcallableparameter) | `[]` |  |
+| `return_type` | `Optional[str]` | `None` |  |
+| `error_channel` | `List[str]` | `[]` |  |
+| `modifiers` | `List[str]` | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
+| `type_parameters` | [`List[JTypeParameter]`](#jtypeparameter) | `[]` |  |
+| `body_span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `declaration` | `Optional[str]` | `None` |  |
+| `is_implicit` | `bool` | `False` |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `is_entrypoint` | `bool` | `False` |  |
+| `entrypoint_frameworks` | `List[str]` | `[]` | The entrypoint rulesets that marked this callable (`["jakarta"]`, `["spring"]`, …), from codeanalyzer-java 3.1.0 (codeanalyzer-java#235). `[]` on an unmarked callable *and* on a payload from an older analyzer; `get_entrypoint_coverage` is where that distinction is drawn, off `JApplication.entrypoint_report`. |
+| `metrics` | [`Optional[JMetrics]`](#jmetrics) | `None` |  |
+| `refs` | [`Optional[JRefs]`](#jrefs) | `None` |  |
+| `local_variables` | [`List[JLocalVariable]`](#jlocalvariable) | `[]` |  |
+| `body` | [`Dict[str, JBodyNode]`](#jbodynode) | `{}` | Every body node off `analysis.json`; the `call` nodes **only** off the Neo4j projection (~30% of what the graph holds), so `call_sites` is complete there and nothing else about the body is. |
+| `cfg` | [`Optional[List[JCfgEdge]]`](#jcfgedge) | `None` |  |
+| `cdg` | [`Optional[List[JCdgEdge]]`](#jcdgedge) | `None` |  |
+| `ddg` | [`Optional[List[JDdgEdge]]`](#jddgedge) | `None` |  |
+| `summary` | [`Optional[List[JSummaryEdge]]`](#jsummaryedge) | `None` |  |
+| `types` | [`Dict[str, JType]`](#jtype) | `{}` |  |
+| `code` | `str` |  | The 1.x `code`: the **body block** (`body_span`), which is what `code_start_line` and `TreesitterJava.get_calling_lines` were written against; the declaration slice (`span`) only when there is no body (abstract / interface methods). |
+| `code_start_line` | `int` |  | The file line `code` starts on: the body block's first line, or the declaration's when there is no body. |
+| `annotations` | `List[str]` |  |  |
+| `thrown_exceptions` | `List[str]` |  |  |
+| `cyclomatic_complexity` | `Optional[int]` |  |  |
+| `variable_declarations` | [`List[JLocalVariable]`](#jlocalvariable) |  |  |
+| `referenced_types` | `List[str]` |  |  |
+| `accessed_fields` | `List[str]` |  |  |
+| `call_sites` | [`List[JCallSite]`](#jcallsite) |  |  |
+| `is_constructor` | `bool` |  |  |
+| `is_static` | `bool` |  |  |
+| `crud_operations` | [`List[JCRUDOperation]`](#jcrudoperation) |  |  |
+| `crud_queries` | [`List[JCRUDQuery]`](#jcrudquery) |  |  |
 
 ### `JType`
 
 ```python
-class JType(_Node)
+class JType(BaseModel)
 ```
 
-A class, interface, enum, annotation or record. The wire has no ``name``: the map key is the
-simple name and the id's last segment; `name` is stamped from the key (J-13).
+A class, interface, enum, annotation or record. The wire has no `name`: the map key is the
+simple name and the id's last segment; `name` is stamped from the key.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `kind` | `Literal['class', 'interface', 'enum', 'annotation', 'record']` |  |
-| `span` | `JSpan` |  |
-| `comments` | `List[JComment]` |  |
-| `modifiers` | `List[str]` |  |
-| `base_types` | `List[str]` |  |
-| `interfaces` | `List[str]` |  |
-| `decorators` | `List[JDecorator]` |  |
-| `type_parameters` | `List[JTypeParameter]` |  |
-| `is_entrypoint_class` | `bool` |  |
-| `entrypoint_frameworks` | `List[str]` |  |
-| `enum_constants` | `List[JEnumConstant]` |  |
-| `record_components` | `List[JRecordComponent]` |  |
-| `fields` | `Dict[str, JField]` |  |
-| `callables` | `Dict[str, JCallable]` |  |
-| `types` | `Dict[str, 'JType']` |  |
-| `name` | `str` |  |
-| `qualified_name` | `str` | ``package.Outer.Inner`` for a member type, the source spelling, nested types joined |
-| `is_interface` | `bool` |  |
-| `is_nested_type` | `bool` |  |
-| `is_local_class` | `bool` |  |
-| `is_inner_class` | `bool` |  |
-| `is_class_or_interface_declaration` | `bool` |  |
-| `is_enum_declaration` | `bool` |  |
-| `is_annotation_declaration` | `bool` |  |
-| `is_record_declaration` | `bool` |  |
-| `is_concrete_class` | `bool` |  |
-| `extends_list` | `List[str]` |  |
-| `implements_list` | `List[str]` |  |
-| `annotations` | `List[str]` |  |
-| `parent_type` | `str` | Qualified name of the enclosing type, ``""`` at top level (the 1.x value). |
-| `field_declarations` | `List[JField]` |  |
-| `callable_declarations` | `Dict[str, JCallable]` |  |
-| `nested_type_declarations` | `List[str]` | Qualified names of the member types (the 1.x value; both backends feed them to ``get_class``). |
-| `initialization_blocks` | `List[JCallable]` |  |
+Inherited from `_Spanned` (`start_line`, `end_line`, `start_column`, `end_column`, `code`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+Inherited from `_Node` (`id`): A spanned node with a `can://` `id`. Identity is the id: nodes from independent parses of the same artifact compare equal and hash alike, and the owner back-references stay out of `==`.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `code` | `str` |  |  |
+| `id` | `str` |  |  |
+| `kind` | `Literal['class', 'interface', 'enum', 'annotation', 'record']` |  |  |
+| `span` | [`JSpan`](#jspan) |  |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `modifiers` | `List[str]` | `[]` |  |
+| `base_types` | `List[str]` | `[]` |  |
+| `interfaces` | `List[str]` | `[]` |  |
+| `decorators` | [`List[JDecorator]`](#jdecorator) | `[]` |  |
+| `type_parameters` | [`List[JTypeParameter]`](#jtypeparameter) | `[]` |  |
+| `is_entrypoint_class` | `bool` | `False` |  |
+| `entrypoint_frameworks` | `List[str]` | `[]` | As `JCallable.entrypoint_frameworks`, for a type marked in its own right. |
+| `enum_constants` | [`List[JEnumConstant]`](#jenumconstant) | `[]` |  |
+| `record_components` | [`List[JRecordComponent]`](#jrecordcomponent) | `[]` |  |
+| `fields` | [`Dict[str, JField]`](#jfield) | `{}` |  |
+| `callables` | [`Dict[str, JCallable]`](#jcallable) | `{}` |  |
+| `types` | [`Dict[str, JType]`](#jtype) | `{}` |  |
+| `name` | `str` |  |  |
+| `qualified_name` | `str` |  | `package.Outer.Inner` for a member type, the source spelling, nested types joined with `.`. A **local or anonymous** class additionally carries the signature of the callable that declares it (`package.Outer.m(int).$anon$0`), mirroring the analyzer's id grammar (`…/Outer/m(int)/$anon$0`): `$anon$N` is numbered *per declaring callable*, so two sibling callables of one type each declare `$anon$0` and dropping the callable segment collides them (measured on ThingsBoard: 97 names, 381 of 5,102 declarations shadowed). A member type needs no such qualifier, its simple name is unique within its enclosing type, so nested spellings are unchanged. |
+| `is_interface` | `bool` |  |  |
+| `is_nested_type` | `bool` |  |  |
+| `is_local_class` | `bool` |  |  |
+| `is_inner_class` | `bool` |  |  |
+| `is_class_or_interface_declaration` | `bool` |  |  |
+| `is_enum_declaration` | `bool` |  |  |
+| `is_annotation_declaration` | `bool` |  |  |
+| `is_record_declaration` | `bool` |  |  |
+| `is_concrete_class` | `bool` |  |  |
+| `extends_list` | `List[str]` |  |  |
+| `implements_list` | `List[str]` |  |  |
+| `annotations` | `List[str]` |  |  |
+| `parent_type` | `str` |  | Qualified name of the enclosing type, `""` at top level (the 1.x value). |
+| `field_declarations` | [`List[JField]`](#jfield) |  |  |
+| `callable_declarations` | [`Dict[str, JCallable]`](#jcallable) |  |  |
+| `nested_type_declarations` | `List[str]` |  | Qualified names of the member types (the 1.x value; both backends feed them to `get_class`). |
+| `initialization_blocks` | [`List[JCallable]`](#jcallable) |  |  |
 
 ### `JCompilationUnit`
 
 ```python
-class JCompilationUnit(_Node)
+class JCompilationUnit(BaseModel)
 ```
 
-One ``.java`` file. The symbol-table key is its repo-relative path (`file_path`); the
-wire carries no ``file_path``/``package_name``. The wire key ``imports`` holds structured
-`JImport` records, exposed as `import_declarations`; the 1.x ``imports`` (a list of
+One `.java` file. The symbol-table key is its repo-relative path (`file_path`); the
+wire carries no `file_path`/`package_name`. The wire key `imports` holds structured
+`JImport` records, exposed as `import_declarations`; the 1.x `imports` (a list of
 paths) is the property of that name.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `model_config` | `` |  |
-| `kind` | `Literal['module']` |  |
-| `span` | `JSpan` |  |
-| `package` | `str` |  |
-| `source` | `str` |  |
-| `comments` | `List[JComment]` |  |
-| `import_declarations` | `List[JImport]` |  |
-| `types` | `Dict[str, JType]` |  |
-| `content_hash` | `Optional[str]` |  |
-| `file_path` | `str` |  |
-| `package_name` | `str` |  |
-| `imports` | `List[str]` |  |
-| `type_declarations` | `Dict[str, JType]` |  |
-| `is_modified` | `bool` | Always ``False``: the analyzer emits a snapshot, never an edit state. |
-| `code` | `str` |  |
+Inherited from `_Spanned` (`start_line`, `end_line`, `start_column`, `end_column`): A node with an optional span. `start_line`/`end_line`/`start_column`/`end_column` are the 1.x attribute paths, read off `span` (`-1` without one); `code` is the UTF-8 byte slice `source_bytes[span.bytes[0]:span.bytes[1]]` of the owning unit, decoded. `""` only for the documented span-less case (implicit callables); a spanned node that was not threaded into a `JCompilationUnit` raises rather than returning a silent empty.
+
+Inherited from `_Node` (`id`): A spanned node with a `can://` `id`. Identity is the id: nodes from independent parses of the same artifact compare equal and hash alike, and the owner back-references stay out of `==`.
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `start_line` | `int` |  |  |
+| `end_line` | `int` |  |  |
+| `start_column` | `int` |  |  |
+| `end_column` | `int` |  |  |
+| `id` | `str` |  |  |
+| `kind` | `Literal['module']` | `'module'` |  |
+| `span` | [`JSpan`](#jspan) |  |  |
+| `package` | `str` |  |  |
+| `source` | `str` |  |  |
+| `comments` | [`List[JComment]`](#jcomment) | `[]` |  |
+| `import_declarations` | [`List[JImport]`](#jimport) | `[]` | JSON key: `imports`. |
+| `types` | [`Dict[str, JType]`](#jtype) | `{}` |  |
+| `content_hash` | `Optional[str]` | `None` |  |
+| `file_path` | `str` |  |  |
+| `package_name` | `str` |  |  |
+| `imports` | `List[str]` |  |  |
+| `type_declarations` | [`Dict[str, JType]`](#jtype) |  |  |
+| `is_modified` | `bool` |  | Always `False`: the analyzer emits a snapshot, never an edit state. |
+| `code` | `str` |  |  |
 
 #### Methods
-
-##### `JCompilationUnit.model_post_init`
-
-```python
-model_post_init(__context: Any) -> None
-```
 
 ##### `JCompilationUnit.slice`
 
@@ -2844,297 +3670,289 @@ model_post_init(__context: Any) -> None
 slice(span: JSpan) -> str
 ```
 
-``source`` between the span's UTF-8 byte offsets (J-15); a plain index when the file is ASCII.
+`source` between the span's UTF-8 byte offsets; a plain index when the file is ASCII.
 
 ### `JCallGraphEdge`
 
 ```python
-class JCallGraphEdge(_Base)
+class JCallGraphEdge(BaseModel)
 ```
 
-A wire call-graph edge: ``can://`` endpoints, provenance tokens ``declared`` / ``rta``.
+A wire call-graph edge: `can://` endpoints, provenance tokens `declared` / `rta`.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `src` | `str` |  |
-| `dst` | `str` |  |
-| `prov` | `List[str]` |  |
-| `weight` | `int` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `src` | `str` |  |  |
+| `dst` | `str` |  |  |
+| `prov` | `List[str]` | `[]` |  |
+| `weight` | `int` | `1` |  |
 
 ### `JParamEdge`
 
 ```python
-class JParamEdge(_Base)
+class JParamEdge(BaseModel)
 ```
 
-An L4 ``param_in``/``param_out`` edge with global endpoints
-(``<callable id>@L:C/actual_in:N`` → ``<callable id>@formal_in:N``).
+An L4 `param_in`/`param_out` edge with global endpoints
+(`<callable id>@L:C/actual_in:N` → `<callable id>@formal_in:N`).
 
-``var`` names the bound formal, and it arrived in codeanalyzer-java 3.1.2
+`var` names the bound formal, and it arrived in codeanalyzer-java 3.1.2
 (codeanalyzer-java#250). Before that the schema declared the property and the projection wrote
-nothing, so a consumer predicate on it was ``null`` on every edge crossing a call boundary --
+nothing, so a consumer predicate on it was `null` on every edge crossing a call boundary,
 which under Cypher's three-valued logic drops the whole path and reads as a proved absence of
-flow. ``Optional`` rather than required because a graph or an ``analysis.json`` from 3.1.1 or
+flow. `Optional` rather than required because a graph or an `analysis.json` from 3.1.1 or
 earlier carries no such key, and both backends attach to artifacts they did not produce.
 `TSParamEdge` has carried the same field since its own
 analyzer added it.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `src` | `str` |  |
-| `dst` | `str` |  |
-| `var` | `Optional[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `src` | `str` |  |  |
+| `dst` | `str` |  |  |
+| `var` | `Optional[str]` | `None` |  |
 
 ### `JExternalSymbol`
 
 ```python
-class JExternalSymbol(_Base)
+class JExternalSymbol(BaseModel)
 ```
 
-A call target outside the project, keyed by its ``@external/…`` id on the application.
+A call target outside the project, keyed by its `@external/…` id on the application.
 Declared in the analyzer's schema; not emitted for daytrader8 at any level.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `kind` | `str` |  |
-| `signature` | `str` |  |
-| `declaring_type` | `Optional[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `kind` | `str` |  |  |
+| `signature` | `str` |  |  |
+| `declaring_type` | `Optional[str]` | `None` |  |
 
 ### `JConfigKey`
 
 ```python
-class JConfigKey(_Base)
+class JConfigKey(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `id` | `str` |  |
-| `key` | `str` |  |
-| `namespace` | `str` |  |
-| `value` | `Optional[str]` |  |
-| `span` | `Optional[JSpan]` |  |
-| `references` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `id` | `str` |  |  |
+| `key` | `str` |  |  |
+| `namespace` | `str` |  |  |
+| `value` | `Optional[str]` | `None` |  |
+| `span` | [`Optional[JSpan]`](#jspan) | `None` |  |
+| `references` | `List[str]` | `[]` |  |
 
 ### `JArtifact`
 
 ```python
-class JArtifact(_Base)
+class JArtifact(BaseModel)
 ```
 
 A recognized non-code file (config, manifest, build descriptor).
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `id` | `str` |  |
-| `kind` | `Literal['artifact']` |  |
-| `path` | `str` |  |
-| `format` | `str` |  |
-| `roles` | `List[str]` |  |
-| `size_bytes` | `int` |  |
-| `sha256` | `str` |  |
-| `source` | `str` |  |
-| `text_truncated` | `bool` |  |
-| `extraction` | `str` |  |
-| `config_keys` | `List[JConfigKey]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `id` | `str` |  |  |
+| `kind` | `Literal['artifact']` | `'artifact'` |  |
+| `path` | `str` |  |  |
+| `format` | `str` |  |  |
+| `roles` | `List[str]` | `[]` |  |
+| `size_bytes` | `int` |  |  |
+| `sha256` | `str` |  |  |
+| `source` | `str` | `''` |  |
+| `text_truncated` | `bool` | `False` |  |
+| `extraction` | `str` | `'none'` |  |
+| `config_keys` | [`List[JConfigKey]`](#jconfigkey) | `[]` |  |
 
 ### `JDependency`
 
 ```python
-class JDependency(_Base)
+class JDependency(BaseModel)
 ```
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `group` | `Optional[str]` |  |
-| `name` | `str` |  |
-| `ecosystem` | `str` |  |
-| `spec` | `str` |  |
-| `kind` | `str` |  |
-| `extras` | `List[str]` |  |
-| `declared_in` | `str` |  |
-| `direct` | `bool` |  |
-| `locked_version` | `Optional[str]` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `group` | `Optional[str]` | `None` |  |
+| `name` | `str` |  |  |
+| `ecosystem` | `str` | `'maven'` |  |
+| `spec` | `str` | `''` |  |
+| `kind` | `str` | `'runtime'` |  |
+| `extras` | `List[str]` | `[]` |  |
+| `declared_in` | `str` | `''` |  |
+| `direct` | `bool` | `True` |  |
+| `locked_version` | `Optional[str]` | `None` |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JEntrypointReport`
 
 ```python
-class JEntrypointReport(_Base)
+class JEntrypointReport(BaseModel)
 ```
 
 Coverage and failure record for the entrypoint pass (codeanalyzer-java#235, 3.1.0).
 
-The same four fields Python and TypeScript already carry (``PyEntrypointReport`` /
-``TSEntrypointReport``), so `EntrypointCoverage` reads
+The same four fields Python and TypeScript already carry (`PyEntrypointReport` /
+`TSEntrypointReport`), so `EntrypointCoverage` reads
 one shape across the three languages.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `frameworks_detected` | `List[str]` |  |
-| `rulesets` | `List[str]` |  |
-| `unresolved` | `Dict[str, int]` |  |
-| `errors` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `frameworks_detected` | `List[str]` | `[]` |  |
+| `rulesets` | `List[str]` | `[]` |  |
+| `unresolved` | `Dict[str, int]` | `{}` |  |
+| `errors` | `List[str]` | `[]` |  |
 
 ### `JConfigUse`
 
 ```python
-class JConfigUse(_Base)
+class JConfigUse(BaseModel)
 ```
 
 One code-to-config edge: a config read whose key closed on a declared `JConfigKey`.
 
-``src`` is the reading call's body-node id (``<callable id>@<line>:<col>``), ``dst`` the matched
-key's id. ``prov`` names the **tier** that resolved it and is the reason this is not flattened:
-``["literal"]`` is a string literal at the call site (codeanalyzer-java#233); ``"dataflow"``
+`src` is the reading call's body-node id (`<callable id>@<line>:<col>`), `dst` the matched
+key's id. `prov` names the **tier** that resolved it and is the reason this is not flattened:
+`["literal"]` is a string literal at the call site (codeanalyzer-java#233); `"dataflow"`
 means the key was reached over the L3 DDG / L4 call graph (codeanalyzer-java#237), weaker
-evidence, and monotone with the analysis level. Python's ``PyConfigUseEdge`` verbatim.
+evidence, and monotone with the analysis level. Python's `PyConfigUseEdge` verbatim.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `src` | `str` |  |
-| `dst` | `str` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `src` | `str` |  |  |
+| `dst` | `str` |  |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JConfigRead`
 
 ```python
-class JConfigRead(_Base)
+class JConfigRead(BaseModel)
 ```
 
 One config read whose key closed on no declared key, first class, so a read nobody can
 trace stays as visible as one that resolves.
 
-``key`` is the literal text when it *was* a literal that matches no declared key
-(``reason="undefined-key"``) and ``None`` when it never closed on one (``reason="non-literal"``);
-``prov`` lists every tier that was **attempted** before giving up, so ``["literal", "dataflow"]``
-means the dataflow tier ran too and still could not name the key. Python's ``PyConfigRead``
+`key` is the literal text when it *was* a literal that matches no declared key
+(`reason="undefined-key"`) and `None` when it never closed on one (`reason="non-literal"`);
+`prov` lists every tier that was **attempted** before giving up, so `["literal", "dataflow"]`
+means the dataflow tier ran too and still could not name the key. Python's `PyConfigRead`
 verbatim.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `site` | `str` |  |
-| `callee` | `str` |  |
-| `key` | `Optional[str]` |  |
-| `reason` | `str` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `site` | `str` |  |  |
+| `callee` | `str` |  |  |
+| `key` | `Optional[str]` | `None` |  |
+| `reason` | `str` | `'non-literal'` |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JViewDispatch`
 
 ```python
-class JViewDispatch(_Base)
+class JViewDispatch(BaseModel)
 ```
 
 One resolved view dispatch (codeanalyzer-java 3.3.0, spec 2026-09-11 § 4): the body node that
 hands the request to a view template and the `JArtifact` it reaches.
 
-``src`` is the dispatching body node's id (``<callable id>@<line>:<col>``), a
-``RequestDispatcher.forward`` / ``include`` or ``sendRedirect`` call, a ``ModelAndView``
-construction or ``setViewName``, or a Spring controller's ``return``; ``dst`` is the artifact's
-``can://<app>/artifact/<path>`` id. ``via`` names the mechanism (``forward | include | redirect |
-view-name | navigation``) and ``prov`` the tier that closed the target: ``["literal"]`` is a string
-at the site, ``["dataflow"]`` a local or parameter traced over the L3/L4 substrate, both mean
-exactly one target, and ``["table"]`` (3.3.1, § 4.5) a lookup into a static string table, which
-is a **may-dispatch**: one edge per entry of the table, from the same site. Kept ``str`` rather
-than ``Literal`` on purpose, as `reason` is: ``navigation`` is reserved and
+`src` is the dispatching body node's id (`<callable id>@<line>:<col>`), a
+`RequestDispatcher.forward` / `include` or `sendRedirect` call, a `ModelAndView`
+construction or `setViewName`, or a Spring controller's `return`; `dst` is the artifact's
+`can://<app>/artifact/<path>` id. `via` names the mechanism (`forward | include | redirect |
+view-name | navigation`) and `prov` the tier that closed the target: `["literal"]` is a string
+at the site, `["dataflow"]` a local or parameter traced over the L3/L4 substrate (both mean
+exactly one target) and `["table"]` (3.3.1, § 4.5) a lookup into a static string table, which
+is a **may-dispatch**: one edge per entry of the table, from the same site. Kept `str` rather
+than `Literal` on purpose, as `JConfigRead.reason` is: `navigation` is reserved and
 unemitted today, and a closed type here would break on the analyzer release that fills it.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `src` | `str` |  |
-| `dst` | `str` |  |
-| `via` | `str` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `src` | `str` |  |  |
+| `dst` | `str` |  |  |
+| `via` | `str` |  |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JViewDispatchUnresolved`
 
 ```python
-class JViewDispatchUnresolved(_Base)
+class JViewDispatchUnresolved(BaseModel)
 ```
 
 A detected dispatch that closed on no artifact, first class, so a page nobody can trace stays
-as visible as one that resolves. ``target`` is the decoded literal when there was one and
-``None`` for ``reason="non-literal"``; ``reason`` is ``non-literal`` / ``no-such-artifact`` (a
-servlet URL, a ``*.faces`` route, a file outside the repository) / ``ambiguous`` (a view name
-matching two templates); ``prov`` lists every tier attempted. ``callee`` is the dispatching
-callee's ``@external`` id for a call site and the enclosing callable's id for a ``return`` site.
+as visible as one that resolves. `target` is the decoded literal when there was one and
+`None` for `reason="non-literal"`; `reason` is `non-literal` / `no-such-artifact` (a
+servlet URL, a `*.faces` route, a file outside the repository) / `ambiguous` (a view name
+matching two templates); `prov` lists every tier attempted. `callee` is the dispatching
+callee's `@external` id for a call site and the enclosing callable's id for a `return` site.
 **JSON-only**: the projection has no node for a target that resolved to nothing.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `site` | `str` |  |
-| `callee` | `str` |  |
-| `target` | `Optional[str]` |  |
-| `via` | `str` |  |
-| `reason` | `str` |  |
-| `prov` | `List[str]` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `site` | `str` |  |  |
+| `callee` | `str` |  |  |
+| `target` | `Optional[str]` | `None` |  |
+| `via` | `str` |  |  |
+| `reason` | `str` |  |  |
+| `prov` | `List[str]` | `[]` |  |
 
 ### `JApplication`
 
 ```python
-class JApplication(_Base)
+class JApplication(BaseModel)
 ```
 
-The application root. ``call_graph``/``param_in``/``param_out`` are absent below the level
-that computes them, empty here, never ``None``.
+The application root. `call_graph`/`param_in`/`param_out` are absent below the level
+that computes them, empty here, never `None`.
 
-That reading is exact for ``call_graph`` on both backends. ``param_in``/``param_out`` are
-**always empty off the Neo4j projection**, at every level: ``--emit neo4j`` forces L4, so the
+That reading is exact for `call_graph` on both backends. `param_in`/`param_out` are
+**always empty off the Neo4j projection**, at every level: `--emit neo4j` forces L4, so the
 dataflow overlay was computed, but this leg does not project the port lattice back out (leg 3b
 does). An empty pair there is this backend's silence, not the analyzer's.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `id` | `str` |  |
-| `kind` | `Literal['application']` |  |
-| `symbol_table` | `Dict[str, JCompilationUnit]` |  |
-| `call_graph` | `List[JCallGraphEdge]` |  |
-| `external_symbols` | `Optional[Dict[str, JExternalSymbol]]` |  |
-| `param_in` | `List[JParamEdge]` |  |
-| `param_out` | `List[JParamEdge]` |  |
-| `artifacts` | `Dict[str, JArtifact]` |  |
-| `dependencies` | `List[JDependency]` |  |
-| `config_uses` | `Optional[List[JConfigUse]]` |  |
-| `config_reads_unresolved` | `Optional[List[JConfigRead]]` |  |
-| `entrypoint_report` | `Optional[JEntrypointReport]` |  |
-| `view_dispatches` | `Optional[List[JViewDispatch]]` |  |
-| `view_dispatches_unresolved` | `Optional[List[JViewDispatchUnresolved]]` |  |
-
-#### Methods
-
-##### `JApplication.model_post_init`
-
-```python
-model_post_init(__context: Any) -> None
-```
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `id` | `str` |  |  |
+| `kind` | `Literal['application']` | `'application'` |  |
+| `symbol_table` | [`Dict[str, JCompilationUnit]`](#jcompilationunit) |  |  |
+| `call_graph` | [`List[JCallGraphEdge]`](#jcallgraphedge) | `[]` |  |
+| `external_symbols` | [`Optional[Dict[str, JExternalSymbol]]`](#jexternalsymbol) | `None` |  |
+| `param_in` | [`List[JParamEdge]`](#jparamedge) | `[]` |  |
+| `param_out` | [`List[JParamEdge]`](#jparamedge) | `[]` |  |
+| `artifacts` | [`Dict[str, JArtifact]`](#jartifact) | `{}` |  |
+| `dependencies` | [`List[JDependency]`](#jdependency) | `[]` |  |
+| `config_uses` | [`Optional[List[JConfigUse]]`](#jconfiguse) | `None` | The three 3.1.0 overlays, and the one place in this file where `None` and `[]` are *different answers*: `None` is "this payload predates the pass" (codeanalyzer-java 3.0.x emits none of these keys at all) and an empty list/report is "the pass ran and found nothing". |
+| `config_reads_unresolved` | [`Optional[List[JConfigRead]]`](#jconfigread) | `None` |  |
+| `entrypoint_report` | [`Optional[JEntrypointReport]`](#jentrypointreport) | `None` |  |
+| `view_dispatches` | [`Optional[List[JViewDispatch]]`](#jviewdispatch) | `None` | The 3.3.0 view-dispatch layer. `None` here means only "the key is absent": 3.3.x writes both lists only when non-empty, so (unlike the 3.1.0 trio) no key on the wire is unconditional and the backends decide "predates the pass" from the analyzer generation instead (`VIEW_DISPATCH_UNAVAILABLE`). |
+| `view_dispatches_unresolved` | [`Optional[List[JViewDispatchUnresolved]]`](#jviewdispatchunresolved) | `None` |  |
 
 ### `JAnalyzer`
 
 ```python
-class JAnalyzer(_Base)
+class JAnalyzer(BaseModel)
 ```
 
 #### Attributes
@@ -3147,38 +3965,182 @@ class JAnalyzer(_Base)
 ### `JAnalysis`
 
 ```python
-class JAnalysis(_Base)
+class JAnalysis(BaseModel)
 ```
 
-The envelope ``analysis.json`` IS.
+The envelope `analysis.json` IS.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `schema_version` | `str` |  |
-| `language` | `str` |  |
-| `max_level` | `int` |  |
-| `k_limit` | `Optional[int]` |  |
-| `analyzer` | `JAnalyzer` |  |
-| `application` | `JApplication` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `schema_version` | `str` |  |  |
+| `language` | `str` |  |  |
+| `max_level` | `int` |  |  |
+| `k_limit` | `Optional[int]` | `None` |  |
+| `analyzer` | [`JAnalyzer`](#janalyzer) |  |  |
+| `application` | [`JApplication`](#japplication) |  |  |
 
 ### `JMethodDetail`
 
 ```python
-class JMethodDetail(_Base)
+class JMethodDetail(BaseModel)
 ```
 
-The ``method_detail`` node attribute of ``get_call_graph()``: built from the string node key
-(``klass`` = everything before the signature's simple name) and the resolved callable.
+The `method_detail` node attribute of `get_call_graph()`: built from the string node key
+(`klass` = everything before the signature's simple name) and the resolved callable.
 
 #### Attributes
 
-| Name | Type | Description |
-| ---- | ---- | ----------- |
-| `method_declaration` | `Optional[str]` |  |
-| `klass` | `str` |  |
-| `method` | `JCallable` |  |
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `method_declaration` | `Optional[str]` | `None` |  |
+| `klass` | `str` |  |  |
+| `method` | [`JCallable`](#jcallable) |  |  |
+
+### `JGraphEdges`
+
+```python
+JGraphEdges = JCallGraphEdge
+```
+
+Alias of [`JCallGraphEdge`](#jcallgraphedge).
+
+### `JVariableDeclaration`
+
+```python
+JVariableDeclaration = JLocalVariable
+```
+
+Alias of [`JLocalVariable`](#jlocalvariable).
+
+### `InitializationBlock`
+
+```python
+InitializationBlock = JCallable
+```
+
+Alias of [`JCallable`](#jcallable).
+
+## Projections
+
+### `JCallableOverview`
+
+```python
+class JCallableOverview(BaseModel)
+```
+
+A lightweight projection of one callable, enough to enumerate and filter without the full
+`JCallable` reconstruction (body nodes, call sites, local
+classes, per-callable graphs).
+
+Returned set-at-a-time by `JavaAnalysis.get_callables_overview` /
+`get_decorated_callables` / `get_entrypoints`. Body-inspect only the few you need afterwards
+via `JavaAnalysis.get_method` / `get_method_bodies`.
+
+#### Attributes
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `key` | `str` |  | The J-1 name, `"<type fqn>.<signature>"`, the application-unique address every other accessor on this surface accepts. A local or anonymous class's segment carries the signature of the callable that declares it. |
+| `signature` | `str` |  | The analyzer's own signature, parameter tail and all, exactly as it spells it (`cancelOrder(java.lang.Integer, boolean)`). **Not a normal form**: the tail is whatever the analyzer could resolve, so the same method reads `setTopLosers(java.util.Collection)` in one run and `setTopLosers(Collection<QuoteDataBean>)` in another where the type was unresolvable. Unique within `owner`, not across the application, which is why `key` exists. |
+| `name` | `str` |  | The callable's short name (`cancelOrder`, `<init>`, `<clinit>$0`). |
+| `owner` | `str` |  | Qualified name of the declaring type. Never `None`: every Java callable is declared by a type. |
+| `owner_kind` | `str` |  | The declaring type's kind, `class`, `interface`, `enum`, `annotation` or `record`, passed through verbatim. |
+| `kind` | `str` |  | The callable's own kind, `method`, `constructor` or `initializer`. Never derived; always `JCallable.kind` as the analyzer reported it. |
+| `path` | `str` |  | Repo-relative path of the declaring compilation unit (the symbol-table key). |
+| `start_line` | `int` |  | The callable's line span, **-1 for an implicit callable**, which carries no span at all (99 of daytrader8's 1,216), never 0, which would read as a real line. |
+| `end_line` | `int` |  | The callable's line span, **-1 for an implicit callable**, which carries no span at all (99 of daytrader8's 1,216), never 0, which would read as a real line. |
+| `modifiers` | `List[str]` | `[]` | The declared modifiers (`public`, `static`, …), in the analyzer's order. |
+| `decorators` | `List[str]` | `[]` | The annotation names applied to the callable (`JDecorator.name` only, so `Override`, not `@Override(...)`), **sorted**. Source order is not recoverable across backends (the graph's containment walk orders a callable's children by `(start_line, name)`, so two annotations on one line come back in a different order than `analysis.json` lists them) and a projection whose order depends on which backend answered is not one answer. Read `annotations` off the full callable for source order and the argument spellings. |
+| `is_entrypoint` | `bool` | `False` | The analyzer's own entrypoint mark for this callable. |
+| `is_implicit` | `bool` | `False` | Whether the analyzer synthesised the callable (a default constructor), in which case it has no span, body, parameters, metrics or declaration text. |
+
+#### Methods
+
+##### `JCallableOverview.of`
+
+```python
+@classmethod
+of(key: str, owner: JType, c: JCallable, *, path: str) -> JCallableOverview
+```
+
+Project one callable, given the J-1 key and declaring type its backend's index already
+holds (neither is on `JCallable` itself).
+
+### `JClassOverview`
+
+```python
+class JClassOverview(BaseModel)
+```
+
+A lightweight projection of one type, the type-level counterpart to
+`JCallableOverview`, for the types codeanalyzer-java marked as entrypoints in their own
+right (`JType.is_entrypoint_class`), independently of any individual method.
+
+Returned by `JavaAnalysis.get_entrypoint_classes`. It mirrors
+`PyClassOverview` and
+`TSClassOverview`, because the accessor that returns
+it mirrors `PythonAnalysis.get_entrypoint_classes`.
+
+#### Attributes
+
+| Name | Type | Default | Description |
+| ---- | ---- | ------- | ----------- |
+| `qualified_name` | `str` |  | The type's source-spelled qualified name, the key `get_class` and `get_all_classes` use, and what `in_class=` accepts. |
+| `name` | `str` |  | The type's simple name. |
+| `kind` | `str` |  | `class`, `interface`, `enum`, `annotation` or `record`. An entrypoint type is not necessarily a class, so the kind is carried rather than assumed. |
+| `path` | `str` |  | Repo-relative path of the declaring compilation unit. |
+| `start_line` | `int` |  | The type's line span. |
+| `end_line` | `int` |  | The type's line span. |
+| `modifiers` | `List[str]` | `[]` | The declared modifiers, in the analyzer's order. |
+| `decorators` | `List[str]` | `[]` | The annotation names applied to the type (`JDecorator.name` only), sorted for the reason `JCallableOverview`'s are. |
+| `is_entrypoint_class` | `bool` | `False` | The analyzer's own mark. Always `True` on what `get_entrypoint_classes` returns; carried so the projection stays readable when it is passed on alone. |
+
+#### Methods
+
+##### `JClassOverview.of`
+
+```python
+@classmethod
+of(t: JType, *, path: str, qualified_name: Optional[str] = None) -> JClassOverview
+```
+
+Project one type, given the module key its backend's index already holds.
+
+## Enums
+
+### `CRUDOperationType`
+
+```python
+class CRUDOperationType(Enum)
+```
+
+An enumeration of CRUD operation types.
+
+#### Attributes
+
+| Name | Value | Description |
+| ---- | ----- | ----------- |
+| `CREATE` | `'CREATE'` | The create operation type. |
+| `READ` | `'READ'` | The read operation type. |
+| `UPDATE` | `'UPDATE'` | The update operation type. |
+| `DELETE` | `'DELETE'` | The delete operation type. |
+
+### `CRUDQueryType`
+
+```python
+class CRUDQueryType(Enum)
+```
+
+An enumeration of CRUD query types.
+
+#### Attributes
+
+| Name | Value | Description |
+| ---- | ----- | ----------- |
+| `READ` | `'READ'` | The read query type. |
+| `WRITE` | `'WRITE'` | The write query type. |
+| `NAMED` | `'NAMED'` | The named query type. |
 
 <!-- CLDK:API:END -->
-

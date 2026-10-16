@@ -1,5 +1,6 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import starlightLinksValidator from "starlight-links-validator";
 import mermaid from "astro-mermaid";
 import { pluginCollapsibleSections } from "@expressive-code/plugin-collapsible-sections";
 import { pluginLineNumbers } from "@expressive-code/plugin-line-numbers";
@@ -27,6 +28,8 @@ export default defineConfig({
         replacesTitle: false,
       },
       favicon: "/favicon.png",
+      // Fails `astro build` on a broken internal link or #anchor in a .md or .mdx page.
+      plugins: [starlightLinksValidator()],
       customCss: ["./src/styles/docs.css"],
       // Wraps Starlight's SocialIcons to prepend live GitHub counts for
       // codellm-devkit/python-sdk. See src/components/HeaderStats.astro.
@@ -142,7 +145,7 @@ export default defineConfig({
         },
       ],
       editLink: {
-        baseUrl: "https://github.com/codellm-devkit/docs/edit/main/",
+        baseUrl: "https://github.com/codellm-devkit/docs/edit/astro/",
       },
       sidebar: [
         {
@@ -194,6 +197,8 @@ export default defineConfig({
                 { label: "Python analysis", slug: "reference/python-api/python", attrs: { "data-cldk-icon": "python" } },
                 { label: "Java analysis", slug: "reference/python-api/java", attrs: { "data-cldk-icon": "java" } },
                 { label: "TypeScript analysis", slug: "reference/python-api/typescript", attrs: { "data-cldk-icon": "typescript" } },
+                { label: "Results and errors", slug: "reference/python-api/results", attrs: { "data-cldk-icon": "results-16" } },
+                { label: "Tree-sitter utilities", slug: "reference/python-api/treesitter", attrs: { "data-cldk-icon": "diagram-tree-16" } },
               ],
             },
           ],
